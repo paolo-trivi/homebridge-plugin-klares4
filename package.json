@@ -1,5 +1,5 @@
 {
-    "name": "homebridge-plugin-klares4",
+    "name": "homebridge-plugin-ksenialares4",
     "version": "1.0.0",
     "description": "Plugin completo per sistemi Ksenia Lares4 - Zone, Luci, Tapparelle, Termostati, Sensori",
     "main": "dist/index.js",
@@ -45,12 +45,12 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/paolo-trivi/homebridge-plugin-klares4.git"
+        "url": "https://github.com/paolo-trivi/homebridge-plugin-ksenialares4.git"
     },
     "bugs": {
-        "url": "https://github.com/paolo-trivi/homebridge-plugin-klares4/issues"
+        "url": "https://github.com/paolo-trivi/homebridge-plugin-ksenialares4/issues"
     },
-    "homepage": "https://github.com/paolo-trivi/homebridge-plugin-klares4#readme",
+    "homepage": "https://github.com/paolo-trivi/homebridge-plugin-ksenialares4#readme",
     "files": [
         "dist",
         "config.schema.json",

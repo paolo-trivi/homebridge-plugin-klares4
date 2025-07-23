@@ -1,6 +1,6 @@
-# homebridge-plugin-klares4
+# homebridge-plugin-ksenialares4
 
-[![npm version](https://badge.fury.io/js/homebridge-plugin-klares4.svg)](https://badge.fury.io/js/homebridge-plugin-klares4)
+[![npm version](https://badge.fury.io/js/homebridge-plugin-ksenialares4.svg)](https://badge.fury.io/js/homebridge-plugin-ksenialares4)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Plugin completo per sistemi Ksenia Lares4 che integra zone di sicurezza, luci, tapparelle, termostati e sensori ambientali in un'unica soluzione per Homebridge.
@@ -28,14 +28,14 @@ Plugin completo per sistemi Ksenia Lares4 che integra zone di sicurezza, luci, t
 
 1. Apri Homebridge UI
 2. Vai su **Plugins**
-3. Cerca `homebridge-plugin-klares4`
+3. Cerca `homebridge-plugin-ksenialares4`
 4. Clicca **Install**
 5. Configura il plugin tramite l'interfaccia grafica
 
 ### Tramite npm
 
 ```bash
-npm install -g homebridge-plugin-klares4
+npm install -g homebridge-plugin-ksenialares4
 ```
 
 ## ⚙️ Configurazione
