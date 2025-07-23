@@ -1,0 +1,64 @@
+{
+    "name": "homebridge-plugin-klares4",
+    "version": "1.0.0",
+    "description": "Plugin completo per sistemi Ksenia Lares4 - Zone, Luci, Tapparelle, Termostati, Sensori",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "tsc",
+        "prepublishOnly": "npm run build"
+    },
+    "keywords": [
+        "homebridge-plugin",
+        "ksenia",
+        "lares4",
+        "security",
+        "automation",
+        "zones",
+        "lights",
+        "covers",
+        "thermostats",
+        "sensors",
+        "homekit",
+        "smart-home",
+        "domotica"
+    ],
+    "engines": {
+        "node": ">=14.18.1",
+        "homebridge": ">=1.6.0"
+    },
+    "dependencies": {
+        "ws": "^8.14.2"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/ws": "^8.5.0",
+        "homebridge": "^1.6.0",
+        "typescript": "^5.0.0"
+    },
+    "peerDependencies": {
+        "homebridge": ">=1.6.0"
+    },
+    "author": {
+        "name": "Paolo Trivisonno",
+        "url": "https://github.com/paolo-trivi"
+    },
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/paolo-trivi/homebridge-plugin-klares4.git"
+    },
+    "bugs": {
+        "url": "https://github.com/paolo-trivi/homebridge-plugin-klares4/issues"
+    },
+    "homepage": "https://github.com/paolo-trivi/homebridge-plugin-klares4#readme",
+    "files": [
+        "dist",
+        "config.schema.json",
+        "README.md",
+        "LICENSE"
+    ],
+    "funding": {
+        "type": "github",
+        "url": "https://github.com/sponsors/paolo-trivi"
+    }
+}

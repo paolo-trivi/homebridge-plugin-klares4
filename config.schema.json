@@ -1,0 +1,206 @@
+{
+    "pluginAlias": "Lares4Complete",
+    "pluginType": "platform",
+    "singular": true,
+    "headerDisplay": "Plugin per il sistema di allarme Ksenia Lares4",
+    "footerDisplay": "Per maggiori informazioni visita [GitHub](https://github.com/your-repo/homebridge-plugin-klares4)",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "title": "Nome Piattaforma",
+                "type": "string",
+                "default": "Lares4",
+                "required": true
+            },
+            "ip": {
+                "title": "Indirizzo IP",
+                "type": "string",
+                "format": "ipv4",
+                "placeholder": "192.168.1.100",
+                "required": true
+            },
+            "port": {
+                "title": "Porta",
+                "type": "integer",
+                "default": 443,
+                "minimum": 1,
+                "maximum": 65535,
+                "required": true
+            },
+            "https": {
+                "title": "Usa HTTPS",
+                "type": "boolean",
+                "default": true
+            },
+            "sender": {
+                "title": "Sender ID",
+                "type": "string",
+                "default": "homebridge",
+                "required": true
+            },
+            "pin": {
+                "title": "PIN Sistema",
+                "type": "string",
+                "required": true
+            },
+            "debug": {
+                "title": "Debug Mode",
+                "type": "boolean",
+                "default": false
+            },
+            "maxSeconds": {
+                "title": "Timeout Massimo (secondi)",
+                "type": "integer",
+                "default": 30,
+                "minimum": 5,
+                "maximum": 300
+            },
+            "reconnectInterval": {
+                "title": "Intervallo Riconnessione (ms)",
+                "type": "integer",
+                "default": 5000,
+                "minimum": 1000,
+                "maximum": 60000
+            },
+            "heartbeatInterval": {
+                "title": "Intervallo Heartbeat (ms)",
+                "type": "integer",
+                "default": 30000,
+                "minimum": 10000,
+                "maximum": 300000
+            },
+            "excludeZones": {
+                "title": "Zone da Escludere",
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            },
+            "excludeOutputs": {
+                "title": "Output da Escludere",
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            },
+            "excludeSensors": {
+                "title": "Sensori da Escludere",
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "layout": [
+        {
+            "type": "section",
+            "title": "Configurazione Connessione",
+            "expandable": true,
+            "expanded": true,
+            "items": [
+                "name",
+                "ip",
+                "port",
+                "https",
+                "sender",
+                "pin"
+            ]
+        },
+        {
+            "type": "section",
+            "title": "Opzioni Avanzate",
+            "expandable": true,
+            "expanded": false,
+            "items": [
+                "debug",
+                "maxSeconds",
+                "reconnectInterval",
+                "heartbeatInterval"
+            ]
+        },
+        {
+            "type": "section",
+            "title": "Esclusioni Dispositivi",
+            "expandable": true,
+            "expanded": true,
+            "items": [
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-primary'><h5>📋 Come Escludere Dispositivi</h5><ol><li><strong>Avvia il plugin una volta</strong> per scoprire tutti i dispositivi</li><li><strong>Controlla il file</strong> <code>~/.homebridge/klares4-devices.json</code></li><li><strong>Copia gli ID</strong> dei dispositivi che NON vuoi vedere in HomeKit</li><li><strong>Incollali</strong> nei campi sottostanti</li><li><strong>Riavvia Homebridge</strong></li></ol></div>"
+                },
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-info'><h5>💡 Suggerimento</h5><p>Puoi aprire il file <code>klares4-devices.json</code> con un editor di testo per vedere tutti i dispositivi disponibili con i loro ID e nomi.</p><p><strong>Esempio di contenuto del file:</strong></p><pre>{\n  \"outputs\": [\n    {\"id\": \"18\", \"name\": \"Riscaldamento Sala\"},\n    {\"id\": \"31\", \"name\": \"Sirena Esterna\"},\n    ...\n  ]\n}</pre></div>"
+                },
+                {
+                    "key": "excludeOutputs",
+                    "type": "array",
+                    "orderable": false,
+                    "buttonText": "➕ Aggiungi Output da Escludere",
+                    "items": [
+                        {
+                            "type": "div",
+                            "displayFlex": true,
+                            "flex-direction": "row",
+                            "items": [
+                                {
+                                    "key": "excludeOutputs[]",
+                                    "flex": "1 1 50px",
+                                    "notitle": true,
+                                    "placeholder": "ID Output (es: 18 per Riscaldamento Sala)",
+                                    "description": "Inserisci l'ID numerico dell'output da escludere"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "key": "excludeZones",
+                    "type": "array",
+                    "orderable": false,
+                    "buttonText": "➕ Aggiungi Zona da Escludere",
+                    "items": [
+                        {
+                            "type": "div",
+                            "displayFlex": true,
+                            "flex-direction": "row",
+                            "items": [
+                                {
+                                    "key": "excludeZones[]",
+                                    "flex": "1 1 50px",
+                                    "notitle": true,
+                                    "placeholder": "ID Zona (es: 18 per Finestra Studio)",
+                                    "description": "Inserisci l'ID numerico della zona da escludere"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "key": "excludeSensors",
+                    "type": "array",
+                    "orderable": false,
+                    "buttonText": "➕ Aggiungi Sensore da Escludere",
+                    "items": [
+                        {
+                            "type": "div",
+                            "displayFlex": true,
+                            "flex-direction": "row",
+                            "items": [
+                                {
+                                    "key": "excludeSensors[]",
+                                    "flex": "1 1 50px",
+                                    "notitle": true,
+                                    "placeholder": "ID Sensore (es: 1 per Term. Sala)",
+                                    "description": "Inserisci l'ID numerico del sensore da escludere"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
