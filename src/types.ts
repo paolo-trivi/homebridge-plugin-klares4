@@ -91,4 +91,17 @@ export interface KseniaSensorData {
     VALUE: string;
     UNIT?: string;
     ENABLED: string;
+}
+
+// Configurazione MQTT
+export interface MqttConfig {
+    enabled: boolean;
+    broker: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    clientId?: string;
+    topicPrefix?: string;
+    qos?: 0 | 1 | 2;
+    retain?: boolean;
 } 

@@ -15,6 +15,7 @@ Plugin completo per sistemi Ksenia Lares4 che integra zone di sicurezza, luci, t
 - 🔄 **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
 - ⚙️ **Configurazione UI**: Interfaccia grafica completa in Homebridge UI
 - 🎯 **Personalizzazione**: Nomi personalizzati ed esclusione selettiva di entità
+- 📡 **Bridge MQTT**: Pubblicazione stati e ricezione comandi via MQTT (opzionale)
 
 ## 📋 Prerequisiti
 
@@ -135,6 +136,84 @@ Il plugin può essere configurato completamente tramite l'interfaccia grafica di
 - **Tipi HomeKit**: Temperature/Humidity/Light Sensor
 - **Dati**: Temperatura, Umidità, Luminosità
 - **Aggiornamenti**: Real-time
+
+## 📡 Bridge MQTT (Opzionale)
+
+Il plugin include un bridge MQTT che permette di pubblicare gli stati degli accessori e ricevere comandi via MQTT.
+
+### 🚀 Configurazione MQTT
+
+Abilita il bridge MQTT nella sezione "MQTT Bridge" della configurazione:
+
+```json
+{
+  "mqtt": {
+    "enabled": true,
+    "broker": "mqtt://192.168.1.100:1883",
+    "username": "mqtt_user",
+    "password": "mqtt_password",
+    "clientId": "homebridge-klares4",
+    "topicPrefix": "homebridge/klares4",
+    "qos": 1,
+    "retain": true
+  }
+}
+```
+
+### 📤 Pubblicazione Stati
+
+Gli stati degli accessori vengono pubblicati sui seguenti topic:
+
+- **Luci**: `homebridge/klares4/light/{id}/state`
+- **Tapparelle**: `homebridge/klares4/cover/{id}/state`
+- **Termostati**: `homebridge/klares4/thermostat/{id}/state`
+- **Sensori**: `homebridge/klares4/sensor/{id}/state`
+- **Zone**: `homebridge/klares4/zone/{id}/state`
+- **Scenari**: `homebridge/klares4/scenario/{id}/state`
+
+### 📥 Ricezione Comandi
+
+Invia comandi agli accessori sui seguenti topic:
+
+- **Luci**: `homebridge/klares4/light/{id}/set`
+- **Tapparelle**: `homebridge/klares4/cover/{id}/set`
+- **Termostati**: `homebridge/klares4/thermostat/{id}/set`
+- **Scenari**: `homebridge/klares4/scenario/{id}/set`
+
+### 💡 Esempi di Utilizzo
+
+#### Accendere una luce:
+```bash
+mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/light/1/set" -m '{"on": true, "brightness": 80}'
+```
+
+#### Muovere una tapparella:
+```bash
+mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/cover/2/set" -m '{"position": 50}'
+```
+
+#### Impostare temperatura termostato:
+```bash
+mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/thermostat/3/set" -m '{"targetTemperature": 22, "mode": "heat"}'
+```
+
+#### Attivare uno scenario:
+```bash
+mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/scenario/4/set" -m '{"active": true}'
+```
+
+### 📊 Formato Payload Stati
+
+```json
+{
+  "id": "1",
+  "name": "Luce Sala",
+  "type": "light",
+  "on": true,
+  "brightness": 80,
+  "timestamp": "2025-09-15T15:00:00.000Z"
+}
+```
 
 ## 🔧 Risoluzione Problemi
 

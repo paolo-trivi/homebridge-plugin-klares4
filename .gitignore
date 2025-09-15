@@ -30,6 +30,7 @@ lib/
 .Trashes
 ehthumbs.db
 Thumbs.db
+NOPE/
 
 # Logs
 *.log

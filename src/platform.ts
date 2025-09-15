@@ -13,6 +13,7 @@ import * as path from 'path';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { KseniaWebSocketClient } from './websocket-client';
 import { KseniaDevice } from './types';
+import { MqttBridge } from './mqtt-bridge';
 import { LightAccessory } from './accessories/light-accessory';
 import { CoverAccessory } from './accessories/cover-accessory';
 import { SensorAccessory } from './accessories/sensor-accessory';
@@ -21,9 +22,9 @@ import { ThermostatAccessory } from './accessories/thermostat-accessory';
 import { ScenarioAccessory } from './accessories/scenario-accessory';
 
 export interface Lares4Config extends PlatformConfig {
-    ip: string;
-    sender: string;
-    pin: string;
+    ip?: string;
+    sender?: string;
+    pin?: string;
     https?: boolean;
     port?: number;
     debug?: boolean;
@@ -50,6 +51,17 @@ export interface Lares4Config extends PlatformConfig {
         step?: number;                    // Step temperatura termostati (default 0.5°C)
     };
     devicesSummaryDelay?: number;         // Ritardo stampa riassunto dispositivi (default 2000ms)
+    mqtt?: {
+        enabled: boolean;
+        broker: string;
+        port?: number;
+        username?: string;
+        password?: string;
+        clientId?: string;
+        topicPrefix?: string;
+        qos?: 0 | 1 | 2;
+        retain?: boolean;
+    };
 }
 
 export class Lares4Platform implements DynamicPlatformPlugin {
@@ -60,9 +72,10 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     public readonly discoveredCacheUUIDs: string[] = [];
 
     // Map per tenere traccia degli handlers degli accessori
-    private readonly accessoryHandlers: Map<string, any> = new Map();
+    public readonly accessoryHandlers: Map<string, any> = new Map();
 
     public wsClient?: KseniaWebSocketClient;
+    public mqttBridge?: MqttBridge;
 
     // Cache dei dispositivi per la configurazione UI
     private discoveredDevices: Map<string, KseniaDevice> = new Map();
@@ -111,11 +124,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             const port = this.config.port || (useHttps ? 443 : 80);
 
             this.wsClient = new KseniaWebSocketClient(
-                this.config.ip,
+                this.config.ip!,
                 port,
                 useHttps,
                 this.config.sender || 'homebridge',
-                this.config.pin,
+                this.config.pin!,
                 this.log,
                 {
                     debug: this.config.debug || false,
@@ -129,6 +142,12 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.wsClient.onDeviceStatusUpdate = (device) => this.handleDeviceStatusUpdate(device);
 
             await this.wsClient.connect();
+
+            // Inizializza MQTT se configurato
+            if (this.config.mqtt?.enabled) {
+                this.mqttBridge = new MqttBridge(this.config.mqtt, this.log, this);
+                this.log.info('🚀 MQTT Bridge inizializzato');
+            }
 
             this.log.info('✅ Ksenia Lares4 inizializzato con successo');
 
@@ -316,8 +335,13 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private handleDeviceStatusUpdate(device: KseniaDevice): void {
         this.log.debug(`🔄 Aggiornamento stato dispositivo: ${device.name}`);
 
-        // Qui implementeremo l'aggiornamento dello stato degli accessori
+        // Aggiorna l'accessorio Homebridge
         this.updateAccessory(device);
+
+        // Pubblica lo stato su MQTT se abilitato
+        if (this.mqttBridge) {
+            this.mqttBridge.publishDeviceState(device);
+        }
     }
 
     configureAccessory(accessory: PlatformAccessory): void {

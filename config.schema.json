@@ -90,6 +90,71 @@
                 "items": {
                     "type": "string"
                 }
+            },
+            "mqtt": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "title": "Abilita MQTT",
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "broker": {
+                        "title": "Broker MQTT",
+                        "type": "string",
+                        "placeholder": "mqtt://192.168.1.100:1883",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "username": {
+                        "title": "Username",
+                        "type": "string",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "password": {
+                        "title": "Password",
+                        "type": "string",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "clientId": {
+                        "title": "Client ID",
+                        "type": "string",
+                        "placeholder": "homebridge-klares4",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "topicPrefix": {
+                        "title": "Prefisso Topic",
+                        "type": "string",
+                        "default": "homebridge/klares4",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "qos": {
+                        "title": "QoS",
+                        "type": "integer",
+                        "default": 1,
+                        "enum": [0, 1, 2],
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "retain": {
+                        "title": "Retain Messages",
+                        "type": "boolean",
+                        "default": true,
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    }
+                }
             }
         }
     },
@@ -200,6 +265,26 @@
                         }
                     ]
                 }
+            ]
+        },
+        {
+            "type": "section",
+            "title": "MQTT Bridge",
+            "expandable": true,
+            "expanded": false,
+            "items": [
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-warning'><h5>🚧 Funzionalità Sperimentale</h5><p>Il bridge MQTT permette di:</p><ul><li>📤 <strong>Pubblicare</strong> gli stati degli accessori su MQTT</li><li>📥 <strong>Ricevere</strong> comandi da MQTT per controllare gli accessori</li></ul><p><strong>Formato Topic:</strong></p><ul><li>Stati: <code>homebridge/klares4/{type}/{id}/state</code></li><li>Comandi: <code>homebridge/klares4/{type}/{id}/set</code></li></ul></div>"
+                },
+                "mqtt.enabled",
+                "mqtt.broker",
+                "mqtt.username",
+                "mqtt.password",
+                "mqtt.clientId",
+                "mqtt.topicPrefix",
+                "mqtt.qos",
+                "mqtt.retain"
             ]
         }
     ]
