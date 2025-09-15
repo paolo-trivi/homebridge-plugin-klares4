@@ -3,7 +3,7 @@
     "pluginType": "platform",
     "singular": true,
     "headerDisplay": "Plugin per il sistema di allarme Ksenia Lares4",
-    "footerDisplay": "Per maggiori informazioni visita [GitHub](https://github.com/your-repo/homebridge-plugin-klares4)",
+    "footerDisplay": "Per maggiori informazioni visita [GitHub](https://github.com/paolo-trivi/homebridge-plugin-klares4)",
     "schema": {
         "type": "object",
         "properties": {
