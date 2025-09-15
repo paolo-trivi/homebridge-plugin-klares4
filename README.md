@@ -147,16 +147,16 @@ Abilita il bridge MQTT nella sezione "MQTT Bridge" della configurazione:
 
 ```json
 {
-  "mqtt": {
-    "enabled": true,
-    "broker": "mqtt://192.168.1.100:1883",
-    "username": "mqtt_user",
-    "password": "mqtt_password",
-    "clientId": "homebridge-klares4",
-    "topicPrefix": "homebridge/klares4",
-    "qos": 1,
-    "retain": true
-  }
+	"mqtt": {
+		"enabled": true,
+		"broker": "mqtt://192.168.1.100:1883",
+		"username": "mqtt_user",
+		"password": "mqtt_password",
+		"clientId": "homebridge-klares4",
+		"topicPrefix": "homebridge/klares4",
+		"qos": 1,
+		"retain": true
+	}
 }
 ```
 
@@ -183,21 +183,25 @@ Invia comandi agli accessori sui seguenti topic:
 ### 💡 Esempi di Utilizzo
 
 #### Accendere una luce:
+
 ```bash
 mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/light/1/set" -m '{"on": true, "brightness": 80}'
 ```
 
 #### Muovere una tapparella:
+
 ```bash
 mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/cover/2/set" -m '{"position": 50}'
 ```
 
 #### Impostare temperatura termostato:
+
 ```bash
 mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/thermostat/3/set" -m '{"targetTemperature": 22, "mode": "heat"}'
 ```
 
 #### Attivare uno scenario:
+
 ```bash
 mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/scenario/4/set" -m '{"active": true}'
 ```
@@ -206,12 +210,12 @@ mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/scenario/4/set" -m '{"acti
 
 ```json
 {
-  "id": "1",
-  "name": "Luce Sala",
-  "type": "light",
-  "on": true,
-  "brightness": 80,
-  "timestamp": "2025-09-15T15:00:00.000Z"
+	"id": "1",
+	"name": "Luce Sala",
+	"type": "light",
+	"on": true,
+	"brightness": 80,
+	"timestamp": "2025-09-15T15:00:00.000Z"
 }
 ```
 
