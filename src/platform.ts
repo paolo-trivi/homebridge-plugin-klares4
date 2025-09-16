@@ -62,6 +62,16 @@ export interface Lares4Config extends PlatformConfig {
         qos?: 0 | 1 | 2;
         retain?: boolean;
     };
+    roomMapping?: {
+        enabled: boolean;
+        rooms?: Array<{
+            roomName: string;
+            devices?: Array<{
+                deviceId: string;
+                deviceName?: string;
+            }>;
+        }>;
+    };
 }
 
 export class Lares4Platform implements DynamicPlatformPlugin {

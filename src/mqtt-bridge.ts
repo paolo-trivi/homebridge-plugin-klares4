@@ -88,12 +88,15 @@ export class MqttBridge {
     private subscribeToCommands(): void {
         if (!this.client) return;
 
-        const commandTopic = `${this.topicPrefix}/+/+/set`;
-        this.client.subscribe(commandTopic, { qos: this.config.qos || 1 }, (error) => {
+        // Sottoscrivi ai comandi sia nel formato vecchio che nuovo
+        const oldCommandTopic = `${this.topicPrefix}/+/+/set`;
+        const newCommandTopic = `${this.topicPrefix}/+/+/+/set`;
+
+        this.client.subscribe([oldCommandTopic, newCommandTopic], { qos: this.config.qos || 1 }, (error) => {
             if (error) {
                 this.log.error('❌ MQTT: Errore sottoscrizione:', error);
             } else {
-                this.log.info('📥 MQTT: Sottoscritto ai comandi:', commandTopic);
+                this.log.info('📥 MQTT: Sottoscritto ai comandi:', [oldCommandTopic, newCommandTopic]);
             }
         });
     }
@@ -101,18 +104,27 @@ export class MqttBridge {
     private handleIncomingMessage(topic: string, payload: string): void {
         try {
             const topicParts = topic.split('/');
-            
-            // Format: homebridge/klares4/{deviceType}/{deviceId}/set
-            if (topicParts.length !== 5 || topicParts[4] !== 'set') {
+            let deviceType: string;
+            let deviceId: string;
+
+            // Supporta entrambi i formati:
+            // Vecchio: homebridge/klares4/{deviceType}/{deviceId}/set
+            // Nuovo: homebridge/{room}/{deviceType}/{deviceId}/set
+            if (topicParts.length === 5 && topicParts[4] === 'set') {
+                // Formato vecchio
+                deviceType = topicParts[2];
+                deviceId = topicParts[3];
+            } else if (topicParts.length === 6 && topicParts[5] === 'set') {
+                // Formato nuovo con stanza
+                deviceType = topicParts[3];
+                deviceId = topicParts[4];
+            } else {
                 this.log.warn('⚠️ MQTT: Formato topic non valido:', topic);
                 return;
             }
 
-            const deviceType = topicParts[2];
-            const deviceId = topicParts[3];
-            
             this.log.debug(`📥 MQTT: Comando ricevuto - Type: ${deviceType}, ID: ${deviceId}, Payload: ${payload}`);
-            
+
             this.executeCommand(deviceType, deviceId, payload);
         } catch (error) {
             this.log.error('❌ MQTT: Errore elaborazione messaggio:', error);
@@ -209,11 +221,35 @@ export class MqttBridge {
         }
     }
 
+    private getRoomForDevice(deviceId: string): string {
+        // Se la mappatura stanze non è abilitata, usa il comportamento predefinito
+        if (!this.platform.config.roomMapping?.enabled) {
+            return 'klares4';
+        }
+
+        // Cerca il dispositivo nelle stanze configurate
+        if (this.platform.config.roomMapping.rooms) {
+            for (const room of this.platform.config.roomMapping.rooms) {
+                if (room.devices) {
+                    for (const device of room.devices) {
+                        if (device.deviceId === deviceId) {
+                            return room.roomName;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Se non trovato in nessuna stanza, usa il comportamento predefinito
+        return 'klares4';
+    }
+
     // Metodo pubblico per pubblicare stati dispositivi
     publishDeviceState(device: KseniaDevice): void {
         if (!this.client || !this.config.enabled) return;
 
-        const topic = `${this.topicPrefix}/${device.type}/${device.id}/state`;
+        const room = this.getRoomForDevice(device.id);
+        const topic = `${this.topicPrefix}/${room}/${device.type}/${device.id}/state`;
         const payload = this.createStatePayload(device);
 
         this.client.publish(topic, JSON.stringify(payload), {
@@ -223,7 +259,7 @@ export class MqttBridge {
             if (error) {
                 this.log.error('❌ MQTT: Errore pubblicazione:', error);
             } else {
-                this.log.debug(`📤 MQTT: Pubblicato stato ${device.type}/${device.id}`);
+                this.log.debug(`📤 MQTT: Pubblicato stato ${room}/${device.type}/${device.id}`);
             }
         });
     }

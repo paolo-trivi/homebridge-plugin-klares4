@@ -155,6 +155,54 @@
                         }
                     }
                 }
+            },
+            "roomMapping": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "title": "Abilita Mappatura Stanze",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Abilita la mappatura dei dispositivi nelle stanze per topic MQTT personalizzati"
+                    },
+                    "rooms": {
+                        "title": "Configurazione Stanze",
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "roomName": {
+                                    "title": "Nome Stanza",
+                                    "type": "string",
+                                    "placeholder": "Es: sala, cucina, camera"
+                                },
+                                "devices": {
+                                    "title": "Dispositivi",
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "deviceId": {
+                                                "title": "ID Dispositivo",
+                                                "type": "string"
+                                            },
+                                            "deviceName": {
+                                                "title": "Nome Dispositivo",
+                                                "type": "string",
+                                                "readonly": true
+                                            }
+                                        },
+                                        "required": ["deviceId"]
+                                    }
+                                }
+                            },
+                            "required": ["roomName"]
+                        },
+                        "condition": {
+                            "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
+                        }
+                    }
+                }
             }
         }
     },
@@ -285,6 +333,66 @@
                 "mqtt.topicPrefix",
                 "mqtt.qos",
                 "mqtt.retain"
+            ]
+        },
+        {
+            "type": "section",
+            "title": "Mappatura Stanze MQTT",
+            "expandable": true,
+            "expanded": false,
+            "items": [
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-info'><h5>🏠 Mappatura Stanze</h5><p>Organizza i dispositivi per stanza nei topic MQTT:</p><ul><li>🔧 <strong>Disabilitato:</strong> <code>homebridge/klares4/{type}/{id}/state</code></li><li>🏠 <strong>Abilitato:</strong> <code>homebridge/{stanza}/{type}/{id}/state</code></li></ul><p><strong>Esempio:</strong></p><ul><li><code>homebridge/sala/sensor/sensor_temp_1/state</code></li><li><code>homebridge/cucina/light/light_9/state</code></li></ul><p>💡 I dispositivi non assegnati useranno <code>klares4</code> come stanza predefinita.</p></div>"
+                },
+                "roomMapping.enabled",
+                {
+                    "key": "roomMapping.rooms",
+                    "type": "array",
+                    "orderable": true,
+                    "buttonText": "➕ Aggiungi Stanza",
+                    "condition": {
+                        "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
+                    },
+                    "items": [
+                        {
+                            "type": "div",
+                            "displayFlex": true,
+                            "flex-direction": "column",
+                            "items": [
+                                "roomMapping.rooms[].roomName",
+                                {
+                                    "key": "roomMapping.rooms[].devices",
+                                    "type": "array",
+                                    "orderable": false,
+                                    "buttonText": "➕ Aggiungi Dispositivo",
+                                    "items": [
+                                        {
+                                            "type": "div",
+                                            "displayFlex": true,
+                                            "flex-direction": "row",
+                                            "items": [
+                                                {
+                                                    "key": "roomMapping.rooms[].devices[].deviceId",
+                                                    "flex": "1 1 50px",
+                                                    "notitle": true,
+                                                    "placeholder": "ID dispositivo (es: light_9, sensor_temp_1)"
+                                                },
+                                                {
+                                                    "key": "roomMapping.rooms[].devices[].deviceName",
+                                                    "flex": "2 1 100px",
+                                                    "notitle": true,
+                                                    "placeholder": "Nome dispositivo (compilato automaticamente)",
+                                                    "readonly": true
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
             ]
         }
     ]
