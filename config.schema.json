@@ -343,14 +343,18 @@
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-info'><h5>🏠 Mappatura Stanze</h5><p>Organizza i dispositivi per stanza nei topic MQTT:</p><ul><li>🔧 <strong>Disabilitato:</strong> <code>homebridge/klares4/{type}/{id}/state</code></li><li>🏠 <strong>Abilitato:</strong> <code>homebridge/{stanza}/{type}/{id}/state</code></li></ul><p><strong>Esempio:</strong></p><ul><li><code>homebridge/sala/sensor/sensor_temp_1/state</code></li><li><code>homebridge/cucina/light/light_9/state</code></li></ul><p>💡 I dispositivi non assegnati useranno <code>klares4</code> come stanza predefinita.</p></div>"
+                    "helpvalue": "<div class='alert alert-info'><h5>🏠 Mappatura Stanze MQTT</h5><p>Organizza i dispositivi per stanza nei topic MQTT:</p><ul><li>🔧 <strong>Disabilitato:</strong> <code>homebridge/klares4/{type}/{id}/state</code></li><li>🏠 <strong>Abilitato:</strong> <code>homebridge/{stanza}/{type}/{id}/state</code></li></ul><p><strong>Esempio:</strong></p><ul><li><code>homebridge/sala/sensor/sensor_temp_1/state</code></li><li><code>homebridge/cucina/light/light_9/state</code></li></ul><p>💡 I dispositivi non assegnati useranno <code>klares4</code> come stanza predefinita.</p></div>"
+                },
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-primary'><h5>📋 Dispositivi del Tuo Sistema</h5><p>💡 <strong>Il plugin genera automaticamente la lista dei tuoi dispositivi:</strong></p><ol><li><strong>Avvia il plugin</strong> una volta per scoprire tutti i dispositivi</li><li><strong>Controlla i log</strong> per vedere l'elenco completo con ID e nomi</li><li><strong>Apri i file generati:</strong><ul><li><code>~/.homebridge/klares4-devices.json</code> - Lista completa dispositivi</li><li><code>~/.homebridge/klares4-room-mapping-example.json</code> - Esempio configurazione</li></ul></li><li><strong>Copia gli ID</strong> dai file e usali nei campi sottostanti</li></ol><p><strong>🎯 Vantaggi:</strong></p><ul><li>✅ Lista sempre aggiornata con i tuoi dispositivi reali</li><li>✅ Nomi originali dal sistema Lares4</li><li>✅ Esempio di configurazione pronto all'uso</li><li>✅ Nessun hardcoding - tutto dinamico!</li></ul></div>"
                 },
                 "roomMapping.enabled",
                 {
                     "key": "roomMapping.rooms",
                     "type": "array",
                     "orderable": true,
-                    "buttonText": "➕ Aggiungi Stanza",
+                    "buttonText": "🏠 Aggiungi Nuova Stanza",
                     "condition": {
                         "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
                     },
@@ -360,30 +364,37 @@
                             "displayFlex": true,
                             "flex-direction": "column",
                             "items": [
-                                "roomMapping.rooms[].roomName",
+                                {
+                                    "key": "roomMapping.rooms[].roomName",
+                                    "title": "Nome Stanza",
+                                    "placeholder": "Es: sala, cucina, camera, studio"
+                                },
                                 {
                                     "key": "roomMapping.rooms[].devices",
+                                    "title": "Dispositivi in questa stanza",
                                     "type": "array",
                                     "orderable": false,
-                                    "buttonText": "➕ Aggiungi Dispositivo",
+                                    "buttonText": "📱 Aggiungi Dispositivo",
                                     "items": [
                                         {
                                             "type": "div",
                                             "displayFlex": true,
-                                            "flex-direction": "row",
+                                            "flex-direction": "column",
                                             "items": [
                                                 {
                                                     "key": "roomMapping.rooms[].devices[].deviceId",
-                                                    "flex": "1 1 50px",
-                                                    "notitle": true,
-                                                    "placeholder": "ID dispositivo (es: light_9, sensor_temp_1)"
+                                                    "title": "ID Dispositivo",
+                                                    "type": "string",
+                                                    "placeholder": "Es: light_9, sensor_temp_1, cover_1, zone_18",
+                                                    "description": "Inserisci l'ID del dispositivo (vedi lista sopra per esempi)",
+                                                    "pattern": "^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)[0-9]+$"
                                                 },
                                                 {
                                                     "key": "roomMapping.rooms[].devices[].deviceName",
-                                                    "flex": "2 1 100px",
-                                                    "notitle": true,
-                                                    "placeholder": "Nome dispositivo (compilato automaticamente)",
-                                                    "readonly": true
+                                                    "title": "Nome Dispositivo",
+                                                    "type": "string",
+                                                    "readonly": true,
+                                                    "description": "Nome automatico basato sull'ID (verrà popolato dal plugin)"
                                                 }
                                             ]
                                         }

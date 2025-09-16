@@ -248,14 +248,14 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private printDevicesSummary(devicesList: any): void {
         this.log.info('');
         this.log.info('📋 ========== DISPOSITIVI DISPONIBILI ==========');
-        this.log.info('💡 Per escludere dispositivi, usa i seguenti ID:');
+        this.log.info('💡 Per escludere dispositivi o configurare stanze MQTT, usa i seguenti ID:');
         this.log.info('');
 
         if (devicesList.outputs.length > 0) {
             this.log.info('🔌 OUTPUT (Luci, Tapparelle, Termostati):');
             devicesList.outputs.forEach((device: any) => {
                 const icon = device.type === 'thermostat' ? '🌡️' : device.type === 'light' ? '💡' : '🪟';
-                this.log.info(`   ID: ${device.id.padEnd(3)} - ${icon} ${device.name}`);
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - ${icon} ${device.name}`);
             });
             this.log.info('');
         }
@@ -263,7 +263,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         if (devicesList.zones.length > 0) {
             this.log.info('🚪 ZONE (Sensori di Sicurezza):');
             devicesList.zones.forEach((device: any) => {
-                this.log.info(`   ID: ${device.id.padEnd(3)} - 🚪 ${device.name}`);
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - 🚪 ${device.name}`);
             });
             this.log.info('');
         }
@@ -273,7 +273,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             devicesList.sensors.forEach((device: any) => {
                 const icon = device.name.includes('Temperatura') ? '🌡️' :
                     device.name.includes('Umidità') ? '💧' : '☀️';
-                this.log.info(`   ID: ${device.id.padEnd(3)} - ${icon} ${device.name}`);
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - ${icon} ${device.name}`);
             });
             this.log.info('');
         }
@@ -281,15 +281,98 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         if (devicesList.scenarios.length > 0) {
             this.log.info('🎬 SCENARI (Automazioni):');
             devicesList.scenarios.forEach((device: any) => {
-                this.log.info(`   ID: ${device.id.padEnd(3)} - 🎬 ${device.name}`);
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - 🎬 ${device.name}`);
             });
             this.log.info('');
         }
 
         this.log.info('📁 Lista completa salvata in: ' + this.devicesFilePath);
         this.log.info('🔧 Usa questi ID nella configurazione per escludere dispositivi');
+        this.log.info('🏠 Oppure per configurare le stanze MQTT in Homebridge UI');
         this.log.info('===============================================');
         this.log.info('');
+
+        // Genera anche un file di configurazione di esempio per le stanze
+        this.generateRoomMappingExample(devicesList);
+    }
+
+    private generateRoomMappingExample(devicesList: any): void {
+        try {
+            const examplePath = path.join(this.api.user.storagePath(), 'klares4-room-mapping-example.json');
+
+            // Crea un esempio di configurazione stanze con alcuni dispositivi
+            const exampleConfig = {
+                "roomMapping": {
+                    "enabled": false,
+                    "rooms": [
+                        {
+                            "roomName": "sala",
+                            "devices": this.getExampleDevicesForRoom(devicesList, 'sala')
+                        },
+                        {
+                            "roomName": "cucina",
+                            "devices": this.getExampleDevicesForRoom(devicesList, 'cucina')
+                        },
+                        {
+                            "roomName": "camera",
+                            "devices": this.getExampleDevicesForRoom(devicesList, 'camera')
+                        }
+                    ]
+                },
+                "_note": "Questo è un file di esempio. Modifica roomName e devices secondo le tue necessità.",
+                "_availableDevices": {
+                    "outputs": devicesList.outputs.map((d: any) => ({ id: d.fullId, name: d.name, type: d.type })),
+                    "zones": devicesList.zones.map((d: any) => ({ id: d.fullId, name: d.name, type: d.type })),
+                    "sensors": devicesList.sensors.map((d: any) => ({ id: d.fullId, name: d.name, type: d.type })),
+                    "scenarios": devicesList.scenarios.map((d: any) => ({ id: d.fullId, name: d.name, type: d.type }))
+                }
+            };
+
+            fs.writeFileSync(examplePath, JSON.stringify(exampleConfig, null, 2));
+            this.log.info(`📝 Esempio configurazione stanze creato: ${examplePath}`);
+        } catch (error) {
+            this.log.error('❌ Errore nella creazione del file di esempio:', error);
+        }
+    }
+
+    private getExampleDevicesForRoom(devicesList: any, roomName: string): any[] {
+        const devices: any[] = [];
+
+        // Prendi alcuni dispositivi di esempio per ogni stanza
+        switch (roomName) {
+            case 'sala':
+                // Cerca sensori temperatura/umidità
+                const salaDevices = [...devicesList.sensors.slice(0, 2), ...devicesList.outputs.slice(0, 1)];
+                salaDevices.forEach((device: any) => {
+                    devices.push({
+                        deviceId: device.fullId,
+                        deviceName: device.name
+                    });
+                });
+                break;
+            case 'cucina':
+                // Cerca luci e tapparelle
+                const cucinaDevices = [...devicesList.outputs.slice(1, 3)];
+                cucinaDevices.forEach((device: any) => {
+                    devices.push({
+                        deviceId: device.fullId,
+                        deviceName: device.name
+                    });
+                });
+                break;
+            case 'camera':
+                // Cerca zone e altri dispositivi
+                const cameraDevices = [...devicesList.zones.slice(0, 1), ...devicesList.outputs.slice(3, 4)];
+                cameraDevices.forEach((device: any) => {
+                    devices.push({
+                        deviceId: device.fullId,
+                        deviceName: device.name
+                    });
+                });
+                break;
+        }
+
+        return devices.slice(0, 3); // Massimo 3 dispositivi per esempio
     }
 
     private shouldExcludeDevice(device: KseniaDevice): boolean {
