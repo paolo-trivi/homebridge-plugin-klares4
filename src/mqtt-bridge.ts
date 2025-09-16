@@ -105,40 +105,40 @@ export class MqttBridge {
         try {
             const topicParts = topic.split('/');
             let deviceType: string;
-            let deviceId: string;
+            let deviceIdentifier: string;
 
             // Supporta entrambi i formati:
             // Vecchio: homebridge/klares4/{deviceType}/{deviceId}/set
-            // Nuovo: homebridge/{room}/{deviceType}/{deviceId}/set
+            // Nuovo: homebridge/klares4/{room}/{deviceType}/{deviceSlug}/set
             if (topicParts.length === 5 && topicParts[4] === 'set') {
                 // Formato vecchio
                 deviceType = topicParts[2];
-                deviceId = topicParts[3];
+                deviceIdentifier = topicParts[3];
             } else if (topicParts.length === 6 && topicParts[5] === 'set') {
                 // Formato nuovo con stanza
                 deviceType = topicParts[3];
-                deviceId = topicParts[4];
+                deviceIdentifier = topicParts[4];
             } else {
                 this.log.warn('⚠️ MQTT: Formato topic non valido:', topic);
                 return;
             }
 
-            this.log.debug(`📥 MQTT: Comando ricevuto - Type: ${deviceType}, ID: ${deviceId}, Payload: ${payload}`);
+            this.log.debug(`📥 MQTT: Comando ricevuto - Type: ${deviceType}, Identifier: ${deviceIdentifier}, Payload: ${payload}`);
 
-            this.executeCommand(deviceType, deviceId, payload);
+            this.executeCommand(deviceType, deviceIdentifier, payload);
         } catch (error) {
             this.log.error('❌ MQTT: Errore elaborazione messaggio:', error);
         }
     }
 
-    private executeCommand(deviceType: string, deviceId: string, payload: string): void {
+    private executeCommand(deviceType: string, deviceIdentifier: string, payload: string): void {
         try {
             const command = JSON.parse(payload);
-            
-            // Trova l'accessorio corrispondente
-            const accessory = this.findAccessoryByDevice(deviceType, deviceId);
+
+            // Trova l'accessorio corrispondente (supporta sia ID che slug del nome)
+            const accessory = this.findAccessoryByDevice(deviceType, deviceIdentifier);
             if (!accessory) {
-                this.log.warn(`⚠️ MQTT: Accessorio non trovato - Type: ${deviceType}, ID: ${deviceId}`);
+                this.log.warn(`⚠️ MQTT: Accessorio non trovato - Type: ${deviceType}, Identifier: ${deviceIdentifier}`);
                 return;
             }
 
@@ -164,12 +164,16 @@ export class MqttBridge {
         }
     }
 
-    private findAccessoryByDevice(deviceType: string, deviceId: string): any {
+    private findAccessoryByDevice(deviceType: string, deviceIdentifier: string): any {
         // Cerca nell'handler degli accessori
         for (const [uuid, handler] of this.platform.accessoryHandlers) {
             const device = handler.device || handler.accessory?.context?.device;
-            if (device && device.type === deviceType && device.id === deviceId) {
-                return handler;
+            if (device && device.type === deviceType) {
+                // Supporta sia ID che slug del nome
+                const deviceSlug = this.createDeviceSlug(device.name);
+                if (device.id === deviceIdentifier || deviceSlug === deviceIdentifier) {
+                    return handler;
+                }
             }
         }
         return null;
@@ -221,6 +225,21 @@ export class MqttBridge {
         }
     }
 
+    private createDeviceSlug(deviceName: string): string {
+        return deviceName
+            .toLowerCase()
+            .replace(/\s+/g, '_')           // spazi → underscore
+            .replace(/[àáâãäå]/g, 'a')      // caratteri accentati
+            .replace(/[èéêë]/g, 'e')
+            .replace(/[ìíîï]/g, 'i')
+            .replace(/[òóôõö]/g, 'o')
+            .replace(/[ùúûü]/g, 'u')
+            .replace(/[ç]/g, 'c')
+            .replace(/[^a-z0-9_]/g, '')     // rimuovi caratteri speciali
+            .replace(/_+/g, '_')            // rimuovi underscore multipli
+            .replace(/^_|_$/g, '');         // rimuovi underscore iniziali/finali
+    }
+
     private getRoomForDevice(deviceId: string): string {
         // Se la mappatura stanze non è abilitata, usa il comportamento predefinito
         if (!this.platform.config.roomMapping?.enabled) {
@@ -249,7 +268,8 @@ export class MqttBridge {
         if (!this.client || !this.config.enabled) return;
 
         const room = this.getRoomForDevice(device.id);
-        const topic = `${this.topicPrefix}/${room}/${device.type}/${device.id}/state`;
+        const deviceSlug = this.createDeviceSlug(device.name);
+        const topic = `${this.topicPrefix}/${room}/${device.type}/${deviceSlug}/state`;
         const payload = this.createStatePayload(device);
 
         this.client.publish(topic, JSON.stringify(payload), {
@@ -259,7 +279,7 @@ export class MqttBridge {
             if (error) {
                 this.log.error('❌ MQTT: Errore pubblicazione:', error);
             } else {
-                this.log.debug(`📤 MQTT: Pubblicato stato ${room}/${device.type}/${device.id}`);
+                this.log.debug(`📤 MQTT: Pubblicato stato ${room}/${device.type}/${deviceSlug}`);
             }
         });
     }
