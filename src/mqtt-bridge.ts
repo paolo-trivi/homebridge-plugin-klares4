@@ -307,9 +307,9 @@ export class MqttBridge {
                 const light = device as any;
                 return {
                     ...basePayload,
-                    on: light.on || false,
-                    brightness: light.brightness || 0,
-                    dimmable: light.dimmable || false
+                    on: light.status?.on || false,
+                    brightness: light.status?.brightness || 0,
+                    dimmable: light.status?.dimmable || false
                 };
 
             case 'cover':
