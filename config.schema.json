@@ -10,23 +10,20 @@
             "name": {
                 "title": "Nome Piattaforma",
                 "type": "string",
-                "default": "Lares4",
-                "required": true
+                "default": "Lares4"
             },
             "ip": {
                 "title": "Indirizzo IP",
                 "type": "string",
                 "format": "ipv4",
-                "placeholder": "192.168.1.100",
-                "required": true
+                "placeholder": "192.168.1.100"
             },
             "port": {
                 "title": "Porta",
                 "type": "integer",
                 "default": 443,
                 "minimum": 1,
-                "maximum": 65535,
-                "required": true
+                "maximum": 65535
             },
             "https": {
                 "title": "Usa HTTPS",
@@ -36,13 +33,11 @@
             "sender": {
                 "title": "Sender ID",
                 "type": "string",
-                "default": "homebridge",
-                "required": true
+                "default": "homebridge"
             },
             "pin": {
                 "title": "PIN Sistema",
-                "type": "string",
-                "required": true
+                "type": "string"
             },
             "debug": {
                 "title": "Debug Mode",
@@ -91,7 +86,8 @@
                     "type": "string"
                 }
             }
-        }
+        },
+        "required": ["name", "ip", "port", "sender", "pin"]
     },
     "layout": [
         {

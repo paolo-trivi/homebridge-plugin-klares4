@@ -52,3 +52,5 @@ temp/
 
 # Config files
 config.json 
+klares4-devices.json
+CLAUDE.md
