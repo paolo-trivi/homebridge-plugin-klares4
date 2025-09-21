@@ -34,9 +34,6 @@
         "@types/ws": "^8.5.0",
         "typescript": "^5.0.0"
     },
-    "peerDependencies": {
-        "homebridge": ">=1.6.0"
-    },
     "author": {
         "name": "Paolo Trivisonno",
         "url": "https://github.com/paolo-trivi"
