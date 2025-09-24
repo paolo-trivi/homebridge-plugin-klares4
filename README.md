@@ -4,53 +4,53 @@
 [![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Plugin completo per sistemi Ksenia Lares4 che integra zone di sicurezza, luci, tapparelle, termostati e sensori ambientali in un'unica soluzione per Homebridge.
+Complete plugin for Ksenia Lares4 security systems that integrates security zones, lights, shutters, thermostats and environmental sensors into a single Homebridge solution.
 
-## ✨ Caratteristiche
+## ✨ Features
 
-- 🔐 **Zone di Sicurezza**: Sensori di contatto per porte e finestre
-- 💡 **Controllo Luci**: Accensione/spegnimento di tutte le luci del sistema
-- 🪟 **Tapparelle Intelligenti**: Controllo percentuale con timing configurabile
-- 🌡️ **Termostati**: Controllo temperatura e modalità riscaldamento/raffreddamento
-- 📊 **Sensori Ambientali**: Temperatura, umidità e luminosità in tempo reale
-- 🔄 **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
-- ⚙️ **Configurazione UI**: Interfaccia grafica completa in Homebridge UI
-- 🎯 **Personalizzazione**: Nomi personalizzati ed esclusione selettiva di entità
+- 🔐 **Security Zones**: Contact sensors for doors and windows
+- 💡 **Light Control**: On/off control of all system lights
+- 🪟 **Smart Shutters**: Percentage control with configurable timing
+- 🌡️ **Thermostats**: Temperature control and heating/cooling modes
+- 📊 **Environmental Sensors**: Real-time temperature, humidity and brightness
+- 🔄 **Real-time Updates**: WebSocket connection with automatic reconnection
+- ⚙️ **UI Configuration**: Complete graphical interface in Homebridge UI
+- 🎯 **Customization**: Custom names and selective entity exclusion
 
-## 📋 Prerequisiti
+## 📋 Prerequisites
 
 - Homebridge >= 1.6.0
 - Node.js >= 14.18.1
-- Sistema Ksenia Lares4 con accesso WebSocket abilitato
+- Ksenia Lares4 system with WebSocket access enabled
 
-## 🚀 Installazione
+## 🚀 Installation
 
-### Tramite Homebridge UI (Consigliato)
+### Via Homebridge UI (Recommended)
 
-1. Apri Homebridge UI
-2. Vai su **Plugins**
-3. Cerca `homebridge-plugin-klares4`
-4. Clicca **Install**
-5. Configura il plugin tramite l'interfaccia grafica
+1. Open Homebridge UI
+2. Go to **Plugins**
+3. Search for `homebridge-plugin-klares4`
+4. Click **Install**
+5. Configure the plugin via the graphical interface
 
-### Tramite npm
+### Via npm
 
 ```bash
 npm install -g homebridge-plugin-klares4
 ```
 
-## ⚙️ Configurazione
+## ⚙️ Configuration
 
-### Configurazione Base
+### Basic Configuration
 
-Il plugin può essere configurato completamente tramite l'interfaccia grafica di Homebridge UI. I parametri obbligatori sono:
+The plugin can be fully configured through the Homebridge UI graphical interface. The mandatory parameters are:
 
-- **Nome Plugin**: Nome che apparirà nei log
-- **Indirizzo IP**: IP del sistema Ksenia Lares4
-- **Sender ID**: Identificativo univoco per la connessione WebSocket
-- **PIN Sistema**: PIN di accesso al sistema Lares4
+- **Plugin Name**: Name that will appear in logs
+- **IP Address**: IP of the Ksenia Lares4 system
+- **Sender ID**: Unique identifier for WebSocket connection
+- **System PIN**: Access PIN for the Lares4 system
 
-### Configurazione Manuale (config.json)
+### Manual Configuration (config.json)
 
 ```json
 {
@@ -70,15 +70,15 @@ Il plugin può essere configurato completamente tramite l'interfaccia grafica di
 			"excludeSensors": ["3"],
 			"customNames": {
 				"zones": {
-					"1": "Porta Principale",
-					"2": "Finestra Cucina"
+					"1": "Main Door",
+					"2": "Kitchen Window"
 				},
 				"outputs": {
-					"9": "Luce Sala Custom",
-					"1": "Tapparella Studio"
+					"9": "Custom Living Light",
+					"1": "Study Shutter"
 				},
 				"sensors": {
-					"1": "Termometro Sala"
+					"1": "Living Thermometer"
 				}
 			}
 		}
@@ -86,71 +86,71 @@ Il plugin può essere configurato completamente tramite l'interfaccia grafica di
 }
 ```
 
-### Parametri di Configurazione
+### Configuration Parameters
 
-| Parametro           | Tipo     | Default      | Descrizione                     |
-| ------------------- | -------- | ------------ | ------------------------------- |
-| `name`              | string   | "Klares4"    | Nome del plugin                 |
-| `ip`                | string   | obbligatorio | Indirizzo IP del sistema Lares4 |
-| `sender`            | string   | "homebridge" | ID univoco per WebSocket        |
-| `pin`               | string   | obbligatorio | PIN di accesso                  |
-| `maxSeconds`        | number   | 30           | Tempo max tapparelle (secondi)  |
-| `reconnectInterval` | number   | 5000         | Intervallo riconnessione (ms)   |
-| `heartbeatInterval` | number   | 30000        | Intervallo heartbeat (ms)       |
-| `debug`             | boolean  | false        | Logging dettagliato             |
-| `excludeZones`      | string[] | []           | Zone da escludere               |
-| `excludeOutputs`    | string[] | []           | Output da escludere             |
-| `excludeSensors`    | string[] | []           | Sensori da escludere            |
-| `customNames`       | object   | {}           | Nomi personalizzati             |
+| Parameter           | Type     | Default      | Description                         |
+| ------------------- | -------- | ------------ | ----------------------------------- |
+| `name`              | string   | "Klares4"    | Plugin name                         |
+| `ip`                | string   | mandatory    | IP address of Lares4 system        |
+| `sender`            | string   | "homebridge" | Unique ID for WebSocket             |
+| `pin`               | string   | mandatory    | Access PIN                          |
+| `maxSeconds`        | number   | 30           | Max shutter time (seconds)          |
+| `reconnectInterval` | number   | 5000         | Reconnection interval (ms)          |
+| `heartbeatInterval` | number   | 30000        | Heartbeat interval (ms)             |
+| `debug`             | boolean  | false        | Detailed logging                    |
+| `excludeZones`      | string[] | []           | Zones to exclude                    |
+| `excludeOutputs`    | string[] | []           | Outputs to exclude                  |
+| `excludeSensors`    | string[] | []           | Sensors to exclude                  |
+| `customNames`       | object   | {}           | Custom names                        |
 
-## 🏠 Tipi di Accessori Supportati
+## 🏠 Supported Accessory Types
 
-### Zone di Sicurezza
+### Security Zones
 
-- **Tipo HomeKit**: Contact Sensor
-- **Stati**: Aperto/Chiuso, Bypass
-- **Aggiornamenti**: Real-time via WebSocket
+- **HomeKit Type**: Contact Sensor
+- **States**: Open/Closed, Bypass
+- **Updates**: Real-time via WebSocket
 
-### Luci
+### Lights
 
-- **Tipo HomeKit**: Lightbulb
-- **Controllo**: On/Off
-- **Feedback**: Stato real-time
+- **HomeKit Type**: Lightbulb
+- **Control**: On/Off
+- **Feedback**: Real-time status
 
-### Tapparelle
+### Shutters
 
-- **Tipo HomeKit**: Window Covering
-- **Controllo**: Percentuale (0-100%)
-- **Comandi**: Su/Giù/Stop
-- **Timing**: Configurabile tramite `maxSeconds`
+- **HomeKit Type**: Window Covering
+- **Control**: Percentage (0-100%)
+- **Commands**: Up/Down/Stop
+- **Timing**: Configurable via `maxSeconds`
 
-### Termostati
+### Thermostats
 
-- **Tipo HomeKit**: Thermostat
-- **Modalità**: Off/Heat/Cool
-- **Controllo**: Temperatura target
-- **Sensori**: Temperatura corrente
+- **HomeKit Type**: Thermostat
+- **Modes**: Off/Heat/Cool
+- **Control**: Target temperature
+- **Sensors**: Current temperature
 
-### Sensori Ambientali
+### Environmental Sensors
 
-- **Tipi HomeKit**: Temperature/Humidity/Light Sensor
-- **Dati**: Temperatura, Umidità, Luminosità
-- **Aggiornamenti**: Real-time
+- **HomeKit Types**: Temperature/Humidity/Light Sensor
+- **Data**: Temperature, Humidity, Brightness
+- **Updates**: Real-time
 
-## 🔧 Risoluzione Problemi
+## 🔧 Troubleshooting
 
-### Connessione WebSocket
+### WebSocket Connection
 
-Se il plugin non riesce a connettersi:
+If the plugin fails to connect:
 
-1. Verifica che l'IP sia corretto
-2. Controlla che il PIN sia valido
-3. Assicurati che il sistema Lares4 accetti connessioni WebSocket
-4. Verifica che la porta 443 (HTTPS) o 80 (HTTP) sia accessibile
+1. Verify the IP address is correct
+2. Check that the PIN is valid
+3. Ensure the Lares4 system accepts WebSocket connections
+4. Verify that port 443 (HTTPS) or 80 (HTTP) is accessible
 
 ### Debug
 
-Abilita il debug logging per diagnosi dettagliate:
+Enable debug logging for detailed diagnostics:
 
 ```json
 {
@@ -160,40 +160,40 @@ Abilita il debug logging per diagnosi dettagliate:
 
 ### Serial Number Warning
 
-Il warning "Serial Number characteristic must have a length of more than 1 character" è stato risolto nelle versioni recenti. Assicurati di avere l'ultima versione del plugin.
+The warning "Serial Number characteristic must have a length of more than 1 character" has been resolved in recent versions. Make sure you have the latest plugin version.
 
-### Tapparelle non Responsive
+### Unresponsive Shutters
 
-Se le tapparelle non rispondono correttamente:
+If shutters don't respond correctly:
 
-1. Verifica il parametro `maxSeconds`
-2. Controlla che i comandi up, down, alt siano supportati dal sistema
-3. Testa prima con movimenti completi (0% o 100%)
+1. Check the `maxSeconds` parameter
+2. Verify that up, down, alt commands are supported by the system
+3. Test first with complete movements (0% or 100%)
 
-## 📊 Monitoraggio
+## 📊 Monitoring
 
-Il plugin fornisce log dettagliati per monitorare:
+The plugin provides detailed logs to monitor:
 
-- Stato connessione WebSocket
-- Comandi inviati e ricevuti
-- Aggiornamenti entità
-- Errori e riconnessioni
+- WebSocket connection status
+- Commands sent and received
+- Entity updates
+- Errors and reconnections
 
-## 🤝 Contributi
+## 🤝 Contributing
 
-I contributi sono benvenuti! Per contribuire:
+Contributions are welcome! To contribute:
 
-1. Fork del repository
-2. Crea un branch per la tua feature
-3. Commit delle modifiche
-4. Push al branch
-5. Apri una Pull Request
+1. Fork the repository
+2. Create a branch for your feature
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
-## 📄 Licenza
+## 📄 License
 
-Questo progetto è rilasciato sotto licenza MIT.
+This project is released under MIT license.
 
-## 🔗 Link Utili
+## 🔗 Useful Links
 
 - [Homebridge](https://homebridge.io/)
 - [Homebridge UI](https://github.com/homebridge/homebridge-config-ui-x)
@@ -201,4 +201,4 @@ Questo progetto è rilasciato sotto licenza MIT.
 
 ---
 
-**Nota**: Questo progetto non è affiliato con Ksenia Security S.p.A. È un progetto open source sviluppato dalla comunità.
+**Note**: This project is not affiliated with Ksenia Security S.p.A. It is an open source project developed by the community.
