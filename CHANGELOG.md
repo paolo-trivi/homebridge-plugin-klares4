@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- Removed all emojis from README.md, CHANGELOG.md, and CONTEXT.md
+- Bilingual README (English/Italian)
+- Removed all emojis from documentation files
 - Updated code style to match strict TypeScript standards
 
 ## [1.1.1-beta.5] - 2025-09-18
@@ -69,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - MQTT topic structure can now include room names when room mapping is enabled
-- Enhanced config schema with new "Mappatura Stanze MQTT" section
+- Enhanced config schema with new "Room Mapping MQTT" section
 - Improved MQTT bridge to support dynamic room assignment
 
 ### Technical
@@ -133,11 +134,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Migration Guide
 
+### From 1.1.1-beta.5 to 1.1.1-beta.6
+
+- No configuration changes required
+- Codebase refactored for strict TypeScript compliance
+- All functionality remains the same
+
 ### From 1.1.1-beta.0 to 1.1.1-beta.1+
 
 - Room mapping is optional and disabled by default
 - Existing MQTT configurations continue to work unchanged
-- To use room mapping, enable it in the new "Mappatura Stanze MQTT" section
+- To use room mapping, enable it in the new "Room Mapping MQTT" section
 
 ### From 1.0.x to 1.1.0+
 
