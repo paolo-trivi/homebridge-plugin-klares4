@@ -5,25 +5,25 @@
 
 Plugin completo per sistemi Ksenia Lares4 che integra zone di sicurezza, luci, tapparelle, termostati e sensori ambientali in un'unica soluzione per Homebridge.
 
-## ✨ Caratteristiche
+## Caratteristiche
 
-- 🔐 **Zone di Sicurezza**: Sensori di contatto per porte e finestre
-- 💡 **Controllo Luci**: Accensione/spegnimento di tutte le luci del sistema
-- 🪟 **Tapparelle Intelligenti**: Controllo percentuale con timing configurabile
-- 🌡️ **Termostati**: Controllo temperatura e modalità riscaldamento/raffreddamento
-- 📊 **Sensori Ambientali**: Temperatura, umidità e luminosità in tempo reale
-- 🔄 **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
-- ⚙️ **Configurazione UI**: Interfaccia grafica completa in Homebridge UI
-- 🎯 **Personalizzazione**: Nomi personalizzati ed esclusione selettiva di entità
-- 📡 **Bridge MQTT**: Pubblicazione stati e ricezione comandi via MQTT (opzionale)
+- **Zone di Sicurezza**: Sensori di contatto per porte e finestre
+- **Controllo Luci**: Accensione/spegnimento di tutte le luci del sistema
+- **Tapparelle Intelligenti**: Controllo percentuale con timing configurabile
+- **Termostati**: Controllo temperatura e modalita riscaldamento/raffreddamento
+- **Sensori Ambientali**: Temperatura, umidita e luminosita in tempo reale
+- **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
+- **Configurazione UI**: Interfaccia grafica completa in Homebridge UI
+- **Personalizzazione**: Nomi personalizzati ed esclusione selettiva di entita
+- **Bridge MQTT**: Pubblicazione stati e ricezione comandi via MQTT (opzionale)
 
-## 📋 Prerequisiti
+## Prerequisiti
 
 - Homebridge >= 1.6.0
 - Node.js >= 14.18.1
 - Sistema Ksenia Lares4 con accesso WebSocket abilitato
 
-## 🚀 Installazione
+## Installazione
 
 ### Tramite Homebridge UI (Consigliato)
 
@@ -39,13 +39,13 @@ Plugin completo per sistemi Ksenia Lares4 che integra zone di sicurezza, luci, t
 npm install -g homebridge-plugin-klares4
 ```
 
-## ⚙️ Configurazione
+## Configurazione
 
 ### Configurazione Base
 
-Il plugin può essere configurato completamente tramite l'interfaccia grafica di Homebridge UI. I parametri obbligatori sono:
+Il plugin puo essere configurato completamente tramite l'interfaccia grafica di Homebridge UI. I parametri obbligatori sono:
 
-- **Nome Plugin**: Nome che apparirà nei log
+- **Nome Plugin**: Nome che apparira nei log
 - **Indirizzo IP**: IP del sistema Ksenia Lares4
 - **Sender ID**: Identificativo univoco per la connessione WebSocket
 - **PIN Sistema**: PIN di accesso al sistema Lares4
@@ -103,7 +103,7 @@ Il plugin può essere configurato completamente tramite l'interfaccia grafica di
 | `excludeSensors`    | string[] | []           | Sensori da escludere            |
 | `customNames`       | object   | {}           | Nomi personalizzati             |
 
-## 🏠 Tipi di Accessori Supportati
+## Tipi di Accessori Supportati
 
 ### Zone di Sicurezza
 
@@ -121,27 +121,27 @@ Il plugin può essere configurato completamente tramite l'interfaccia grafica di
 
 - **Tipo HomeKit**: Window Covering
 - **Controllo**: Percentuale (0-100%)
-- **Comandi**: Su/Giù/Stop
+- **Comandi**: Su/Giu/Stop
 - **Timing**: Configurabile tramite `maxSeconds`
 
 ### Termostati
 
 - **Tipo HomeKit**: Thermostat
-- **Modalità**: Off/Heat/Cool
+- **Modalita**: Off/Heat/Cool
 - **Controllo**: Temperatura target
 - **Sensori**: Temperatura corrente
 
 ### Sensori Ambientali
 
 - **Tipi HomeKit**: Temperature/Humidity/Light Sensor
-- **Dati**: Temperatura, Umidità, Luminosità
+- **Dati**: Temperatura, Umidita, Luminosita
 - **Aggiornamenti**: Real-time
 
-## 📡 Bridge MQTT (Opzionale)
+## Bridge MQTT (Opzionale)
 
 Il plugin include un bridge MQTT che permette di pubblicare gli stati degli accessori e ricevere comandi via MQTT.
 
-### 🚀 Configurazione MQTT
+### Configurazione MQTT
 
 Abilita il bridge MQTT nella sezione "MQTT Bridge" della configurazione:
 
@@ -160,7 +160,7 @@ Abilita il bridge MQTT nella sezione "MQTT Bridge" della configurazione:
 }
 ```
 
-### 📤 Pubblicazione Stati
+### Pubblicazione Stati
 
 Gli stati degli accessori vengono pubblicati sui seguenti topic:
 
@@ -171,7 +171,7 @@ Gli stati degli accessori vengono pubblicati sui seguenti topic:
 - **Zone**: `homebridge/klares4/zone/{id}/state`
 - **Scenari**: `homebridge/klares4/scenario/{id}/state`
 
-### 📥 Ricezione Comandi
+### Ricezione Comandi
 
 Invia comandi agli accessori sui seguenti topic:
 
@@ -180,7 +180,7 @@ Invia comandi agli accessori sui seguenti topic:
 - **Termostati**: `homebridge/klares4/thermostat/{id}/set`
 - **Scenari**: `homebridge/klares4/scenario/{id}/set`
 
-### 💡 Esempi di Utilizzo
+### Esempi di Utilizzo
 
 #### Accendere una luce:
 
@@ -206,7 +206,7 @@ mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/thermostat/3/set" -m '{"ta
 mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/scenario/4/set" -m '{"active": true}'
 ```
 
-### 📊 Formato Payload Stati
+### Formato Payload Stati
 
 ```json
 {
@@ -219,7 +219,7 @@ mosquitto_pub -h 192.168.1.100 -t "homebridge/klares4/scenario/4/set" -m '{"acti
 }
 ```
 
-## 🔧 Risoluzione Problemi
+## Risoluzione Problemi
 
 ### Connessione WebSocket
 
@@ -242,7 +242,7 @@ Abilita il debug logging per diagnosi dettagliate:
 
 ### Serial Number Warning
 
-Il warning "Serial Number characteristic must have a length of more than 1 character" è stato risolto nelle versioni recenti. Assicurati di avere l'ultima versione del plugin.
+Il warning "Serial Number characteristic must have a length of more than 1 character" e stato risolto nelle versioni recenti. Assicurati di avere l'ultima versione del plugin.
 
 ### Tapparelle non Responsive
 
@@ -252,16 +252,16 @@ Se le tapparelle non rispondono correttamente:
 2. Controlla che i comandi up, down, alt siano supportati dal sistema
 3. Testa prima con movimenti completi (0% o 100%)
 
-## 📊 Monitoraggio
+## Monitoraggio
 
 Il plugin fornisce log dettagliati per monitorare:
 
 - Stato connessione WebSocket
 - Comandi inviati e ricevuti
-- Aggiornamenti entità
+- Aggiornamenti entita
 - Errori e riconnessioni
 
-## 🤝 Contributi
+## Contributi
 
 I contributi sono benvenuti! Per contribuire:
 
@@ -271,11 +271,11 @@ I contributi sono benvenuti! Per contribuire:
 4. Push al branch
 5. Apri una Pull Request
 
-## 📄 Licenza
+## Licenza
 
-Questo progetto è rilasciato sotto licenza MIT.
+Questo progetto e rilasciato sotto licenza MIT.
 
-## 🔗 Link Utili
+## Link Utili
 
 - [Homebridge](https://homebridge.io/)
 - [Homebridge UI](https://github.com/homebridge/homebridge-config-ui-x)
@@ -283,4 +283,4 @@ Questo progetto è rilasciato sotto licenza MIT.
 
 ---
 
-**Nota**: Questo progetto non è affiliato con Ksenia Security S.p.A. È un progetto open source sviluppato dalla comunità.
+**Nota**: Questo progetto non e affiliato con Ksenia Security S.p.A. E un progetto open source sviluppato dalla comunita.

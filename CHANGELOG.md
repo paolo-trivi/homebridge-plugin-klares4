@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1-beta.6] - 2025-12-28
+
+### Changed
+
+- **Strict TypeScript Refactoring**: Complete codebase rewrite for strict type compliance
+- Replaced all `any` types with proper interfaces and discriminated unions
+- Added explicit return types to all functions and methods
+- Implemented type guards for MQTT command validation
+- Improved error handling: clean messages without stack traces in production logs
+- Removed all emojis from source code, comments, and log messages
+
+### Technical
+
+- New discriminated union types for device status (`KseniaLight`, `KseniaCover`, etc.)
+- `AccessoryHandler` union type for typed accessory management
+- Raw API response interfaces (`KseniaOutputStatusRaw`, `KseniaSensorStatusRaw`, etc.)
+- Type guard functions (`isMqttLightCommand`, `isMqttCoverCommand`, etc.)
+- Removed duplicate `MqttConfig` definition
+
+### Documentation
+
+- Removed all emojis from README.md, CHANGELOG.md, and CONTEXT.md
+- Updated code style to match strict TypeScript standards
+
 ## [1.1.1-beta.5] - 2025-09-18
 
 ### Fixed
@@ -80,12 +104,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Complete plugin rewrite for Ksenia Lares4 systems
 - Support for multiple device types:
-  - 🔐 Security zones (contact sensors)
-  - 💡 Lights with on/off control
-  - 🪟 Window coverings with position control
-  - 🌡️ Thermostats with temperature and mode control
-  - 📊 Environmental sensors (temperature, humidity, light)
-  - 🎬 Scenario automation triggers
+  - Security zones (contact sensors)
+  - Lights with on/off control
+  - Window coverings with position control
+  - Thermostats with temperature and mode control
+  - Environmental sensors (temperature, humidity, light)
+  - Scenario automation triggers
 - Real-time WebSocket communication with Lares4 system
 - Configurable device exclusion system
 - Custom device naming support
