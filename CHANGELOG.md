@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5] - 2025-12-28
+
+### Added
+
+- **MQTT Bridge**: Full MQTT integration for publishing states and receiving commands
+- Room mapping for MQTT topics
+- Bilingual documentation (English/Italian)
+
 ## [1.1.1-beta.6] - 2025-12-28
 
 ### Changed

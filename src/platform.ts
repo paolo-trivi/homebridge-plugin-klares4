@@ -161,6 +161,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             const useHttps = this.config.https !== false;
             const port = this.config.port ?? (useHttps ? 443 : 80);
 
+            if (!this.config.ip || !this.config.pin) {
+                this.log.error('Configurazione mancante: IP e PIN sono obbligatori');
+                return;
+            }
+
             this.wsClient = new KseniaWebSocketClient(
                 this.config.ip!,
                 port,

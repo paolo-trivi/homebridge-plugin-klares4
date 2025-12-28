@@ -1,6 +1,7 @@
 # homebridge-plugin-klares4
 
 [![npm version](https://badge.fury.io/js/homebridge-plugin-klares4.svg)](https://badge.fury.io/js/homebridge-plugin-klares4)
+[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Complete plugin for Ksenia Lares4 systems integrating security zones, lights, covers, thermostats, and environmental sensors into a single Homebridge solution.
