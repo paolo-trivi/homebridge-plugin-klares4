@@ -1,69 +1,81 @@
-import type {
-    Service,
-    PlatformAccessory,
-    CharacteristicValue,
-} from 'homebridge';
+import type { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
 
-import { Lares4Platform } from '../platform';
-import { KseniaDevice } from '../types';
+import type { Lares4Platform, Lares4Config } from '../platform';
+import type { KseniaScenario } from '../types';
 
+/**
+ * Scenario Accessory Handler
+ * Handles HomeKit Switch service for Ksenia Lares4 scenarios
+ */
 export class ScenarioAccessory {
     private service: Service;
+    public readonly device: KseniaScenario;
 
     constructor(
         private readonly platform: Lares4Platform,
         private readonly accessory: PlatformAccessory,
-        private readonly device: KseniaDevice,
+        device: KseniaScenario,
     ) {
-        // Imposta le informazioni dell'accessorio
-        this.accessory.getService(this.platform.Service.AccessoryInformation)!
-            .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Ksenia')
-            .setCharacteristic(this.platform.Characteristic.Model, 'Lares4 Scenario')
-            .setCharacteristic(this.platform.Characteristic.SerialNumber, device.id);
+        this.device = device;
 
-        // Ottieni il servizio Switch o crealo se non esiste
-        this.service = this.accessory.getService(this.platform.Service.Switch) ||
+        const accessoryInfoService = this.accessory.getService(
+            this.platform.Service.AccessoryInformation,
+        );
+        if (accessoryInfoService) {
+            accessoryInfoService
+                .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Ksenia')
+                .setCharacteristic(this.platform.Characteristic.Model, 'Lares4 Scenario')
+                .setCharacteristic(this.platform.Characteristic.SerialNumber, device.id);
+        }
+
+        this.service =
+            this.accessory.getService(this.platform.Service.Switch) ??
             this.accessory.addService(this.platform.Service.Switch);
 
-        // Imposta il nome del servizio
         this.service.setCharacteristic(this.platform.Characteristic.Name, device.name);
 
-        // Registra gli handler per le caratteristiche
-        this.service.getCharacteristic(this.platform.Characteristic.On)
+        this.service
+            .getCharacteristic(this.platform.Characteristic.On)
             .onSet(this.setOn.bind(this))
             .onGet(this.getOn.bind(this));
     }
 
-    async setOn(value: CharacteristicValue) {
+    public async setOn(value: CharacteristicValue): Promise<void> {
         const isOn = value as boolean;
 
         if (isOn) {
             try {
                 if (!this.platform.wsClient) {
-                    throw new Error('WebSocket client non inizializzato');
+                    throw new Error('WebSocket client not initialized');
                 }
                 await this.platform.wsClient.triggerScenario(this.device.id);
-                this.platform.log.info(`🎬 Scenario ${this.device.name} eseguito`);
+                this.platform.log.info(`Scenario ${this.device.name} executed`);
 
-                // Spegni automaticamente dopo timeout configurabile (gli scenari sono momentanei)
-                const autoOffDelay = this.platform.config.scenarioAutoOffDelay || 500;
-                setTimeout(() => {
+                const autoOffDelay =
+                    (this.platform.config as Lares4Config).scenarioAutoOffDelay ?? 500;
+                setTimeout((): void => {
                     if (this.service) {
                         this.service.updateCharacteristic(this.platform.Characteristic.On, false);
-                        this.platform.log.debug(`🔄 Scenario ${this.device.name} automaticamente spento dopo ${autoOffDelay}ms`);
+                        this.platform.log.debug(
+                            `Scenario ${this.device.name} automatically turned off after ${autoOffDelay}ms`,
+                        );
                     }
                 }, autoOffDelay);
-
-            } catch (error) {
-                this.platform.log.error(`❌ Errore esecuzione scenario ${this.device.name}:`, error);
-                throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+            } catch (error: unknown) {
+                this.platform.log.error(
+                    `Scenario execution error ${this.device.name}:`,
+                    error instanceof Error ? error.message : String(error),
+                );
+                throw new this.platform.api.hap.HapStatusError(
+                    this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+                );
             }
         }
-        // Non facciamo nulla per "spegnere" uno scenario
+        // Do nothing for "off" - scenarios are momentary
     }
 
-    async getOn(): Promise<CharacteristicValue> {
-        // Gli scenari non hanno uno stato persistente, tornano sempre false
+    public async getOn(): Promise<CharacteristicValue> {
+        // Scenarios don't have persistent state, always return false
         return false;
     }
-} 
+}

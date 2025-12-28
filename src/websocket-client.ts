@@ -1,32 +1,99 @@
 import WebSocket from 'ws';
 import * as https from 'https';
 import * as crypto from 'crypto';
-import { Logger } from 'homebridge';
+import type { Logger } from 'homebridge';
 
-import {
+import type {
     KseniaMessage,
+    KseniaMessagePayload,
     KseniaWebSocketOptions,
     KseniaDevice,
+    KseniaLight,
+    KseniaCover,
+    KseniaThermostat,
+    KseniaSensor,
+    KseniaZone,
+    KseniaScenario,
     KseniaOutputData,
     KseniaZoneData,
-    KseniaSensorData
+    KseniaBusHaData,
+    KseniaScenarioData,
+    KseniaOutputStatusRaw,
+    KseniaSensorStatusRaw,
+    KseniaZoneStatusRaw,
+    LightStatus,
+    CoverStatus,
+    ThermostatStatus,
+    SensorStatus,
+    ZoneStatus,
+    ScenarioStatus,
 } from './types';
 
+/**
+ * Interface for WebSocket connection options
+ */
+interface WebSocketConnectionOptions {
+    rejectUnauthorized: boolean;
+    agent?: https.Agent;
+}
+
+/**
+ * Interface for real-time status data
+ */
+interface RealtimeStatusData {
+    STATUS_OUTPUTS?: KseniaOutputStatusRaw[];
+    STATUS_BUS_HA_SENSORS?: KseniaSensorStatusRaw[];
+    STATUS_ZONES?: KseniaZoneStatusRaw[];
+    STATUS_SYSTEM?: SystemTemperatureData[];
+}
+
+/**
+ * Interface for system temperature data
+ */
+interface SystemTemperatureData {
+    ID: string;
+    TEMP?: {
+        IN?: string;
+        OUT?: string;
+    };
+}
+
+/**
+ * Interface for Ksenia command payload
+ */
+interface KseniaCommandPayload {
+    ID_LOGIN?: string;
+    PIN?: string;
+    ID_ITEMS_RANGE?: string[];
+    TYPES?: string[];
+    OUTPUT?: {
+        ID: string;
+        STA: string;
+    };
+    ID_THERMOSTAT?: string;
+    MODE?: string;
+    TARGET_TEMP?: string;
+    SCENARIO?: {
+        ID: string;
+    };
+}
+
+/**
+ * WebSocket client for Ksenia Lares4 communication
+ */
 export class KseniaWebSocketClient {
     private ws?: WebSocket;
     private isConnected = false;
     private idLogin?: string;
-    private heartbeatTimer?: NodeJS.Timeout;
-    private reconnectTimer?: NodeJS.Timeout;
+    private heartbeatTimer?: ReturnType<typeof setInterval>;
+    private reconnectTimer?: ReturnType<typeof setTimeout>;
 
-    // Event handlers
     public onDeviceDiscovered?: (device: KseniaDevice) => void;
     public onDeviceStatusUpdate?: (device: KseniaDevice) => void;
     public onConnected?: () => void;
     public onDisconnected?: () => void;
 
-    // Device storage
-    private devices: Map<string, KseniaDevice> = new Map();
+    private readonly devices: Map<string, KseniaDevice> = new Map();
 
     constructor(
         private readonly ip: string,
@@ -35,13 +102,13 @@ export class KseniaWebSocketClient {
         private readonly sender: string,
         private readonly pin: string,
         private readonly log: Logger,
-        private readonly options: KseniaWebSocketOptions = {}
+        private readonly options: KseniaWebSocketOptions = {},
     ) {
         this.options = {
             debug: false,
             reconnectInterval: 5000,
             heartbeatInterval: 30000,
-            ...options
+            ...options,
         };
     }
 
@@ -51,47 +118,50 @@ export class KseniaWebSocketClient {
                 const protocol = this.useHttps ? 'wss' : 'ws';
                 const wsUrl = `${protocol}://${this.ip}:${this.port}/KseniaWsock/`;
 
-                this.log.info(`🔗 Connessione a ${wsUrl}...`);
+                this.log.info(`Connecting to ${wsUrl}...`);
 
-                const wsOptions: any = {};
+                const wsOptions: WebSocketConnectionOptions = {
+                    rejectUnauthorized: false,
+                };
+
                 if (this.useHttps) {
-                    wsOptions.rejectUnauthorized = false;
                     wsOptions.agent = new https.Agent({
                         rejectUnauthorized: false,
                         secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
                         secureProtocol: 'TLS_method',
-                        ciphers: 'ALL:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA'
+                        ciphers: 'ALL:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA',
                     });
                 }
 
                 this.ws = new WebSocket(wsUrl, ['KS_WSOCK'], wsOptions);
 
-                this.ws.on('open', () => {
-                    this.log.info('✅ WebSocket connesso');
+                this.ws.on('open', (): void => {
+                    this.log.info('WebSocket connected');
                     this.isConnected = true;
-                    this.login().then(() => {
-                        this.onConnected?.();
-                        resolve();
-                    }).catch(reject);
+                    this.login()
+                        .then((): void => {
+                            this.onConnected?.();
+                            resolve();
+                        })
+                        .catch(reject);
                 });
 
-                this.ws.on('message', (data: WebSocket.Data) => {
+                this.ws.on('message', (data: WebSocket.Data): void => {
                     this.handleMessage(data.toString());
                 });
 
-                this.ws.on('close', (code: number, reason: Buffer) => {
-                    this.log.warn(`🔌 WebSocket chiuso: ${code} - ${reason.toString()}`);
+                this.ws.on('close', (code: number, reason: Buffer): void => {
+                    this.log.warn(`WebSocket closed: ${code} - ${reason.toString()}`);
                     this.isConnected = false;
                     this.onDisconnected?.();
                     this.scheduleReconnect();
                 });
 
-                this.ws.on('error', (error: Error) => {
-                    this.log.error('❌ Errore WebSocket:', error.message);
+                this.ws.on('error', (error: Error): void => {
+                    this.log.error('WebSocket error:', error.message);
                     reject(error);
                 });
-
-            } catch (error) {
+            } catch (error: unknown) {
                 reject(error);
             }
         });
@@ -105,31 +175,30 @@ export class KseniaWebSocketClient {
             ID: Math.floor(Math.random() * 65535).toString(),
             PAYLOAD_TYPE: 'UNKNOWN',
             PAYLOAD: {
-                PIN: this.pin
+                PIN: this.pin,
             },
             TIMESTAMP: Math.floor(Date.now() / 1000).toString(),
-            CRC_16: '0x0000'
+            CRC_16: '0x0000',
         };
 
         loginMessage.CRC_16 = this.calculateCRC16(JSON.stringify(loginMessage));
 
-        this.log.info('🔐 Esecuzione login...');
+        this.log.info('Executing login...');
         await this.sendMessage(loginMessage);
     }
 
     private handleMessage(data: string): void {
         try {
-            const message: KseniaMessage = JSON.parse(data);
+            const message = JSON.parse(data) as KseniaMessage;
 
-            // Filtra i messaggi di debug
             const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
-            const isGenericRealtime = message.CMD === 'REALTIME' && message.PAYLOAD_TYPE === 'CHANGES';
+            const isGenericRealtime =
+                message.CMD === 'REALTIME' && message.PAYLOAD_TYPE === 'CHANGES';
 
-            // Mostra messaggi solo se sono importanti o se siamo in debug
             if (this.options.debug || (!isHeartbeat && !isGenericRealtime)) {
-                this.log.info(`📨 Ricevuto: ${data}`);
+                this.log.info(`Received: ${data}`);
             } else if (isHeartbeat || isGenericRealtime) {
-                this.log.debug(`📨 Debug: ${data}`);
+                this.log.debug(`Debug: ${data}`);
             }
 
             switch (message.CMD) {
@@ -143,7 +212,6 @@ export class KseniaWebSocketClient {
                     this.handleRealtimeResponse(message);
                     break;
                 case 'REALTIME':
-                    // I messaggi real-time di aggiornamento stato
                     if (message.PAYLOAD_TYPE === 'CHANGES') {
                         this.handleStatusUpdate(message);
                     }
@@ -152,68 +220,69 @@ export class KseniaWebSocketClient {
                     this.handleStatusUpdate(message);
                     break;
                 case 'PING':
-                    // PING ricevuto - rispondi solo in debug
                     if (this.options.debug) {
-                        this.log.debug(`🏓 PING ricevuto dal sistema`);
+                        this.log.debug('PING received from system');
                     }
                     break;
                 default:
                     if (this.options.debug) {
-                        this.log.debug(`📋 Messaggio non gestito: ${message.CMD}`);
+                        this.log.debug(`Unhandled message: ${message.CMD}`);
                     }
             }
-        } catch (error) {
-            this.log.error('❌ Errore parsing messaggio:', error);
+        } catch (error: unknown) {
+            this.log.error(
+                'Message parsing error:',
+                error instanceof Error ? error.message : String(error),
+            );
         }
     }
 
     private handleLoginResponse(message: KseniaMessage): void {
         if (message.PAYLOAD?.RESULT === 'OK') {
-            this.idLogin = message.PAYLOAD.ID_LOGIN || '1';
-            this.log.info(`✅ Login completato, ID_LOGIN: ${this.idLogin}`);
+            this.idLogin = String(message.PAYLOAD.ID_LOGIN ?? '1');
+            this.log.info(`Login completed, ID_LOGIN: ${this.idLogin}`);
             this.startHeartbeat();
-            this.requestSystemData();
+            this.requestSystemData().catch((error: unknown): void => {
+                this.log.error(
+                    'Error requesting system data:',
+                    error instanceof Error ? error.message : String(error),
+                );
+            });
         } else {
-            this.log.error('❌ Login fallito:', message.PAYLOAD?.RESULT_DETAIL);
+            this.log.error('Login failed:', String(message.PAYLOAD?.RESULT_DETAIL ?? 'Unknown error'));
         }
     }
 
     private async requestSystemData(): Promise<void> {
         if (!this.idLogin) {
-            this.log.error('❌ ID_LOGIN non disponibile');
+            this.log.error('ID_LOGIN not available');
             return;
         }
 
-        this.log.info('📥 Richiesta dati sistema...');
+        this.log.info('Requesting system data...');
 
-        // Richiedi zone
         await this.sendKseniaCommand('READ', 'ZONES', {
             ID_LOGIN: this.idLogin,
-            ID_ITEMS_RANGE: ['ALL', 'ALL']
+            ID_ITEMS_RANGE: ['ALL', 'ALL'],
         });
 
-        // Richiedi output (luci, tapparelle, ecc.)
         await this.sendKseniaCommand('READ', 'MULTI_TYPES', {
             ID_LOGIN: this.idLogin,
-            TYPES: ['OUTPUTS', 'BUS_HAS', 'SCENARIOS']
+            TYPES: ['OUTPUTS', 'BUS_HAS', 'SCENARIOS'],
         });
 
-        // Richiedi stati attuali degli output (FONDAMENTALE per sincronizzare stati iniziali!)
         await this.sendKseniaCommand('READ', 'STATUS_OUTPUTS', {
-            ID_LOGIN: this.idLogin
+            ID_LOGIN: this.idLogin,
         });
 
-        // Richiedi stati attuali dei sensori
         await this.sendKseniaCommand('READ', 'STATUS_BUS_HA_SENSORS', {
-            ID_LOGIN: this.idLogin
+            ID_LOGIN: this.idLogin,
         });
 
-        // Richiedi stati del sistema (AGGIUNTO per termostati!)
         await this.sendKseniaCommand('READ', 'STATUS_SYSTEM', {
-            ID_LOGIN: this.idLogin
+            ID_LOGIN: this.idLogin,
         });
 
-        // Registra per aggiornamenti real-time
         await this.sendKseniaCommand('REALTIME', 'REGISTER', {
             ID_LOGIN: this.idLogin,
             TYPES: [
@@ -221,19 +290,19 @@ export class KseniaWebSocketClient {
                 'STATUS_OUTPUTS',
                 'STATUS_BUS_HA_SENSORS',
                 'STATUS_SYSTEM',
-                'SCENARIOS'
-            ]
+                'SCENARIOS',
+            ],
         });
     }
 
     private handleReadResponse(message: KseniaMessage): void {
         const payload = message.PAYLOAD;
 
-        this.log.info(`📥 Risposta ricevuta: ${message.PAYLOAD_TYPE}`);
+        this.log.info(`Response received: ${message.PAYLOAD_TYPE}`);
 
         if (message.PAYLOAD_TYPE === 'ZONES' && payload.ZONES) {
-            this.log.info(`🏠 Trovate ${payload.ZONES.length} zone`);
-            payload.ZONES.forEach((zone: KseniaZoneData) => {
+            this.log.info(`Found ${payload.ZONES.length} zones`);
+            payload.ZONES.forEach((zone: KseniaZoneData): void => {
                 const device = this.parseZoneData(zone);
                 this.devices.set(device.id, device);
                 this.onDeviceDiscovered?.(device);
@@ -242,14 +311,15 @@ export class KseniaWebSocketClient {
 
         if (message.PAYLOAD_TYPE === 'MULTI_TYPES') {
             if (payload.OUTPUTS) {
-                this.log.info(`💡 Trovati ${payload.OUTPUTS.length} output`);
-                payload.OUTPUTS.forEach((output: KseniaOutputData) => {
-                    // Log dettagliato per debugging termostati
-                    const category = (output as any).CAT || output.TYPE || '';
+                this.log.info(`Found ${payload.OUTPUTS.length} outputs`);
+                payload.OUTPUTS.forEach((output: KseniaOutputData): void => {
+                    const category = output.CAT ?? output.TYPE ?? '';
                     const type = this.determineOutputType(category);
 
-                    if (type === 'thermostat') {
-                        this.log.info(`🌡️ DEBUG Termostato trovato - ID: ${output.ID}, DES: ${output.DES}, TYPE: ${output.TYPE}, CAT: ${(output as any).CAT}, RAW: ${JSON.stringify(output)}`);
+                    if (type === 'thermostat' && this.options.debug) {
+                        this.log.debug(
+                            `Thermostat found - ID: ${output.ID}, DES: ${output.DES}, TYPE: ${output.TYPE}, CAT: ${output.CAT}`,
+                        );
                     }
 
                     const device = this.parseOutputData(output);
@@ -261,11 +331,10 @@ export class KseniaWebSocketClient {
             }
 
             if (payload.SCENARIOS) {
-                this.log.info(`🎬 Trovati ${payload.SCENARIOS.length} scenari`);
-                payload.SCENARIOS.forEach((scenario: any) => {
-                    // Filtra gli scenari ARM/DISARM come fa lares4-ts
+                this.log.info(`Found ${payload.SCENARIOS.length} scenarios`);
+                payload.SCENARIOS.forEach((scenario: KseniaScenarioData): void => {
                     if (scenario.CAT === 'ARM' || scenario.CAT === 'DISARM') {
-                        this.log.debug(`⏭️ Scenario ${scenario.DES} ignorato (categoria ${scenario.CAT})`);
+                        this.log.debug(`Scenario ${scenario.DES} ignored (category ${scenario.CAT})`);
                         return;
                     }
 
@@ -278,52 +347,48 @@ export class KseniaWebSocketClient {
             }
 
             if (payload.BUS_HAS) {
-                this.log.info(`🌡️ Trovati ${payload.BUS_HAS.length} sensori`);
-                payload.BUS_HAS.forEach((sensor: KseniaSensorData) => {
-                    // Crea sensori multipli per ogni DOMUS
-                    const baseName = sensor.DES || `Sensore ${sensor.ID}`;
+                this.log.info(`Found ${payload.BUS_HAS.length} sensors`);
+                payload.BUS_HAS.forEach((sensor: KseniaBusHaData): void => {
+                    const baseName = sensor.DES || `Sensor ${sensor.ID}`;
 
-                    // Sensore temperatura
-                    const tempDevice = {
+                    const tempDevice: KseniaSensor = {
                         id: `sensor_temp_${sensor.ID}`,
-                        type: 'sensor' as const,
+                        type: 'sensor',
                         name: `${baseName} - Temperatura`,
                         description: `${baseName} - Temperatura`,
                         status: {
                             sensorType: 'temperature',
-                            value: undefined, // Sarà aggiornato dai dati real-time
-                            unit: '°C'
-                        }
+                            value: 0,
+                            unit: 'C',
+                        },
                     };
                     this.devices.set(tempDevice.id, tempDevice);
                     this.onDeviceDiscovered?.(tempDevice);
 
-                    // Sensore umidità
-                    const humDevice = {
+                    const humDevice: KseniaSensor = {
                         id: `sensor_hum_${sensor.ID}`,
-                        type: 'sensor' as const,
-                        name: `${baseName} - Umidità`,
-                        description: `${baseName} - Umidità`,
+                        type: 'sensor',
+                        name: `${baseName} - Umidita`,
+                        description: `${baseName} - Umidita`,
                         status: {
                             sensorType: 'humidity',
                             value: 50,
-                            unit: '%'
-                        }
+                            unit: '%',
+                        },
                     };
                     this.devices.set(humDevice.id, humDevice);
                     this.onDeviceDiscovered?.(humDevice);
 
-                    // Sensore luminosità
-                    const lightDevice = {
+                    const lightDevice: KseniaSensor = {
                         id: `sensor_light_${sensor.ID}`,
-                        type: 'sensor' as const,
-                        name: `${baseName} - Luminosità`,
-                        description: `${baseName} - Luminosità`,
+                        type: 'sensor',
+                        name: `${baseName} - Luminosita`,
+                        description: `${baseName} - Luminosita`,
                         status: {
                             sensorType: 'light',
                             value: 100,
-                            unit: 'lux'
-                        }
+                            unit: 'lux',
+                        },
                     };
                     this.devices.set(lightDevice.id, lightDevice);
                     this.onDeviceDiscovered?.(lightDevice);
@@ -331,364 +396,336 @@ export class KseniaWebSocketClient {
             }
         }
 
-        // Gestisci stati iniziali degli output
         if (message.PAYLOAD_TYPE === 'STATUS_OUTPUTS' && payload.STATUS_OUTPUTS) {
-            this.log.info(`📊 Stati iniziali ${payload.STATUS_OUTPUTS.length} output`);
-            // Log dettagliato per debugging termostati
-            payload.STATUS_OUTPUTS.forEach((output: any) => {
-                const thermostatDevice = this.devices.get(`thermostat_${output.ID}`);
-                if (thermostatDevice) {
-                    this.log.info(`🌡️ DEBUG Stato iniziale termostato ${output.ID}: ${JSON.stringify(output)}`);
-                }
-            });
+            this.log.info(`Initial states for ${payload.STATUS_OUTPUTS.length} outputs`);
+            if (this.options.debug) {
+                payload.STATUS_OUTPUTS.forEach((output: KseniaOutputStatusRaw): void => {
+                    const thermostatDevice = this.devices.get(`thermostat_${output.ID}`);
+                    if (thermostatDevice) {
+                        this.log.debug(`Initial thermostat state ${output.ID}: ${JSON.stringify(output)}`);
+                    }
+                });
+            }
             this.updateOutputStatuses(payload.STATUS_OUTPUTS);
         }
 
-        // Gestisci stati iniziali dei sensori
         if (message.PAYLOAD_TYPE === 'STATUS_BUS_HA_SENSORS' && payload.STATUS_BUS_HA_SENSORS) {
-            this.log.info(`🌡️ Stati iniziali ${payload.STATUS_BUS_HA_SENSORS.length} sensori`);
+            this.log.info(`Initial states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
             this.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
         }
 
-        // Gestisci stati iniziali del sistema
         if (message.PAYLOAD_TYPE === 'STATUS_SYSTEM' && payload.STATUS_SYSTEM) {
-            this.log.info(`🌡️ Temperature sistema iniziali`);
-            this.updateSystemTemperatures(payload.STATUS_SYSTEM);
+            this.log.info('Initial system temperatures');
+            this.updateSystemTemperatures(payload.STATUS_SYSTEM as unknown as SystemTemperatureData[]);
         }
     }
 
     private handleRealtimeResponse(message: KseniaMessage): void {
-        this.log.info('🔄 Registrazione real-time completata');
+        this.log.info('Real-time registration completed');
 
-        // Processa gli stati iniziali se presenti
         const payload = message.PAYLOAD;
         if (payload.STATUS_OUTPUTS) {
-            this.log.info(`📊 Aggiornamento stati ${payload.STATUS_OUTPUTS.length} output`);
+            this.log.info(`Updating states for ${payload.STATUS_OUTPUTS.length} outputs`);
             this.updateOutputStatuses(payload.STATUS_OUTPUTS);
         }
         if (payload.STATUS_BUS_HA_SENSORS) {
-            this.log.info(`🌡️ Aggiornamento stati ${payload.STATUS_BUS_HA_SENSORS.length} sensori`);
+            this.log.info(`Updating states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
             this.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
         }
         if (payload.STATUS_ZONES) {
-            this.log.info(`🚪 Aggiornamento stati ${payload.STATUS_ZONES.length} zone`);
+            this.log.info(`Updating states for ${payload.STATUS_ZONES.length} zones`);
             this.updateZoneStatuses(payload.STATUS_ZONES);
         }
         if (payload.STATUS_SYSTEM) {
-            this.log.info(`🌡️ Aggiornamento temperature sistema iniziali`);
-            this.updateSystemTemperatures(payload.STATUS_SYSTEM);
+            this.log.info('Updating initial system temperatures');
+            this.updateSystemTemperatures(payload.STATUS_SYSTEM as unknown as SystemTemperatureData[]);
         }
     }
 
     private handleStatusUpdate(message: KseniaMessage): void {
-        // Gestisce gli aggiornamenti di stato in tempo reale
         const payload = message.PAYLOAD;
-        this.log.debug(`🔄 handleStatusUpdate chiamato, payload keys: ${Object.keys(payload)}`);
+        this.log.debug(`handleStatusUpdate called, payload keys: ${Object.keys(payload)}`);
 
-        // I messaggi real-time hanno un formato diverso
-        for (const [sender, data] of Object.entries(payload)) {
+        for (const [, data] of Object.entries(payload)) {
             if (data && typeof data === 'object') {
-                const statusData = data as any;
+                const statusData = data as RealtimeStatusData;
 
                 if (statusData.STATUS_OUTPUTS) {
-                    this.log.info(`📊 Aggiornamento real-time ${statusData.STATUS_OUTPUTS.length} output`);
+                    this.log.info(`Real-time update for ${statusData.STATUS_OUTPUTS.length} outputs`);
                     this.updateOutputStatuses(statusData.STATUS_OUTPUTS);
                 }
                 if (statusData.STATUS_BUS_HA_SENSORS) {
-                    this.log.info(`🌡️ Aggiornamento real-time ${statusData.STATUS_BUS_HA_SENSORS.length} sensori`);
+                    this.log.info(`Real-time update for ${statusData.STATUS_BUS_HA_SENSORS.length} sensors`);
                     this.updateSensorStatuses(statusData.STATUS_BUS_HA_SENSORS);
                 }
                 if (statusData.STATUS_ZONES) {
-                    this.log.info(`🚪 Aggiornamento real-time ${statusData.STATUS_ZONES.length} zone`);
+                    this.log.info(`Real-time update for ${statusData.STATUS_ZONES.length} zones`);
                     this.updateZoneStatuses(statusData.STATUS_ZONES);
                 }
                 if (statusData.STATUS_SYSTEM) {
-                    this.log.info(`🌡️ Aggiornamento temperature sistema`);
+                    this.log.info('System temperature update');
                     this.updateSystemTemperatures(statusData.STATUS_SYSTEM);
                 }
             }
         }
     }
 
-    private parseZoneData(zoneData: KseniaZoneData): KseniaDevice {
+    private parseZoneData(zoneData: KseniaZoneData): KseniaZone {
         return {
             id: `zone_${zoneData.ID}`,
             type: 'zone',
-            name: zoneData.DES || `Zona ${zoneData.ID}`,
+            name: zoneData.DES || `Zone ${zoneData.ID}`,
             description: zoneData.DES || '',
             status: {
                 armed: zoneData.STATUS === '1',
                 bypassed: false,
                 fault: false,
-                open: zoneData.STATUS === '2'
-            }
+                open: zoneData.STATUS === '2',
+            },
         };
     }
 
-    private parseOutputData(outputData: KseniaOutputData): KseniaDevice | null {
-        // Usa CAT (categoria) dal payload reale - implementazione diretta senza libreria
-        const category = (outputData as any).CAT || outputData.TYPE || '';
+    private parseOutputData(outputData: KseniaOutputData): KseniaLight | KseniaCover | null {
+        const category = outputData.CAT ?? outputData.TYPE ?? '';
         const categoryUpper = category.toUpperCase();
-
-        // Usa l'ID reale del sistema (non remappato)
         const systemId = outputData.ID;
 
         if (categoryUpper === 'LIGHT') {
             return {
                 id: `light_${systemId}`,
                 type: 'light',
-                name: outputData.DES || `Luce ${systemId}`,
+                name: outputData.DES || `Light ${systemId}`,
                 description: outputData.DES || '',
                 status: {
-                    on: false, // Sarà aggiornato dai dati real-time
+                    on: false,
                     brightness: undefined,
-                    dimmable: false
-                }
+                    dimmable: false,
+                },
             };
         } else if (categoryUpper === 'ROLL') {
             return {
                 id: `cover_${systemId}`,
                 type: 'cover',
-                name: outputData.DES || `Tapparella ${systemId}`,
-                description: outputData.DES || '',
-                status: {
-                    position: 0, // Sarà aggiornato dai dati real-time
-                    state: 'stopped'
-                }
-            };
-        } else if (categoryUpper === 'GATE') {
-            return {
-                id: `cover_${systemId}`, // I cancelli sono trattati come cover
-                type: 'cover',
-                name: outputData.DES || `Cancello ${systemId}`,
+                name: outputData.DES || `Cover ${systemId}`,
                 description: outputData.DES || '',
                 status: {
                     position: 0,
-                    state: 'stopped'
-                }
+                    state: 'stopped',
+                },
+            };
+        } else if (categoryUpper === 'GATE') {
+            return {
+                id: `cover_${systemId}`,
+                type: 'cover',
+                name: outputData.DES || `Gate ${systemId}`,
+                description: outputData.DES || '',
+                status: {
+                    position: 0,
+                    state: 'stopped',
+                },
             };
         }
 
-        // Ignora altri tipi di output per ora
-        this.log.debug(`📋 Output ignorato: ID ${systemId}, CAT: ${category}, DES: ${outputData.DES}`);
+        this.log.debug(`Output ignored: ID ${systemId}, CAT: ${category}, DES: ${outputData.DES}`);
         return null;
     }
 
-    private parseSensorData(sensorData: KseniaSensorData): KseniaDevice | null {
-        const baseName = sensorData.DES || `Sensore ${sensorData.ID}`;
-
-        // Creiamo solo il sensore temperatura per ora
-        return {
-            id: `sensor_temp_${sensorData.ID}`,
-            type: 'sensor',
-            name: `${baseName} - Temperatura`,
-            description: `${baseName} - Temperatura`,
-            status: {
-                sensorType: 'temperature',
-                value: undefined, // Sarà aggiornato dai dati real-time
-                unit: '°C'
-            }
-        };
-    }
-
-    private parseScenarioData(scenarioData: any): KseniaDevice | null {
+    private parseScenarioData(scenarioData: KseniaScenarioData): KseniaScenario | null {
         return {
             id: `scenario_${scenarioData.ID}`,
             type: 'scenario',
             name: scenarioData.DES || `Scenario ${scenarioData.ID}`,
             description: scenarioData.DES || '',
             status: {
-                active: false // Gli scenari non hanno uno stato persistente
-            }
+                active: false,
+            },
         };
     }
 
     private determineOutputType(category: string): 'light' | 'cover' | 'thermostat' | 'scenario' {
         const catUpper = category.toUpperCase();
 
-        // Log per debugging
-        this.log.debug(`🔍 Determinazione tipo per categoria: "${category}" (normalizzato: "${catUpper}")`);
+        this.log.debug(`Determining type for category: "${category}" (normalized: "${catUpper}")`);
 
-        // Usa la logica della libreria lares4-ts basata sul campo CAT
         if (catUpper === 'ROLL') {
-            this.log.debug(`✅ Identificato come tapparella: ${category}`);
+            this.log.debug(`Identified as cover: ${category}`);
             return 'cover';
         }
 
         if (catUpper === 'LIGHT') {
-            this.log.debug(`✅ Identificato come luce: ${category}`);
+            this.log.debug(`Identified as light: ${category}`);
             return 'light';
         }
 
         if (catUpper === 'GATE') {
-            this.log.debug(`✅ Identificato come cancello (trattato come copertura): ${category}`);
+            this.log.debug(`Identified as gate (treated as cover): ${category}`);
             return 'cover';
         }
 
-        // Termostati - controlla diverse possibili denominazioni per retrocompatibilità
-        if (catUpper.includes('THERM') ||
+        if (
+            catUpper.includes('THERM') ||
             catUpper.includes('CLIMA') ||
             catUpper.includes('TEMP') ||
             catUpper.includes('RISCALD') ||
             catUpper.includes('RAFFRES') ||
             catUpper.includes('HVAC') ||
-            catUpper.includes('TERMOS')) {
-            this.log.debug(`✅ Identificato come termostato: ${category}`);
+            catUpper.includes('TERMOS')
+        ) {
+            this.log.debug(`Identified as thermostat: ${category}`);
             return 'thermostat';
         }
 
-        // Default: luce (per compatibilità con sistemi più vecchi)
-        this.log.debug(`✅ Identificato come luce (default): ${category}`);
+        this.log.debug(`Identified as light (default): ${category}`);
         return 'light';
     }
 
-    private determineSensorType(type: string): 'temperature' | 'humidity' | 'light' | 'motion' | 'contact' {
-        if (type.includes('TEMP')) return 'temperature';
-        if (type.includes('HUM')) return 'humidity';
-        if (type.includes('LIGHT') || type.includes('LUX')) return 'light';
-        if (type.includes('MOTION') || type.includes('PIR')) return 'motion';
-        if (type.includes('CONTACT') || type.includes('DOOR')) return 'contact';
-        return 'temperature'; // Default
-    }
+    private updateOutputStatuses(outputs: KseniaOutputStatusRaw[]): void {
+        outputs.forEach((output: KseniaOutputStatusRaw): void => {
+            this.log.debug(
+                `Output update ${output.ID}: STA=${output.STA}, POS=${output.POS}, TPOS=${output.TPOS}`,
+            );
 
-    private updateOutputStatuses(outputs: any[]): void {
-        outputs.forEach(output => {
-            this.log.debug(`📊 Aggiornamento output ${output.ID}: STA=${output.STA}, POS=${output.POS}, TPOS=${output.TPOS}`);
-
-            // Usa gli ID reali del sistema (non remappati)
             const lightDevice = this.devices.get(`light_${output.ID}`);
-            if (lightDevice) {
-                const wasOn = (lightDevice.status as any).on;
-                (lightDevice.status as any).on = output.STA === 'ON';
+            if (lightDevice && lightDevice.type === 'light') {
+                const lightStatus = lightDevice.status as LightStatus;
+                const wasOn = lightStatus.on;
+                lightStatus.on = output.STA === 'ON';
                 if (output.POS !== undefined) {
-                    (lightDevice.status as any).brightness = parseInt(output.POS);
-                    (lightDevice.status as any).dimmable = true;
+                    lightStatus.brightness = parseInt(output.POS, 10);
+                    lightStatus.dimmable = true;
                 }
                 if (wasOn !== (output.STA === 'ON')) {
-                    this.log.info(`💡 Luce ${lightDevice.name} (Output ${output.ID}): ${output.STA === 'ON' ? 'ACCESA' : 'SPENTA'}`);
+                    this.log.info(
+                        `Light ${lightDevice.name} (Output ${output.ID}): ${output.STA === 'ON' ? 'ON' : 'OFF'}`,
+                    );
                 }
                 this.onDeviceStatusUpdate?.(lightDevice);
             }
 
             const coverDevice = this.devices.get(`cover_${output.ID}`);
-            if (coverDevice) {
-                const oldPos = (coverDevice.status as any).position;
+            if (coverDevice && coverDevice.type === 'cover') {
+                const coverStatus = coverDevice.status as CoverStatus;
+                const oldPos = coverStatus.position;
                 const newPosition = this.mapCoverPosition(output.STA, output.POS);
-                (coverDevice.status as any).position = newPosition;
-                (coverDevice.status as any).targetPosition = parseInt(output.TPOS || output.POS || '0');
-                (coverDevice.status as any).state = this.mapCoverState(output.STA, output.POS, output.TPOS);
+                coverStatus.position = newPosition;
+                coverStatus.targetPosition = parseInt(output.TPOS ?? output.POS ?? '0', 10);
+                coverStatus.state = this.mapCoverState(output.STA, output.POS, output.TPOS);
 
                 if (oldPos !== newPosition) {
-                    this.log.info(`🪟 Cover ${coverDevice.name} (Output ${output.ID}): ${output.STA} posizione ${newPosition}%`);
+                    this.log.info(
+                        `Cover ${coverDevice.name} (Output ${output.ID}): ${output.STA} position ${newPosition}%`,
+                    );
                 }
                 this.onDeviceStatusUpdate?.(coverDevice);
             }
 
             const thermostatDevice = this.devices.get(`thermostat_${output.ID}`);
-            if (thermostatDevice) {
-                // IMPLEMENTAZIONE REALE PER TERMOSTATI
-                // Aggiorna i dati del termostato se disponibili
+            if (thermostatDevice && thermostatDevice.type === 'thermostat') {
+                const thermostatStatus = thermostatDevice.status as ThermostatStatus;
                 let updated = false;
 
-                // Se abbiamo dati di temperatura nel payload (dipende dal protocollo Lares4)
                 if (output.TEMP_CURRENT !== undefined) {
-                    const oldCurrentTemp = (thermostatDevice.status as any).currentTemperature;
+                    const oldCurrentTemp = thermostatStatus.currentTemperature;
                     const newCurrentTemp = parseFloat(output.TEMP_CURRENT);
-                    (thermostatDevice.status as any).currentTemperature = newCurrentTemp;
+                    thermostatStatus.currentTemperature = newCurrentTemp;
                     if (oldCurrentTemp !== newCurrentTemp) {
-                        this.log.info(`🌡️ ${thermostatDevice.name}: Temperatura corrente ${newCurrentTemp}°C`);
+                        this.log.info(`${thermostatDevice.name}: Current temperature ${newCurrentTemp}C`);
                         updated = true;
                     }
                 }
 
                 if (output.TEMP_TARGET !== undefined) {
-                    const oldTargetTemp = (thermostatDevice.status as any).targetTemperature;
+                    const oldTargetTemp = thermostatStatus.targetTemperature;
                     const newTargetTemp = parseFloat(output.TEMP_TARGET);
-                    (thermostatDevice.status as any).targetTemperature = newTargetTemp;
+                    thermostatStatus.targetTemperature = newTargetTemp;
                     if (oldTargetTemp !== newTargetTemp) {
-                        this.log.info(`🌡️ ${thermostatDevice.name}: Temperatura target ${newTargetTemp}°C`);
+                        this.log.info(`${thermostatDevice.name}: Target temperature ${newTargetTemp}C`);
                         updated = true;
                     }
                 }
 
                 if (output.MODE !== undefined) {
-                    const oldMode = (thermostatDevice.status as any).mode;
+                    const oldMode = thermostatStatus.mode;
                     const newMode = this.mapThermostatMode(output.MODE);
-                    (thermostatDevice.status as any).mode = newMode;
+                    thermostatStatus.mode = newMode;
                     if (oldMode !== newMode) {
-                        this.log.info(`🌡️ ${thermostatDevice.name}: Modalità ${newMode}`);
+                        this.log.info(`${thermostatDevice.name}: Mode ${newMode}`);
                         updated = true;
                     }
                 }
 
-                // Se abbiamo aggiornato qualcosa, notifica l'accessorio
                 if (updated) {
                     this.onDeviceStatusUpdate?.(thermostatDevice);
-                } else {
-                    // Log di debug per capire che dati stanno arrivando per i termostati
-                    this.log.debug(`🌡️ Debug termostato ${output.ID}: ${JSON.stringify(output)}`);
+                } else if (this.options.debug) {
+                    this.log.debug(`Debug thermostat ${output.ID}: ${JSON.stringify(output)}`);
                 }
             }
         });
     }
 
-    private updateSensorStatuses(sensors: any[]): void {
-        sensors.forEach(sensor => {
+    private updateSensorStatuses(sensors: KseniaSensorStatusRaw[]): void {
+        sensors.forEach((sensor: KseniaSensorStatusRaw): void => {
             if (sensor.DOMUS) {
-                this.log.debug(`🌡️ Aggiornamento sensore ${sensor.ID}: TEM=${sensor.DOMUS.TEM}°C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`);
+                this.log.debug(
+                    `Sensor update ${sensor.ID}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
+                );
 
                 const tempDevice = this.devices.get(`sensor_temp_${sensor.ID}`);
-                if (tempDevice) {
-                    const oldTemp = (tempDevice.status as any).value;
-                    const newTemp = parseFloat(sensor.DOMUS.TEM || '0'); // Usa 0 invece di 20 come fallback
-                    (tempDevice.status as any).value = newTemp;
-                    if (oldTemp !== newTemp && newTemp > 0) { // Log solo se abbiamo una temperatura valida
-                        this.log.info(`🌡️ ${tempDevice.name}: ${newTemp}°C`);
+                if (tempDevice && tempDevice.type === 'sensor') {
+                    const tempStatus = tempDevice.status as SensorStatus;
+                    const oldTemp = tempStatus.value;
+                    const newTemp = parseFloat(sensor.DOMUS.TEM ?? '0');
+                    tempStatus.value = newTemp;
+                    if (oldTemp !== newTemp && newTemp > 0) {
+                        this.log.info(`${tempDevice.name}: ${newTemp}C`);
                     }
                     this.onDeviceStatusUpdate?.(tempDevice);
                 }
 
                 const humDevice = this.devices.get(`sensor_hum_${sensor.ID}`);
-                if (humDevice) {
-                    const oldHum = (humDevice.status as any).value;
-                    const newHum = parseInt(sensor.DOMUS.HUM || '50');
-                    (humDevice.status as any).value = newHum;
+                if (humDevice && humDevice.type === 'sensor') {
+                    const humStatus = humDevice.status as SensorStatus;
+                    const oldHum = humStatus.value;
+                    const newHum = parseInt(sensor.DOMUS.HUM ?? '50', 10);
+                    humStatus.value = newHum;
                     if (oldHum !== newHum) {
-                        this.log.info(`💧 ${humDevice.name}: ${newHum}%`);
+                        this.log.info(`${humDevice.name}: ${newHum}%`);
                     }
                     this.onDeviceStatusUpdate?.(humDevice);
                 }
 
-                const lightDevice = this.devices.get(`sensor_light_${sensor.ID}`);
-                if (lightDevice) {
-                    const oldLight = (lightDevice.status as any).value;
-                    const newLight = parseInt(sensor.DOMUS.LHT || '100');
-                    (lightDevice.status as any).value = newLight;
+                const lightSensorDevice = this.devices.get(`sensor_light_${sensor.ID}`);
+                if (lightSensorDevice && lightSensorDevice.type === 'sensor') {
+                    const lightStatus = lightSensorDevice.status as SensorStatus;
+                    const oldLight = lightStatus.value;
+                    const newLight = parseInt(sensor.DOMUS.LHT ?? '100', 10);
+                    lightStatus.value = newLight;
                     if (oldLight !== newLight) {
-                        this.log.info(`☀️ ${lightDevice.name}: ${newLight}lux`);
+                        this.log.info(`${lightSensorDevice.name}: ${newLight}lux`);
                     }
-                    this.onDeviceStatusUpdate?.(lightDevice);
+                    this.onDeviceStatusUpdate?.(lightSensorDevice);
                 }
             }
         });
     }
 
-    private updateZoneStatuses(zones: any[]): void {
-        zones.forEach(zone => {
-            this.log.debug(`🚪 Aggiornamento zona ${zone.ID}: STA=${zone.STA}, BYP=${zone.BYP}, A=${zone.A}`);
+    private updateZoneStatuses(zones: KseniaZoneStatusRaw[]): void {
+        zones.forEach((zone: KseniaZoneStatusRaw): void => {
+            this.log.debug(`Zone update ${zone.ID}: STA=${zone.STA}, BYP=${zone.BYP}, A=${zone.A}`);
 
             const zoneDevice = this.devices.get(`zone_${zone.ID}`);
-            if (zoneDevice) {
-                const oldOpen = (zoneDevice.status as any).open;
-                const newOpen = zone.STA === 'A'; // A = Aperta/Allarme, R = Riposo
+            if (zoneDevice && zoneDevice.type === 'zone') {
+                const zoneStatus = zoneDevice.status as ZoneStatus;
+                const oldOpen = zoneStatus.open;
+                const newOpen = zone.STA === 'A';
 
-                (zoneDevice.status as any).open = newOpen;
-                (zoneDevice.status as any).bypassed = zone.BYP === 'YES';
-                (zoneDevice.status as any).armed = zone.A === 'Y';
-                (zoneDevice.status as any).fault = zone.FM === 'T';
+                zoneStatus.open = newOpen;
+                zoneStatus.bypassed = zone.BYP === 'YES';
+                zoneStatus.armed = zone.A === 'Y';
+                zoneStatus.fault = zone.FM === 'T';
 
                 if (oldOpen !== newOpen) {
-                    this.log.info(`🚪 ${zoneDevice.name}: ${newOpen ? 'APERTA/ALLARME' : 'RIPOSO'}`);
+                    this.log.info(`${zoneDevice.name}: ${newOpen ? 'OPEN/ALARM' : 'IDLE'}`);
                 }
 
                 this.onDeviceStatusUpdate?.(zoneDevice);
@@ -697,12 +734,10 @@ export class KseniaWebSocketClient {
     }
 
     private mapCoverPosition(sta: string, pos?: string): number {
-        // Per cancelli e tapparelle, converti lo stato in posizione percentuale
         if (pos !== undefined && pos !== '') {
-            return parseInt(pos);
+            return parseInt(pos, 10);
         }
 
-        // Fallback basato sullo stato
         switch (sta?.toUpperCase()) {
             case 'OPEN':
             case 'UP':
@@ -711,59 +746,62 @@ export class KseniaWebSocketClient {
             case 'DOWN':
                 return 0;
             case 'STOP':
-                return 50; // Posizione intermedia se ferma
+                return 50;
             default:
                 return 0;
         }
     }
 
-    private mapCoverState(sta: string, pos?: string, tpos?: string): 'stopped' | 'opening' | 'closing' {
-        // Se abbiamo posizione e target position, verifichiamo se è in movimento
+    private mapCoverState(
+        sta: string,
+        pos?: string,
+        tpos?: string,
+    ): 'stopped' | 'opening' | 'closing' {
         if (pos !== undefined && tpos !== undefined) {
-            const currentPos = parseInt(pos);
-            const targetPos = parseInt(tpos);
+            const currentPos = parseInt(pos, 10);
+            const targetPos = parseInt(tpos, 10);
 
             if (currentPos === targetPos) {
-                return 'stopped'; // Ferma nella posizione target
+                return 'stopped';
             } else if (currentPos < targetPos) {
-                return 'opening'; // Si sta aprendo (verso 100)
+                return 'opening';
             } else {
-                return 'closing'; // Si sta chiudendo (verso 0)
+                return 'closing';
             }
         }
 
-        // Fallback alla logica precedente se non abbiamo posizioni
         switch (sta?.toUpperCase()) {
             case 'UP':
-            case 'OPEN': return 'opening';
+            case 'OPEN':
+                return 'opening';
             case 'DOWN':
-            case 'CLOSE': return 'closing';
+            case 'CLOSE':
+                return 'closing';
             case 'STOP':
-            default: return 'stopped';
+            default:
+                return 'stopped';
         }
     }
 
-    // Metodi per controllare i dispositivi
     public async switchLight(lightId: string, on: boolean): Promise<void> {
-        if (!this.idLogin) throw new Error('Non connesso');
+        if (!this.idLogin) throw new Error('Not connected');
 
         const systemOutputId = lightId.replace('light_', '');
 
-        // Usa formato corretto con sostituzione automatica di ID_LOGIN e PIN
         await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
-            ID_LOGIN: 'true', // Sarà sostituito con this.idLogin
-            PIN: 'true',       // Sarà sostituito con this.pin
+            ID_LOGIN: 'true',
+            PIN: 'true',
             OUTPUT: {
                 ID: systemOutputId,
-                STA: on ? 'ON' : 'OFF'
-            }
+                STA: on ? 'ON' : 'OFF',
+            },
         });
 
-        this.log.info(`💡 Comando luce inviato: Output ${systemOutputId} -> ${on ? 'ON' : 'OFF'}`);
+        this.log.info(`Light command sent: Output ${systemOutputId} -> ${on ? 'ON' : 'OFF'}`);
     }
 
     public async dimLight(lightId: string, brightness: number): Promise<void> {
-        if (!this.idLogin) throw new Error('Non connesso');
+        if (!this.idLogin) throw new Error('Not connected');
 
         const systemOutputId = lightId.replace('light_', '');
         await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
@@ -771,26 +809,25 @@ export class KseniaWebSocketClient {
             PIN: 'true',
             OUTPUT: {
                 ID: systemOutputId,
-                STA: brightness.toString()
-            }
+                STA: brightness.toString(),
+            },
         });
 
-        this.log.info(`💡 Comando dimmer inviato: Output ${systemOutputId} -> ${brightness}%`);
+        this.log.info(`Dimmer command sent: Output ${systemOutputId} -> ${brightness}%`);
     }
 
     public async moveCover(coverId: string, position: number): Promise<void> {
-        if (!this.idLogin) throw new Error('Non connesso');
+        if (!this.idLogin) throw new Error('Not connected');
 
         const systemOutputId = coverId.replace('cover_', '');
 
-        // Determina il comando basato sulla posizione
         let command: string;
         if (position === 0) {
-            command = 'DOWN';  // Chiudi
+            command = 'DOWN';
         } else if (position === 100) {
-            command = 'UP';    // Apri
+            command = 'UP';
         } else {
-            command = position.toString(); // Posizione specifica per tapparelle
+            command = position.toString();
         }
 
         await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
@@ -798,63 +835,75 @@ export class KseniaWebSocketClient {
             PIN: 'true',
             OUTPUT: {
                 ID: systemOutputId,
-                STA: command
-            }
+                STA: command,
+            },
         });
 
-        this.log.info(`🪟 Comando cover inviato: Output ${systemOutputId} -> ${command}`);
+        this.log.info(`Cover command sent: Output ${systemOutputId} -> ${command}`);
     }
 
-
-
-    public async setThermostatMode(thermostatId: string, mode: 'off' | 'heat' | 'cool' | 'auto'): Promise<void> {
-        if (!this.idLogin) throw new Error('Non connesso');
+    public async setThermostatMode(
+        thermostatId: string,
+        mode: 'off' | 'heat' | 'cool' | 'auto',
+    ): Promise<void> {
+        if (!this.idLogin) throw new Error('Not connected');
 
         let modeValue: string;
         switch (mode) {
-            case 'heat': modeValue = '1'; break;
-            case 'cool': modeValue = '2'; break;
-            case 'auto': modeValue = '3'; break;
-            default: modeValue = '0'; break; // off
+            case 'heat':
+                modeValue = '1';
+                break;
+            case 'cool':
+                modeValue = '2';
+                break;
+            case 'auto':
+                modeValue = '3';
+                break;
+            default:
+                modeValue = '0';
+                break;
         }
 
         await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
             ID_LOGIN: this.idLogin,
             ID_THERMOSTAT: thermostatId.replace('thermostat_', ''),
-            MODE: modeValue
+            MODE: modeValue,
         });
     }
 
     public async setThermostatTemperature(thermostatId: string, temperature: number): Promise<void> {
-        if (!this.idLogin) throw new Error('Non connesso');
+        if (!this.idLogin) throw new Error('Not connected');
 
         await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
             ID_LOGIN: this.idLogin,
             ID_THERMOSTAT: thermostatId.replace('thermostat_', ''),
-            TARGET_TEMP: temperature.toString()
+            TARGET_TEMP: temperature.toString(),
         });
     }
 
     public async triggerScenario(scenarioId: string): Promise<void> {
-        if (!this.idLogin) throw new Error('Non connesso');
+        if (!this.idLogin) throw new Error('Not connected');
 
         const systemScenarioId = scenarioId.replace('scenario_', '');
         await this.sendKseniaCommand('CMD_USR', 'CMD_EXE_SCENARIO', {
             ID_LOGIN: 'true',
             PIN: 'true',
             SCENARIO: {
-                ID: systemScenarioId
-            }
+                ID: systemScenarioId,
+            },
         });
-        this.log.info(`🎬 Scenario ${systemScenarioId} eseguito`);
+        this.log.info(`Scenario ${systemScenarioId} executed`);
     }
 
-    private async sendKseniaCommand(cmd: string, payloadType: string, payload: any): Promise<void> {
+    private async sendKseniaCommand(
+        cmd: string,
+        payloadType: string,
+        payload: KseniaCommandPayload,
+    ): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket non connesso');
+            throw new Error('WebSocket not connected');
         }
 
-        // Implementa la sostituzione automatica di ID_LOGIN e PIN come fa lares4-ts
         const processedPayload = this.buildPayload(payload);
 
         const id = Math.floor(Math.random() * 100000).toString();
@@ -866,35 +915,31 @@ export class KseniaWebSocketClient {
             CMD: cmd,
             ID: id,
             PAYLOAD_TYPE: payloadType,
-            PAYLOAD: processedPayload,
+            PAYLOAD: processedPayload as KseniaMessagePayload,
             TIMESTAMP: timestamp,
-            CRC_16: '0x0000'
+            CRC_16: '0x0000',
         };
 
-        // Calcola il CRC del messaggio prima di inviarlo
         message.CRC_16 = this.calculateCRC16(JSON.stringify(message));
 
         const jsonMessage = JSON.stringify(message);
 
-        // Filtra i log di invio per PING/HEARTBEAT
         const isPing = cmd === 'PING' || payloadType === 'HEARTBEAT';
 
         if (this.options.debug || !isPing) {
-            this.log.info(`📤 Invio: ${jsonMessage}`);
+            this.log.info(`Sending: ${jsonMessage}`);
         } else {
-            this.log.debug(`📤 Debug: ${jsonMessage}`);
+            this.log.debug(`Debug: ${jsonMessage}`);
         }
 
-        // Log esteso per debugging comandi critici
-        if (cmd === 'CMD_USR') {
-            this.log.info(`🔧 DEBUG - Comando ${payloadType}: ${JSON.stringify(payload, null, 2)}`);
+        if (cmd === 'CMD_USR' && this.options.debug) {
+            this.log.debug(`DEBUG - Command ${payloadType}: ${JSON.stringify(payload, null, 2)}`);
         }
 
         this.ws.send(jsonMessage);
     }
 
-    private buildPayload(payload: any): any {
-        // Implementa la logica di sostituzione della libreria lares4-ts
+    private buildPayload(payload: KseniaCommandPayload): KseniaCommandPayload {
         return {
             ...payload,
             ...(payload?.ID_LOGIN === 'true' && { ID_LOGIN: this.idLogin }),
@@ -904,46 +949,61 @@ export class KseniaWebSocketClient {
 
     private async sendMessage(message: KseniaMessage): Promise<void> {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket non connesso');
+            throw new Error('WebSocket not connected');
         }
 
         const messageStr = JSON.stringify(message);
-        // Mostra sempre i messaggi inviati per debug
-        this.log.info(`📤 Invio: ${messageStr}`);
+        this.log.info(`Sending: ${messageStr}`);
 
         this.ws.send(messageStr);
     }
 
     private calculateCRC16(jsonString: string): string {
-        const utf8 = [];
+        const utf8: number[] = [];
         for (let i = 0; i < jsonString.length; i++) {
             const charcode = jsonString.charCodeAt(i);
-            if (charcode < 0x80) utf8.push(charcode);
-            else if (charcode < 0x800) {
+            if (charcode < 0x80) {
+                utf8.push(charcode);
+            } else if (charcode < 0x800) {
                 utf8.push(0xc0 | (charcode >> 6), 0x80 | (charcode & 0x3f));
             } else if (charcode < 0xd800 || charcode >= 0xe000) {
-                utf8.push(0xe0 | (charcode >> 12), 0x80 | ((charcode >> 6) & 0x3f), 0x80 | (charcode & 0x3f));
+                utf8.push(
+                    0xe0 | (charcode >> 12),
+                    0x80 | ((charcode >> 6) & 0x3f),
+                    0x80 | (charcode & 0x3f),
+                );
             } else {
                 i++;
-                const surrogate = 0x10000 + (((charcode & 0x3ff) << 10) | (jsonString.charCodeAt(i) & 0x3f));
-                utf8.push(0xf0 | (surrogate >> 18), 0x80 | ((surrogate >> 12) & 0x3f), 0x80 | ((surrogate >> 6) & 0x3f), 0x80 | (surrogate & 0x3f));
+                const surrogate =
+                    0x10000 + (((charcode & 0x3ff) << 10) | (jsonString.charCodeAt(i) & 0x3f));
+                utf8.push(
+                    0xf0 | (surrogate >> 18),
+                    0x80 | ((surrogate >> 12) & 0x3f),
+                    0x80 | ((surrogate >> 6) & 0x3f),
+                    0x80 | (surrogate & 0x3f),
+                );
             }
         }
 
-        const SEME_CRC_16_JSON = 0xFFFF;
+        const SEME_CRC_16_JSON = 0xffff;
         const GEN_POLY_JSON = 0x1021;
         const CRC_16 = '"CRC_16"';
-        const dataLen = jsonString.lastIndexOf(CRC_16) + CRC_16.length + (utf8.length - jsonString.length);
+        const dataLen =
+            jsonString.lastIndexOf(CRC_16) + CRC_16.length + (utf8.length - jsonString.length);
 
         let crc = SEME_CRC_16_JSON;
         for (let i = 0; i < dataLen; i++) {
             const charCode = utf8[i];
-            for (let i_CRC = 0x80; i_CRC; i_CRC >>= 1) {
-                const flag_CRC = (crc & 0x8000) ? 1 : 0;
+            for (let iCrc = 0x80; iCrc; iCrc >>= 1) {
+                const flagCrc = crc & 0x8000 ? 1 : 0;
                 crc <<= 1;
-                crc = (crc & 0xFFFF);
-                if (charCode & i_CRC) { crc++; }
-                if (flag_CRC) { crc ^= GEN_POLY_JSON; }
+                crc = crc & 0xffff;
+                if (charCode & iCrc) {
+                    crc++;
+                }
+                if (flagCrc) {
+                    crc ^= GEN_POLY_JSON;
+                }
             }
         }
 
@@ -955,12 +1015,15 @@ export class KseniaWebSocketClient {
             clearInterval(this.heartbeatTimer);
         }
 
-        this.heartbeatTimer = setInterval(() => {
+        this.heartbeatTimer = setInterval((): void => {
             if (this.isConnected && this.idLogin) {
                 this.sendKseniaCommand('PING', 'HEARTBEAT', {
-                    ID_LOGIN: this.idLogin
-                }).catch(err => {
-                    this.log.error('❌ Errore heartbeat:', err);
+                    ID_LOGIN: this.idLogin,
+                }).catch((err: unknown): void => {
+                    this.log.error(
+                        'Heartbeat error:',
+                        err instanceof Error ? err.message : String(err),
+                    );
                 });
             }
         }, this.options.heartbeatInterval);
@@ -971,10 +1034,13 @@ export class KseniaWebSocketClient {
             clearTimeout(this.reconnectTimer);
         }
 
-        this.reconnectTimer = setTimeout(() => {
-            this.log.info('🔄 Tentativo riconnessione...');
-            this.connect().catch(err => {
-                this.log.error('❌ Riconnessione fallita:', err);
+        this.reconnectTimer = setTimeout((): void => {
+            this.log.info('Attempting reconnection...');
+            this.connect().catch((err: unknown): void => {
+                this.log.error(
+                    'Reconnection failed:',
+                    err instanceof Error ? err.message : String(err),
+                );
                 this.scheduleReconnect();
             });
         }, this.options.reconnectInterval);
@@ -993,7 +1059,6 @@ export class KseniaWebSocketClient {
         this.isConnected = false;
     }
 
-    // Metodo helper per mappare le modalità del termostato
     private mapThermostatMode(mode: string): 'off' | 'heat' | 'cool' | 'auto' {
         switch (mode?.toLowerCase()) {
             case 'heat':
@@ -1015,26 +1080,31 @@ export class KseniaWebSocketClient {
         }
     }
 
-    // Nuovo metodo per gestire le temperature del sistema
-    private updateSystemTemperatures(systemData: any[]): void {
-        systemData.forEach(system => {
+    private updateSystemTemperatures(systemData: SystemTemperatureData[]): void {
+        systemData.forEach((system: SystemTemperatureData): void => {
             if (this.options.debug) {
-                this.log.debug(`🌡️ Dati sistema ${system.ID}: ${JSON.stringify(system)}`);
+                this.log.debug(`System data ${system.ID}: ${JSON.stringify(system)}`);
             }
 
             if (system.TEMP) {
-                const internalTemp = system.TEMP.IN ? parseFloat(system.TEMP.IN.replace('+', '')) : undefined;
-                const externalTemp = system.TEMP.OUT ? parseFloat(system.TEMP.OUT.replace('+', '')) : undefined;
+                const internalTemp = system.TEMP.IN
+                    ? parseFloat(system.TEMP.IN.replace('+', ''))
+                    : undefined;
+                const externalTemp = system.TEMP.OUT
+                    ? parseFloat(system.TEMP.OUT.replace('+', ''))
+                    : undefined;
 
-                // Log delle temperature solo se sono cambiate significativamente o in debug
-                let logTemperatures = this.options.debug;
+                let logTemperatures = this.options.debug ?? false;
 
-                // Controlla se ci sono cambiamenti significativi (>= 0.5°C) nei termostati
                 if (internalTemp !== undefined) {
-                    this.devices.forEach((device, deviceId) => {
+                    this.devices.forEach((device: KseniaDevice): void => {
                         if (device.type === 'thermostat') {
-                            const oldCurrentTemp = (device.status as any).currentTemperature;
-                            if (oldCurrentTemp === undefined || Math.abs(oldCurrentTemp - internalTemp) >= 0.5) {
+                            const thermostatStatus = device.status as ThermostatStatus;
+                            const oldCurrentTemp = thermostatStatus.currentTemperature;
+                            if (
+                                oldCurrentTemp === undefined ||
+                                Math.abs(oldCurrentTemp - internalTemp) >= 0.5
+                            ) {
                                 logTemperatures = true;
                             }
                         }
@@ -1042,26 +1112,35 @@ export class KseniaWebSocketClient {
                 }
 
                 if (logTemperatures) {
-                    this.log.info(`🌡️ Temperature sistema: Interna=${internalTemp}°C, Esterna=${externalTemp}°C`);
+                    this.log.info(
+                        `System temperatures: Internal=${internalTemp}C, External=${externalTemp}C`,
+                    );
                 }
 
-                // Aggiorna tutti i termostati con la temperatura interna del sistema
-                // (assumendo che i termostati utilizzino la temperatura interna come riferimento)
                 if (internalTemp !== undefined) {
-                    this.devices.forEach((device, deviceId) => {
+                    this.devices.forEach((device: KseniaDevice): void => {
                         if (device.type === 'thermostat') {
-                            const oldCurrentTemp = (device.status as any).currentTemperature;
-                            (device.status as any).currentTemperature = internalTemp;
+                            const thermostatStatus = device.status as ThermostatStatus;
+                            const oldCurrentTemp = thermostatStatus.currentTemperature;
+                            thermostatStatus.currentTemperature = internalTemp;
 
-                            // Se non abbiamo ancora una temperatura target, usiamo quella corrente + 1°C come ragionevole default
-                            if ((device.status as any).targetTemperature === undefined || (device.status as any).targetTemperature === null) {
-                                (device.status as any).targetTemperature = Math.round(internalTemp + 1);
-                                this.log.info(`🌡️ ${device.name}: Impostata temperatura target iniziale a ${(device.status as any).targetTemperature}°C`);
+                            if (
+                                thermostatStatus.targetTemperature === undefined ||
+                                thermostatStatus.targetTemperature === null
+                            ) {
+                                thermostatStatus.targetTemperature = Math.round(internalTemp + 1);
+                                this.log.info(
+                                    `${device.name}: Initial target temperature set to ${thermostatStatus.targetTemperature}C`,
+                                );
                             }
 
-                            // Log solo per cambiamenti significativi
-                            if (oldCurrentTemp === undefined || Math.abs(oldCurrentTemp - internalTemp) >= 0.5) {
-                                this.log.info(`🌡️ ${device.name}: Temperatura corrente aggiornata a ${internalTemp}°C`);
+                            if (
+                                oldCurrentTemp === undefined ||
+                                Math.abs(oldCurrentTemp - internalTemp) >= 0.5
+                            ) {
+                                this.log.info(
+                                    `${device.name}: Current temperature updated to ${internalTemp}C`,
+                                );
                             }
 
                             this.onDeviceStatusUpdate?.(device);
@@ -1071,4 +1150,4 @@ export class KseniaWebSocketClient {
             }
         });
     }
-} 
+}

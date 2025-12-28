@@ -5,14 +5,25 @@ import type {
     Logger,
     PlatformAccessory,
     PlatformConfig,
-    Service
+    Service,
 } from 'homebridge';
 import * as fs from 'fs';
 import * as path from 'path';
 
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { KseniaWebSocketClient } from './websocket-client';
-import { KseniaDevice } from './types';
+import type {
+    KseniaDevice,
+    KseniaLight,
+    KseniaCover,
+    KseniaThermostat,
+    KseniaSensor,
+    KseniaZone,
+    KseniaScenario,
+    MqttConfig,
+    RoomMappingConfig,
+} from './types';
+import { MqttBridge } from './mqtt-bridge';
 import { LightAccessory } from './accessories/light-accessory';
 import { CoverAccessory } from './accessories/cover-accessory';
 import { SensorAccessory } from './accessories/sensor-accessory';
@@ -20,6 +31,20 @@ import { ZoneAccessory } from './accessories/zone-accessory';
 import { ThermostatAccessory } from './accessories/thermostat-accessory';
 import { ScenarioAccessory } from './accessories/scenario-accessory';
 
+/**
+ * Union type for all accessory handlers
+ */
+export type AccessoryHandler =
+    | LightAccessory
+    | CoverAccessory
+    | SensorAccessory
+    | ZoneAccessory
+    | ThermostatAccessory
+    | ScenarioAccessory;
+
+/**
+ * Platform configuration interface
+ */
 export interface Lares4Config extends PlatformConfig {
     ip?: string;
     sender?: string;
@@ -35,23 +60,46 @@ export interface Lares4Config extends PlatformConfig {
     excludeSensors?: string[];
     excludeScenarios?: string[];
     customNames?: {
-        zones?: { [id: string]: string };
-        outputs?: { [id: string]: string };
-        sensors?: { [id: string]: string };
-        scenarios?: { [id: string]: string };
+        zones?: Record<string, string>;
+        outputs?: Record<string, string>;
+        sensors?: Record<string, string>;
+        scenarios?: Record<string, string>;
     };
-    // Nuovi parametri configurabili
-    scenarioAutoOffDelay?: number;        // Timeout auto-spegnimento scenari (default 500ms)
-    coverStepSize?: number;               // Dimensione step simulazione tapparelle (default 5%)
+    scenarioAutoOffDelay?: number;
+    coverStepSize?: number;
     temperatureDefaults?: {
-        target?: number;                  // Temperatura target default termostati (default 21°C)
-        min?: number;                     // Temperatura minima termostati (default 10°C)
-        max?: number;                     // Temperatura massima termostati (default 38°C)
-        step?: number;                    // Step temperatura termostati (default 0.5°C)
+        target?: number;
+        min?: number;
+        max?: number;
+        step?: number;
     };
-    devicesSummaryDelay?: number;         // Ritardo stampa riassunto dispositivi (default 2000ms)
+    devicesSummaryDelay?: number;
+    mqtt?: MqttConfig;
+    roomMapping?: RoomMappingConfig;
 }
 
+/**
+ * Device list structure for configuration UI
+ */
+interface DeviceListItem {
+    id: string;
+    name: string;
+    type: string;
+    description: string;
+    fullId: string;
+}
+
+interface DevicesList {
+    zones: DeviceListItem[];
+    outputs: DeviceListItem[];
+    sensors: DeviceListItem[];
+    scenarios: DeviceListItem[];
+    lastUpdated: string;
+}
+
+/**
+ * Main platform class implementing DynamicPlatformPlugin
+ */
 export class Lares4Platform implements DynamicPlatformPlugin {
     public readonly Service: typeof Service;
     public readonly Characteristic: typeof Characteristic;
@@ -59,14 +107,13 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     public readonly accessories: Map<string, PlatformAccessory> = new Map();
     public readonly discoveredCacheUUIDs: string[] = [];
 
-    // Map per tenere traccia degli handlers degli accessori
-    private readonly accessoryHandlers: Map<string, any> = new Map();
+    public readonly accessoryHandlers: Map<string, AccessoryHandler> = new Map();
 
     public wsClient?: KseniaWebSocketClient;
+    public mqttBridge?: MqttBridge;
 
-    // Cache dei dispositivi per la configurazione UI
-    private discoveredDevices: Map<string, KseniaDevice> = new Map();
-    private devicesFilePath: string;
+    private readonly discoveredDevices: Map<string, KseniaDevice> = new Map();
+    private readonly devicesFilePath: string;
     private summaryTimeout?: NodeJS.Timeout;
 
     constructor(
@@ -77,38 +124,42 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.Service = api.hap.Service;
         this.Characteristic = api.hap.Characteristic;
 
-        // Percorso per salvare la lista dei dispositivi
         this.devicesFilePath = path.join(this.api.user.storagePath(), 'klares4-devices.json');
 
         if (!config) {
-            this.log.error('❌ Nessuna configurazione trovata');
+            this.log.error('No configuration found');
             return;
         }
 
         if (!config.ip) {
-            this.log.error('❌ Indirizzo IP mancante nella configurazione');
+            this.log.error('IP address missing in configuration');
             return;
         }
 
         if (!config.pin) {
-            this.log.error('❌ PIN mancante nella configurazione');
+            this.log.error('PIN missing in configuration');
             return;
         }
 
-        this.log.debug('🔧 Inizializzazione platform completata:', this.config.name);
+        this.log.debug('Platform initialization completed:', this.config.name);
 
-        this.api.on('didFinishLaunching', async () => {
-            this.log.debug('🚀 Callback didFinishLaunching eseguito');
-            await this.initializeLares4();
+        this.api.on('didFinishLaunching', (): void => {
+            this.log.debug('didFinishLaunching callback executed');
+            this.initializeLares4().catch((error: unknown): void => {
+                this.log.error(
+                    'Failed to initialize Lares4:',
+                    error instanceof Error ? error.message : String(error),
+                );
+            });
         });
     }
 
     private async initializeLares4(): Promise<void> {
         try {
-            this.log.info('🔌 Inizializzazione connessione Ksenia Lares4...');
+            this.log.info('Initializing Ksenia Lares4 connection...');
 
-            const useHttps = this.config.https !== false; // Default true
-            const port = this.config.port || (useHttps ? 443 : 80);
+            const useHttps = this.config.https !== false;
+            const port = this.config.port ?? (useHttps ? 443 : 80);
 
             if (!this.config.ip || !this.config.pin) {
                 this.log.error('Configurazione mancante: IP e PIN sono obbligatori');
@@ -116,80 +167,93 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             }
 
             this.wsClient = new KseniaWebSocketClient(
-                this.config.ip,
+                this.config.ip!,
                 port,
                 useHttps,
-                this.config.sender || 'homebridge',
-                this.config.pin,
+                this.config.sender ?? 'homebridge',
+                this.config.pin!,
                 this.log,
                 {
-                    debug: this.config.debug || false,
-                    reconnectInterval: this.config.reconnectInterval || 5000,
-                    heartbeatInterval: this.config.heartbeatInterval || 30000
-                }
+                    debug: this.config.debug ?? false,
+                    reconnectInterval: this.config.reconnectInterval ?? 5000,
+                    heartbeatInterval: this.config.heartbeatInterval ?? 30000,
+                },
             );
 
-            // Setup event handlers
-            this.wsClient.onDeviceDiscovered = (device) => this.handleDeviceDiscovered(device);
-            this.wsClient.onDeviceStatusUpdate = (device) => this.handleDeviceStatusUpdate(device);
+            this.wsClient.onDeviceDiscovered = (device: KseniaDevice): void => {
+                this.handleDeviceDiscovered(device);
+            };
+            this.wsClient.onDeviceStatusUpdate = (device: KseniaDevice): void => {
+                this.handleDeviceStatusUpdate(device);
+            };
 
             await this.wsClient.connect();
 
-            this.log.info('✅ Ksenia Lares4 inizializzato con successo');
+            if (this.config.mqtt?.enabled) {
+                this.mqttBridge = new MqttBridge(this.config.mqtt, this.log, this);
+                this.log.info('MQTT Bridge initialized');
+            }
 
-        } catch (error) {
-            this.log.error('❌ Errore inizializzazione Lares4:', error);
+            this.log.info('Ksenia Lares4 initialized successfully');
+        } catch (error: unknown) {
+            this.log.error(
+                'Lares4 initialization error:',
+                error instanceof Error ? error.message : String(error),
+            );
         }
     }
 
     private handleDeviceDiscovered(device: KseniaDevice): void {
-        // Aggiungi il dispositivo alla cache per la UI di configurazione
         this.discoveredDevices.set(device.id, device);
-
-        // Salva la lista aggiornata dei dispositivi
         this.saveDevicesList();
 
-        // Controlla se il dispositivo deve essere escluso
         if (this.shouldExcludeDevice(device)) {
-            this.log.info(`⏭️ Dispositivo escluso: ${device.type} - ${device.name}`);
+            this.log.info(`Device excluded: ${device.type} - ${device.name}`);
             return;
         }
 
-        // Applica nome personalizzato se presente
         const customName = this.getCustomName(device);
         if (customName) {
-            device.name = customName;
-            device.description = customName;
+            const mutableDevice = device as { name: string; description: string };
+            mutableDevice.name = customName;
+            mutableDevice.description = customName;
         }
 
-        this.log.info(`🔍 Dispositivo scoperto: ${device.type} - ${device.name}`);
+        this.log.info(`Device discovered: ${device.type} - ${device.name}`);
         this.addAccessory(device);
     }
 
     private saveDevicesList(): void {
         try {
-            const devicesList = {
-                zones: [] as any[],
-                outputs: [] as any[],
-                sensors: [] as any[],
-                scenarios: [] as any[],
-                lastUpdated: new Date().toISOString()
+            const devicesList: DevicesList = {
+                zones: [],
+                outputs: [],
+                sensors: [],
+                scenarios: [],
+                lastUpdated: new Date().toISOString(),
             };
 
             for (const device of this.discoveredDevices.values()) {
-                const id = device.id.replace(/^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)/, '');
+                const id = device.id.replace(
+                    /^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)/,
+                    '',
+                );
 
-                const deviceInfo = {
+                const deviceInfo: DeviceListItem = {
                     id: id,
                     name: device.name,
                     type: device.type,
                     description: device.description || device.name,
-                    fullId: device.id
+                    fullId: device.id,
                 };
 
                 if (device.type === 'zone') {
                     devicesList.zones.push(deviceInfo);
-                } else if (device.type === 'light' || device.type === 'cover' || device.type === 'thermostat') {
+                } else if (
+                    device.type === 'light' ||
+                    device.type === 'cover' ||
+                    device.type === 'thermostat'
+                ) {
                     devicesList.outputs.push(deviceInfo);
                 } else if (device.type === 'sensor') {
                     devicesList.sensors.push(deviceInfo);
@@ -198,94 +262,224 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 }
             }
 
-            // Ordina per nome
             devicesList.zones.sort((a, b) => a.name.localeCompare(b.name));
             devicesList.outputs.sort((a, b) => a.name.localeCompare(b.name));
             devicesList.sensors.sort((a, b) => a.name.localeCompare(b.name));
             devicesList.scenarios.sort((a, b) => a.name.localeCompare(b.name));
 
             fs.writeFileSync(this.devicesFilePath, JSON.stringify(devicesList, null, 2));
-            this.log.debug(`📝 Lista dispositivi salvata: ${this.discoveredDevices.size} dispositivi`);
+            this.log.debug(`Devices list saved: ${this.discoveredDevices.size} devices`);
 
-            // Ritarda la stampa del riassunto per evitare duplicati durante la scoperta
             if (this.summaryTimeout) {
                 clearTimeout(this.summaryTimeout);
             }
-            const summaryDelay = this.config.devicesSummaryDelay || 2000;
-            this.summaryTimeout = setTimeout(() => {
+            const summaryDelay = this.config.devicesSummaryDelay ?? 2000;
+            this.summaryTimeout = setTimeout((): void => {
                 this.printDevicesSummary(devicesList);
                 this.summaryTimeout = undefined;
-            }, summaryDelay); // Aspetta tempo configurabile dopo l'ultimo dispositivo scoperto
-        } catch (error) {
-            this.log.error('❌ Errore nel salvare la lista dispositivi:', error);
+            }, summaryDelay);
+        } catch (error: unknown) {
+            this.log.error(
+                'Error saving devices list:',
+                error instanceof Error ? error.message : String(error),
+            );
         }
     }
 
-    private printDevicesSummary(devicesList: any): void {
+    private printDevicesSummary(devicesList: DevicesList): void {
         this.log.info('');
-        this.log.info('📋 ========== DISPOSITIVI DISPONIBILI ==========');
-        this.log.info('💡 Per escludere dispositivi, usa i seguenti ID:');
+        this.log.info('========== AVAILABLE DEVICES ==========');
+        this.log.info('Use the following IDs to exclude devices or configure MQTT rooms:');
         this.log.info('');
 
         if (devicesList.outputs.length > 0) {
-            this.log.info('🔌 OUTPUT (Luci, Tapparelle, Termostati):');
-            devicesList.outputs.forEach((device: any) => {
-                const icon = device.type === 'thermostat' ? '🌡️' : device.type === 'light' ? '💡' : '🪟';
-                this.log.info(`   ID: ${device.id.padEnd(3)} - ${icon} ${device.name}`);
+            this.log.info('OUTPUTS (Lights, Covers, Thermostats):');
+            devicesList.outputs.forEach((device: DeviceListItem): void => {
+                const typeLabel =
+                    device.type === 'thermostat'
+                        ? 'THERM'
+                        : device.type === 'light'
+                            ? 'LIGHT'
+                            : 'COVER';
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - [${typeLabel}] ${device.name}`);
             });
             this.log.info('');
         }
 
         if (devicesList.zones.length > 0) {
-            this.log.info('🚪 ZONE (Sensori di Sicurezza):');
-            devicesList.zones.forEach((device: any) => {
-                this.log.info(`   ID: ${device.id.padEnd(3)} - 🚪 ${device.name}`);
+            this.log.info('ZONES (Security Sensors):');
+            devicesList.zones.forEach((device: DeviceListItem): void => {
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - [ZONE] ${device.name}`);
             });
             this.log.info('');
         }
 
         if (devicesList.sensors.length > 0) {
-            this.log.info('🌡️ SENSORI (Temperatura, Umidità, Luminosità):');
-            devicesList.sensors.forEach((device: any) => {
-                const icon = device.name.includes('Temperatura') ? '🌡️' :
-                    device.name.includes('Umidità') ? '💧' : '☀️';
-                this.log.info(`   ID: ${device.id.padEnd(3)} - ${icon} ${device.name}`);
+            this.log.info('SENSORS (Temperature, Humidity, Light):');
+            devicesList.sensors.forEach((device: DeviceListItem): void => {
+                let typeLabel = 'SENSOR';
+                if (device.name.includes('Temperatura')) {
+                    typeLabel = 'TEMP';
+                } else if (device.name.includes('Umidita')) {
+                    typeLabel = 'HUM';
+                } else if (device.name.includes('Luminosita')) {
+                    typeLabel = 'LUX';
+                }
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - [${typeLabel}] ${device.name}`);
             });
             this.log.info('');
         }
 
         if (devicesList.scenarios.length > 0) {
-            this.log.info('🎬 SCENARI (Automazioni):');
-            devicesList.scenarios.forEach((device: any) => {
-                this.log.info(`   ID: ${device.id.padEnd(3)} - 🎬 ${device.name}`);
+            this.log.info('SCENARIOS (Automations):');
+            devicesList.scenarios.forEach((device: DeviceListItem): void => {
+                this.log.info(`   ID: ${device.fullId.padEnd(20)} - [SCENE] ${device.name}`);
             });
             this.log.info('');
         }
 
-        this.log.info('📁 Lista completa salvata in: ' + this.devicesFilePath);
-        this.log.info('🔧 Usa questi ID nella configurazione per escludere dispositivi');
-        this.log.info('===============================================');
+        this.log.info('Full list saved to: ' + this.devicesFilePath);
+        this.log.info('Use these IDs in configuration to exclude devices');
+        this.log.info('Or to configure MQTT rooms in Homebridge UI');
+        this.log.info('================================================');
         this.log.info('');
+
+        this.generateRoomMappingExample(devicesList);
+    }
+
+    private generateRoomMappingExample(devicesList: DevicesList): void {
+        try {
+            const examplePath = path.join(
+                this.api.user.storagePath(),
+                'klares4-room-mapping-example.json',
+            );
+
+            const exampleConfig = {
+                roomMapping: {
+                    enabled: false,
+                    rooms: [
+                        {
+                            roomName: 'sala',
+                            devices: this.getExampleDevicesForRoom(devicesList, 'sala'),
+                        },
+                        {
+                            roomName: 'cucina',
+                            devices: this.getExampleDevicesForRoom(devicesList, 'cucina'),
+                        },
+                        {
+                            roomName: 'camera',
+                            devices: this.getExampleDevicesForRoom(devicesList, 'camera'),
+                        },
+                    ],
+                },
+                _note: 'This is an example file. Modify roomName and devices as needed.',
+                _availableDevices: {
+                    outputs: devicesList.outputs.map((d: DeviceListItem) => ({
+                        id: d.fullId,
+                        name: d.name,
+                        type: d.type,
+                    })),
+                    zones: devicesList.zones.map((d: DeviceListItem) => ({
+                        id: d.fullId,
+                        name: d.name,
+                        type: d.type,
+                    })),
+                    sensors: devicesList.sensors.map((d: DeviceListItem) => ({
+                        id: d.fullId,
+                        name: d.name,
+                        type: d.type,
+                    })),
+                    scenarios: devicesList.scenarios.map((d: DeviceListItem) => ({
+                        id: d.fullId,
+                        name: d.name,
+                        type: d.type,
+                    })),
+                },
+            };
+
+            fs.writeFileSync(examplePath, JSON.stringify(exampleConfig, null, 2));
+            this.log.info(`Room mapping example created: ${examplePath}`);
+        } catch (error: unknown) {
+            this.log.error(
+                'Error creating example file:',
+                error instanceof Error ? error.message : String(error),
+            );
+        }
+    }
+
+    private getExampleDevicesForRoom(
+        devicesList: DevicesList,
+        roomName: string,
+    ): Array<{ deviceId: string; deviceName: string }> {
+        const devices: Array<{ deviceId: string; deviceName: string }> = [];
+
+        switch (roomName) {
+            case 'sala': {
+                const salaDevices = [
+                    ...devicesList.sensors.slice(0, 2),
+                    ...devicesList.outputs.slice(0, 1),
+                ];
+                salaDevices.forEach((device: DeviceListItem): void => {
+                    devices.push({
+                        deviceId: device.fullId,
+                        deviceName: device.name,
+                    });
+                });
+                break;
+            }
+            case 'cucina': {
+                const cucinaDevices = [...devicesList.outputs.slice(1, 3)];
+                cucinaDevices.forEach((device: DeviceListItem): void => {
+                    devices.push({
+                        deviceId: device.fullId,
+                        deviceName: device.name,
+                    });
+                });
+                break;
+            }
+            case 'camera': {
+                const cameraDevices = [
+                    ...devicesList.zones.slice(0, 1),
+                    ...devicesList.outputs.slice(3, 4),
+                ];
+                cameraDevices.forEach((device: DeviceListItem): void => {
+                    devices.push({
+                        deviceId: device.fullId,
+                        deviceName: device.name,
+                    });
+                });
+                break;
+            }
+        }
+
+        return devices.slice(0, 3);
     }
 
     private shouldExcludeDevice(device: KseniaDevice): boolean {
-        const config = this.config as Lares4Config;
-        const id = device.id.replace(/^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)/, '');
+        const id = device.id.replace(
+            /^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)/,
+            '',
+        );
 
-        if (device.type === 'zone' && config.excludeZones?.includes(id)) {
-            this.log.info(`⏭️ Zona esclusa: ${device.name} (ID: ${id})`);
+        if (device.type === 'zone' && this.config.excludeZones?.includes(id)) {
+            this.log.info(`Zone excluded: ${device.name} (ID: ${id})`);
             return true;
         }
-        if ((device.type === 'light' || device.type === 'cover' || device.type === 'thermostat') && config.excludeOutputs?.includes(id)) {
-            this.log.info(`⏭️ Output escluso: ${device.name} (ID: ${id})`);
+        if (
+            (device.type === 'light' ||
+                device.type === 'cover' ||
+                device.type === 'thermostat') &&
+            this.config.excludeOutputs?.includes(id)
+        ) {
+            this.log.info(`Output excluded: ${device.name} (ID: ${id})`);
             return true;
         }
-        if (device.type === 'sensor' && config.excludeSensors?.includes(id)) {
-            this.log.info(`⏭️ Sensore escluso: ${device.name} (ID: ${id})`);
+        if (device.type === 'sensor' && this.config.excludeSensors?.includes(id)) {
+            this.log.info(`Sensor excluded: ${device.name} (ID: ${id})`);
             return true;
         }
-        if (device.type === 'scenario' && config.excludeScenarios?.includes(id)) {
-            this.log.info(`⏭️ Scenario escluso: ${device.name} (ID: ${id})`);
+        if (device.type === 'scenario' && this.config.excludeScenarios?.includes(id)) {
+            this.log.info(`Scenario excluded: ${device.name} (ID: ${id})`);
             return true;
         }
 
@@ -293,54 +487,56 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     }
 
     private getCustomName(device: KseniaDevice): string | undefined {
-        const config = this.config as Lares4Config;
-        const id = device.id.replace(/^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)/, '');
+        const id = device.id.replace(
+            /^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)/,
+            '',
+        );
 
         if (device.type === 'zone') {
-            return config.customNames?.zones?.[id];
+            return this.config.customNames?.zones?.[id];
         }
         if (device.type === 'light' || device.type === 'cover' || device.type === 'thermostat') {
-            return config.customNames?.outputs?.[id];
+            return this.config.customNames?.outputs?.[id];
         }
         if (device.type === 'sensor') {
-            const sensorName = config.customNames?.sensors?.[id];
+            const sensorName = this.config.customNames?.sensors?.[id];
             if (sensorName) {
-                // Mantieni il suffixo per i sensori multipli
                 if (device.id.includes('_temp_')) return `${sensorName} - Temperatura`;
-                if (device.id.includes('_hum_')) return `${sensorName} - Umidità`;
-                if (device.id.includes('_light_')) return `${sensorName} - Luminosità`;
+                if (device.id.includes('_hum_')) return `${sensorName} - Umidita`;
+                if (device.id.includes('_light_')) return `${sensorName} - Luminosita`;
             }
         }
         if (device.type === 'scenario') {
-            return config.customNames?.scenarios?.[id];
+            return this.config.customNames?.scenarios?.[id];
         }
 
         return undefined;
     }
 
     private handleDeviceStatusUpdate(device: KseniaDevice): void {
-        this.log.debug(`🔄 Aggiornamento stato dispositivo: ${device.name}`);
-
-        // Qui implementeremo l'aggiornamento dello stato degli accessori
+        this.log.debug(`Device status update: ${device.name}`);
         this.updateAccessory(device);
+
+        if (this.mqttBridge) {
+            this.mqttBridge.publishDeviceState(device);
+        }
     }
 
-    configureAccessory(accessory: PlatformAccessory): void {
-        this.log.info('🔧 Caricamento accessorio dalla cache:', accessory.displayName);
+    public configureAccessory(accessory: PlatformAccessory): void {
+        this.log.info('Loading accessory from cache:', accessory.displayName);
         this.accessories.set(accessory.UUID, accessory);
     }
 
-    // Metodi per la gestione degli accessori
-    addAccessory(device: KseniaDevice): void {
+    public addAccessory(device: KseniaDevice): void {
         const uuid = this.api.hap.uuid.generate(device.id);
         const existingAccessory = this.accessories.get(uuid);
 
         if (existingAccessory) {
-            this.log.info('🔄 Ripristino accessorio esistente dalla cache:', device.name);
+            this.log.info('Restoring existing accessory from cache:', device.name);
             existingAccessory.context.device = device;
             this.createAccessoryHandler(existingAccessory, device);
         } else {
-            this.log.info('🆕 Aggiunta nuovo accessorio:', device.name);
+            this.log.info('Adding new accessory:', device.name);
             const accessory = new this.api.platformAccessory(device.name, uuid);
             accessory.context.device = device;
             this.createAccessoryHandler(accessory, device);
@@ -349,7 +545,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         }
     }
 
-    updateAccessory(device: KseniaDevice): void {
+    public updateAccessory(device: KseniaDevice): void {
         const uuid = this.api.hap.uuid.generate(device.id);
         const accessory = this.accessories.get(uuid);
         const handler = this.accessoryHandlers.get(uuid);
@@ -357,9 +553,26 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         if (accessory && handler) {
             accessory.context.device = device;
 
-            // Chiama il metodo updateStatus dell'handler specifico
-            if (handler.updateStatus && typeof handler.updateStatus === 'function') {
-                handler.updateStatus(device);
+            if ('updateStatus' in handler && typeof handler.updateStatus === 'function') {
+                switch (device.type) {
+                    case 'light':
+                        (handler as LightAccessory).updateStatus(device as KseniaLight);
+                        break;
+                    case 'cover':
+                        (handler as CoverAccessory).updateStatus(device as KseniaCover);
+                        break;
+                    case 'thermostat':
+                        (handler as ThermostatAccessory).updateStatus(device as KseniaThermostat);
+                        break;
+                    case 'sensor':
+                        (handler as SensorAccessory).updateStatus(device as KseniaSensor);
+                        break;
+                    case 'zone':
+                        (handler as ZoneAccessory).updateStatus(device as KseniaZone);
+                        break;
+                    case 'scenario':
+                        break;
+                }
             }
         }
     }
@@ -367,51 +580,50 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private createAccessoryHandler(accessory: PlatformAccessory, device: KseniaDevice): void {
         const uuid = accessory.UUID;
 
-        // Rimuovi handler esistente se presente
         if (this.accessoryHandlers.has(uuid)) {
             this.accessoryHandlers.delete(uuid);
         }
 
-        // Crea il nuovo handler in base al tipo di dispositivo
-        let handler: any;
+        let handler: AccessoryHandler | undefined;
 
         switch (device.type) {
             case 'light':
                 handler = new LightAccessory(this, accessory);
-                this.log.debug(`💡 Creato handler per luce: ${device.name}`);
+                this.log.debug(`Created handler for light: ${device.name}`);
                 break;
             case 'cover':
                 handler = new CoverAccessory(this, accessory);
-                this.log.debug(`🪟 Creato handler per tapparella: ${device.name}`);
+                this.log.debug(`Created handler for cover: ${device.name}`);
                 break;
             case 'sensor':
                 handler = new SensorAccessory(this, accessory);
-                this.log.debug(`🌡️ Creato handler per sensore: ${device.name}`);
+                this.log.debug(`Created handler for sensor: ${device.name}`);
                 break;
             case 'zone':
                 handler = new ZoneAccessory(this, accessory);
-                this.log.debug(`🚪 Creato handler per zona: ${device.name}`);
+                this.log.debug(`Created handler for zone: ${device.name}`);
                 break;
             case 'thermostat':
                 handler = new ThermostatAccessory(this, accessory);
-                this.log.debug(`🌡️ Creato handler per termostato: ${device.name}`);
+                this.log.debug(`Created handler for thermostat: ${device.name}`);
                 break;
             case 'scenario':
-                handler = new ScenarioAccessory(this, accessory, device);
-                this.log.debug(`🎬 Creato handler per scenario: ${device.name}`);
+                handler = new ScenarioAccessory(this, accessory, device as KseniaScenario);
+                this.log.debug(`Created handler for scenario: ${device.name}`);
                 break;
             default:
-                this.log.warn(`⚠️ Tipo dispositivo non supportato: ${device.type}`);
+                this.log.warn(`Unsupported device type: ${(device as KseniaDevice).type}`);
                 return;
         }
 
-        // Salva l'handler per aggiornamenti futuri
-        this.accessoryHandlers.set(uuid, handler);
+        if (handler) {
+            this.accessoryHandlers.set(uuid, handler);
+        }
     }
 
-    removeAccessory(accessory: PlatformAccessory): void {
-        this.log.info('🗑️ Rimozione accessorio:', accessory.displayName);
+    public removeAccessory(accessory: PlatformAccessory): void {
+        this.log.info('Removing accessory:', accessory.displayName);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
         this.accessories.delete(accessory.UUID);
     }
-} 
+}

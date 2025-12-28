@@ -1,98 +1,120 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
-import type { Lares4Platform } from '../platform';
-import type { KseniaDevice } from '../types';
+import type { Lares4Platform, Lares4Config } from '../platform';
+import type { KseniaCover, CoverStatus } from '../types';
 
+/**
+ * Cover Accessory Handler
+ * Handles HomeKit WindowCovering service for Ksenia Lares4 covers/shutters
+ */
 export class CoverAccessory {
     private service: Service;
-    private device: KseniaDevice;
+    public device: KseniaCover;
     private targetPosition: number = 0;
     private currentPosition: number = 0;
     private positionState: number = 2; // 2 = stopped
-    private maxSeconds: number;
+    private readonly maxSeconds: number;
 
     constructor(
         private readonly platform: Lares4Platform,
         private readonly accessory: PlatformAccessory,
     ) {
-        this.device = accessory.context.device as KseniaDevice;
-        this.currentPosition = this.device.status?.position || 0;
-        this.targetPosition = this.device.status?.position || 0;
-        this.maxSeconds = (this.platform.config as any).maxSeconds || 30;
+        this.device = accessory.context.device as KseniaCover;
+        this.currentPosition = this.device.status?.position ?? 0;
+        this.targetPosition = this.device.status?.position ?? 0;
+        this.maxSeconds = (this.platform.config as Lares4Config).maxSeconds ?? 30;
 
-        // Imposta le informazioni dell'accessorio
-        this.accessory.getService(this.platform.Service.AccessoryInformation)!
-            .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Ksenia')
-            .setCharacteristic(this.platform.Characteristic.Model, 'Lares4 Cover')
-            .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-            .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.0');
+        const accessoryInfoService = this.accessory.getService(
+            this.platform.Service.AccessoryInformation,
+        );
+        if (accessoryInfoService) {
+            accessoryInfoService
+                .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Ksenia')
+                .setCharacteristic(this.platform.Characteristic.Model, 'Lares4 Cover')
+                .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
+                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.0');
+        }
 
-        // Ottieni o crea il servizio WindowCovering
-        this.service = this.accessory.getService(this.platform.Service.WindowCovering)
-            || this.accessory.addService(this.platform.Service.WindowCovering);
+        this.service =
+            this.accessory.getService(this.platform.Service.WindowCovering) ??
+            this.accessory.addService(this.platform.Service.WindowCovering);
 
         this.service.setCharacteristic(this.platform.Characteristic.Name, this.device.name);
 
-        // Imposta gli handlers per le caratteristiche
-        this.service.getCharacteristic(this.platform.Characteristic.CurrentPosition)
+        this.service
+            .getCharacteristic(this.platform.Characteristic.CurrentPosition)
             .onGet(this.getCurrentPosition.bind(this));
 
-        this.service.getCharacteristic(this.platform.Characteristic.PositionState)
+        this.service
+            .getCharacteristic(this.platform.Characteristic.PositionState)
             .onGet(this.getPositionState.bind(this));
 
-        this.service.getCharacteristic(this.platform.Characteristic.TargetPosition)
+        this.service
+            .getCharacteristic(this.platform.Characteristic.TargetPosition)
             .onSet(this.setTargetPosition.bind(this))
             .onGet(this.getTargetPosition.bind(this));
 
-        // Inizializza i valori delle caratteristiche con valori sicuri
         const safeCurrentPosition = isNaN(this.currentPosition) ? 0 : this.currentPosition;
         const safeTargetPosition = isNaN(this.targetPosition) ? 0 : this.targetPosition;
 
-        this.service.setCharacteristic(this.platform.Characteristic.CurrentPosition, safeCurrentPosition);
-        this.service.setCharacteristic(this.platform.Characteristic.TargetPosition, safeTargetPosition);
-        this.service.setCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
+        this.service.setCharacteristic(
+            this.platform.Characteristic.CurrentPosition,
+            safeCurrentPosition,
+        );
+        this.service.setCharacteristic(
+            this.platform.Characteristic.TargetPosition,
+            safeTargetPosition,
+        );
+        this.service.setCharacteristic(
+            this.platform.Characteristic.PositionState,
+            this.positionState,
+        );
     }
 
-    async setTargetPosition(value: CharacteristicValue): Promise<void> {
+    public async setTargetPosition(value: CharacteristicValue): Promise<void> {
         const targetPosition = value as number;
 
         if (targetPosition === this.currentPosition) {
-            return; // Nessun movimento necessario
+            return;
         }
 
         this.targetPosition = targetPosition;
 
         try {
-            // Determina lo stato del movimento
             if (targetPosition > this.currentPosition) {
                 this.positionState = 1; // Opening
             } else {
-                this.positionState = 0; // Closing  
+                this.positionState = 0; // Closing
             }
 
-            // Aggiorna lo stato del movimento
-            this.service.updateCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.PositionState,
+                this.positionState,
+            );
 
             await this.platform.wsClient?.moveCover(this.device.id, targetPosition);
-            this.platform.log.info(`🪟 ${this.device.name}: Movimento a ${targetPosition}%`);
+            this.platform.log.info(`${this.device.name}: Moving to ${targetPosition}%`);
 
-            // Simula il movimento graduale
             this.simulateMovement(targetPosition);
-
-        } catch (error) {
-            this.platform.log.error(`❌ Errore controllo tapparella ${this.device.name}:`, error);
-            throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+        } catch (error: unknown) {
+            this.platform.log.error(
+                `Cover control error ${this.device.name}:`,
+                error instanceof Error ? error.message : String(error),
+            );
+            throw new this.platform.api.hap.HapStatusError(
+                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
         }
     }
 
-    async getTargetPosition(): Promise<CharacteristicValue> {
+    public async getTargetPosition(): Promise<CharacteristicValue> {
         return isNaN(this.targetPosition) ? 0 : this.targetPosition;
     }
 
-    async getCurrentPosition(): Promise<CharacteristicValue> {
+    public async getCurrentPosition(): Promise<CharacteristicValue> {
         return isNaN(this.currentPosition) ? 0 : this.currentPosition;
     }
 
-    async getPositionState(): Promise<CharacteristicValue> {
+    public async getPositionState(): Promise<CharacteristicValue> {
         return this.positionState;
     }
 
@@ -100,48 +122,63 @@ export class CoverAccessory {
         const startPosition = this.currentPosition;
         const distance = Math.abs(targetPosition - startPosition);
         const direction = targetPosition > startPosition ? 1 : -1;
-        const stepSize = (this.platform.config as any).coverStepSize || 5; // % per step (configurabile)
-        const totalTime = (distance / 100) * (this.maxSeconds * 1000); // Tempo totale basato su maxSeconds
-        const stepTime = totalTime / (distance / stepSize); // Tempo per step calcolato
+        const stepSize = (this.platform.config as Lares4Config).coverStepSize ?? 5;
+        const totalTime = (distance / 100) * (this.maxSeconds * 1000);
+        const stepTime = totalTime / (distance / stepSize);
 
         let currentStep = 0;
         const totalSteps = Math.ceil(distance / stepSize);
 
-        const moveInterval = setInterval(() => {
+        const moveInterval = setInterval((): void => {
             currentStep++;
 
             if (currentStep >= totalSteps) {
-                // Movimento completato
                 this.currentPosition = targetPosition;
                 this.positionState = 2; // Stopped
 
-                this.service.updateCharacteristic(this.platform.Characteristic.CurrentPosition, this.currentPosition);
-                this.service.updateCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
+                this.service.updateCharacteristic(
+                    this.platform.Characteristic.CurrentPosition,
+                    this.currentPosition,
+                );
+                this.service.updateCharacteristic(
+                    this.platform.Characteristic.PositionState,
+                    this.positionState,
+                );
 
-                this.platform.log.debug(`🪟 ${this.device.name}: Movimento completato a ${targetPosition}%`);
+                this.platform.log.debug(
+                    `${this.device.name}: Movement completed to ${targetPosition}%`,
+                );
                 clearInterval(moveInterval);
             } else {
-                // Movimento in corso
-                this.currentPosition = Math.min(100, Math.max(0, startPosition + (direction * stepSize * currentStep)));
-                this.service.updateCharacteristic(this.platform.Characteristic.CurrentPosition, this.currentPosition);
+                this.currentPosition = Math.min(
+                    100,
+                    Math.max(0, startPosition + direction * stepSize * currentStep),
+                );
+                this.service.updateCharacteristic(
+                    this.platform.Characteristic.CurrentPosition,
+                    this.currentPosition,
+                );
             }
         }, stepTime);
     }
 
-    // Metodo per aggiornare lo stato dall'esterno (aggiornamenti real-time)
-    updateStatus(newDevice: KseniaDevice): void {
+    public updateStatus(newDevice: KseniaCover): void {
         this.device = newDevice;
 
         if (this.device.status?.position !== this.currentPosition) {
-            this.currentPosition = this.device.status?.position || 0;
-            this.targetPosition = this.device.status?.position || 0;
+            this.currentPosition = this.device.status?.position ?? 0;
+            this.targetPosition = this.device.status?.position ?? 0;
 
-            // Aggiorna le caratteristiche
-            this.service.updateCharacteristic(this.platform.Characteristic.CurrentPosition, this.currentPosition);
-            this.service.updateCharacteristic(this.platform.Characteristic.TargetPosition, this.targetPosition);
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.CurrentPosition,
+                this.currentPosition,
+            );
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.TargetPosition,
+                this.targetPosition,
+            );
         }
 
-        // Aggiorna lo stato del movimento
         switch (this.device.status?.state) {
             case 'opening':
                 this.positionState = 1;
@@ -153,8 +190,11 @@ export class CoverAccessory {
                 this.positionState = 2; // stopped
         }
 
-        this.service.updateCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
+        this.service.updateCharacteristic(
+            this.platform.Characteristic.PositionState,
+            this.positionState,
+        );
 
-        this.platform.log.debug(`🔄 Aggiornato stato tapparella ${this.device.name}: ${this.currentPosition}%`);
+        this.platform.log.debug(`Updated cover state ${this.device.name}: ${this.currentPosition}%`);
     }
-} 
+}

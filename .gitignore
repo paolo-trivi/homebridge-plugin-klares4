@@ -30,6 +30,7 @@ lib/
 .Trashes
 ehthumbs.db
 Thumbs.db
+NOPE/
 
 # Logs
 *.log
@@ -54,3 +55,4 @@ temp/
 config.json 
 klares4-devices.json
 CLAUDE.md
+CONTEXT.md

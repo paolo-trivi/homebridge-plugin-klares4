@@ -85,6 +85,119 @@
                 "items": {
                     "type": "string"
                 }
+            },
+            "mqtt": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "title": "Abilita MQTT",
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "broker": {
+                        "title": "Broker MQTT",
+                        "type": "string",
+                        "placeholder": "mqtt://192.168.1.100:1883",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "username": {
+                        "title": "Username",
+                        "type": "string",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "password": {
+                        "title": "Password",
+                        "type": "string",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "clientId": {
+                        "title": "Client ID",
+                        "type": "string",
+                        "placeholder": "homebridge-klares4",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "topicPrefix": {
+                        "title": "Prefisso Topic",
+                        "type": "string",
+                        "default": "homebridge/klares4",
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "qos": {
+                        "title": "QoS",
+                        "type": "integer",
+                        "default": 1,
+                        "enum": [0, 1, 2],
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    },
+                    "retain": {
+                        "title": "Retain Messages",
+                        "type": "boolean",
+                        "default": true,
+                        "condition": {
+                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                        }
+                    }
+                }
+            },
+            "roomMapping": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "title": "Abilita Mappatura Stanze",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Abilita la mappatura dei dispositivi nelle stanze per topic MQTT personalizzati"
+                    },
+                    "rooms": {
+                        "title": "Configurazione Stanze",
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "roomName": {
+                                    "title": "Nome Stanza",
+                                    "type": "string",
+                                    "placeholder": "Es: sala, cucina, camera"
+                                },
+                                "devices": {
+                                    "title": "Dispositivi",
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "deviceId": {
+                                                "title": "ID Dispositivo",
+                                                "type": "string"
+                                            },
+                                            "deviceName": {
+                                                "title": "Nome Dispositivo",
+                                                "type": "string",
+                                                "readonly": true
+                                            }
+                                        },
+                                        "required": ["deviceId"]
+                                    }
+                                }
+                            },
+                            "required": ["roomName"]
+                        },
+                        "condition": {
+                            "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
+                        }
+                    }
+                }
             }
         },
         "required": ["name", "ip", "port", "sender", "pin"]
@@ -191,6 +304,97 @@
                                     "notitle": true,
                                     "placeholder": "ID Sensore (es: 1 per Term. Sala)",
                                     "description": "Inserisci l'ID numerico del sensore da escludere"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "section",
+            "title": "MQTT Bridge",
+            "expandable": true,
+            "expanded": false,
+            "items": [
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-warning'><h5>🚧 Funzionalità Sperimentale</h5><p>Il bridge MQTT permette di:</p><ul><li>📤 <strong>Pubblicare</strong> gli stati degli accessori su MQTT</li><li>📥 <strong>Ricevere</strong> comandi da MQTT per controllare gli accessori</li></ul><p><strong>Formato Topic:</strong></p><ul><li>Stati: <code>homebridge/klares4/{type}/{id}/state</code></li><li>Comandi: <code>homebridge/klares4/{type}/{id}/set</code></li></ul></div>"
+                },
+                "mqtt.enabled",
+                "mqtt.broker",
+                "mqtt.username",
+                "mqtt.password",
+                "mqtt.clientId",
+                "mqtt.topicPrefix",
+                "mqtt.qos",
+                "mqtt.retain"
+            ]
+        },
+        {
+            "type": "section",
+            "title": "Mappatura Stanze MQTT",
+            "expandable": true,
+            "expanded": false,
+            "items": [
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-info'><h5>🏠 Mappatura Stanze MQTT</h5><p>Organizza i dispositivi per stanza nei topic MQTT:</p><ul><li>🔧 <strong>Disabilitato:</strong> <code>homebridge/klares4/{type}/{id}/state</code></li><li>🏠 <strong>Abilitato:</strong> <code>homebridge/{stanza}/{type}/{id}/state</code></li></ul><p><strong>Esempio:</strong></p><ul><li><code>homebridge/sala/sensor/sensor_temp_1/state</code></li><li><code>homebridge/cucina/light/light_9/state</code></li></ul><p>💡 I dispositivi non assegnati useranno <code>klares4</code> come stanza predefinita.</p></div>"
+                },
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-primary'><h5>📋 Dispositivi del Tuo Sistema</h5><p>💡 <strong>Il plugin genera automaticamente la lista dei tuoi dispositivi:</strong></p><ol><li><strong>Avvia il plugin</strong> una volta per scoprire tutti i dispositivi</li><li><strong>Controlla i log</strong> per vedere l'elenco completo con ID e nomi</li><li><strong>Apri i file generati:</strong><ul><li><code>~/.homebridge/klares4-devices.json</code> - Lista completa dispositivi</li><li><code>~/.homebridge/klares4-room-mapping-example.json</code> - Esempio configurazione</li></ul></li><li><strong>Copia gli ID</strong> dai file e usali nei campi sottostanti</li></ol><p><strong>🎯 Vantaggi:</strong></p><ul><li>✅ Lista sempre aggiornata con i tuoi dispositivi reali</li><li>✅ Nomi originali dal sistema Lares4</li><li>✅ Esempio di configurazione pronto all'uso</li><li>✅ Nessun hardcoding - tutto dinamico!</li></ul></div>"
+                },
+                "roomMapping.enabled",
+                {
+                    "key": "roomMapping.rooms",
+                    "type": "array",
+                    "orderable": true,
+                    "buttonText": "🏠 Aggiungi Nuova Stanza",
+                    "condition": {
+                        "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
+                    },
+                    "items": [
+                        {
+                            "type": "div",
+                            "displayFlex": true,
+                            "flex-direction": "column",
+                            "items": [
+                                {
+                                    "key": "roomMapping.rooms[].roomName",
+                                    "title": "Nome Stanza",
+                                    "placeholder": "Es: sala, cucina, camera, studio"
+                                },
+                                {
+                                    "key": "roomMapping.rooms[].devices",
+                                    "title": "Dispositivi in questa stanza",
+                                    "type": "array",
+                                    "orderable": false,
+                                    "buttonText": "📱 Aggiungi Dispositivo",
+                                    "items": [
+                                        {
+                                            "type": "div",
+                                            "displayFlex": true,
+                                            "flex-direction": "column",
+                                            "items": [
+                                                {
+                                                    "key": "roomMapping.rooms[].devices[].deviceId",
+                                                    "title": "ID Dispositivo",
+                                                    "type": "string",
+                                                    "placeholder": "Es: light_9, sensor_temp_1, cover_1, zone_18",
+                                                    "description": "Inserisci l'ID del dispositivo (vedi lista sopra per esempi)",
+                                                    "pattern": "^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)[0-9]+$"
+                                                },
+                                                {
+                                                    "key": "roomMapping.rooms[].devices[].deviceName",
+                                                    "title": "Nome Dispositivo",
+                                                    "type": "string",
+                                                    "readonly": true,
+                                                    "description": "Nome automatico basato sull'ID (verrà popolato dal plugin)"
+                                                }
+                                            ]
+                                        }
+                                    ]
                                 }
                             ]
                         }
