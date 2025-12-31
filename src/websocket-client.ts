@@ -87,6 +87,10 @@ export class KseniaWebSocketClient {
     private idLogin?: string;
     private heartbeatTimer?: ReturnType<typeof setInterval>;
     private reconnectTimer?: ReturnType<typeof setTimeout>;
+    private heartbeatPending = false;
+    private lastPongReceived = 0;
+    private reconnectAttempts = 0;
+    private readonly maxReconnectDelay = 60000; // Max 60 seconds between attempts
 
     public onDeviceDiscovered?: (device: KseniaDevice) => void;
     public onDeviceStatusUpdate?: (device: KseniaDevice) => void;
@@ -222,6 +226,13 @@ export class KseniaWebSocketClient {
                 case 'PING':
                     if (this.options.debug) {
                         this.log.debug('PING received from system');
+                    }
+                    break;
+                case 'PONG':
+                    this.heartbeatPending = false;
+                    this.lastPongReceived = Date.now();
+                    if (this.options.debug) {
+                        this.log.debug('PONG received - connection healthy');
                     }
                     break;
                 default:
@@ -1015,8 +1026,24 @@ export class KseniaWebSocketClient {
             clearInterval(this.heartbeatTimer);
         }
 
+        this.lastPongReceived = Date.now();
+        this.heartbeatPending = false;
+
         this.heartbeatTimer = setInterval((): void => {
             if (this.isConnected && this.idLogin) {
+                // Check if previous heartbeat got a response
+                if (this.heartbeatPending) {
+                    const timeSinceLastPong = Date.now() - this.lastPongReceived;
+                    const heartbeatTimeout = (this.options.heartbeatInterval ?? 30000) * 2;
+                    
+                    if (timeSinceLastPong > heartbeatTimeout) {
+                        this.log.warn(`Heartbeat timeout: no PONG received for ${Math.round(timeSinceLastPong / 1000)}s - forcing reconnection`);
+                        this.forceReconnect();
+                        return;
+                    }
+                }
+
+                this.heartbeatPending = true;
                 this.sendKseniaCommand('PING', 'HEARTBEAT', {
                     ID_LOGIN: this.idLogin,
                 }).catch((err: unknown): void => {
@@ -1029,21 +1056,60 @@ export class KseniaWebSocketClient {
         }, this.options.heartbeatInterval);
     }
 
+    private forceReconnect(): void {
+        this.log.info('Forcing reconnection due to heartbeat timeout...');
+        this.heartbeatPending = false;
+        
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = undefined;
+        }
+        
+        if (this.ws) {
+            this.ws.terminate(); // Force close without waiting for graceful shutdown
+        }
+        
+        this.isConnected = false;
+        this.onDisconnected?.();
+        this.scheduleReconnect();
+    }
+
     private scheduleReconnect(): void {
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
         }
 
+        // Exponential backoff with jitter
+        const baseDelay = this.options.reconnectInterval ?? 5000;
+        const exponentialDelay = Math.min(
+            baseDelay * Math.pow(2, this.reconnectAttempts),
+            this.maxReconnectDelay,
+        );
+        // Add jitter (±10%) to prevent thundering herd
+        const jitter = exponentialDelay * 0.1 * (Math.random() * 2 - 1);
+        const finalDelay = Math.round(exponentialDelay + jitter);
+
+        this.log.info(
+            `Scheduling reconnection attempt ${this.reconnectAttempts + 1} in ${Math.round(finalDelay / 1000)}s...`,
+        );
+
         this.reconnectTimer = setTimeout((): void => {
-            this.log.info('Attempting reconnection...');
-            this.connect().catch((err: unknown): void => {
-                this.log.error(
-                    'Reconnection failed:',
-                    err instanceof Error ? err.message : String(err),
-                );
-                this.scheduleReconnect();
-            });
-        }, this.options.reconnectInterval);
+            this.reconnectAttempts++;
+            this.log.info(`Attempting reconnection (attempt ${this.reconnectAttempts})...`);
+            this.connect()
+                .then((): void => {
+                    // Reset attempts on successful connection
+                    this.reconnectAttempts = 0;
+                    this.log.info('Reconnection successful');
+                })
+                .catch((err: unknown): void => {
+                    this.log.error(
+                        'Reconnection failed:',
+                        err instanceof Error ? err.message : String(err),
+                    );
+                    this.scheduleReconnect();
+                });
+        }, finalDelay);
     }
 
     public disconnect(): void {

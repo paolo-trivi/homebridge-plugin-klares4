@@ -2,152 +2,275 @@
     "pluginAlias": "Lares4Complete",
     "pluginType": "platform",
     "singular": true,
-    "headerDisplay": "Plugin per il sistema di allarme Ksenia Lares4",
-    "footerDisplay": "Per maggiori informazioni visita [GitHub](https://github.com/paolo-trivi/homebridge-plugin-klares4)",
+    "customUi": false,
+"headerDisplay": "<div class='text-center mb-3'><h3>Ksenia Lares4 per Homebridge</h3><p class='text-muted'>Integrazione professionale per sistemi di sicurezza Ksenia Lares 4.0</p></div><div class='alert alert-info'><strong>Prima di iniziare, verifica che:</strong><ul class='mb-0 mt-2'><li>La centrale Lares4 sia raggiungibile in rete locale</li><li>L'accesso WebSocket sia abilitato sulla centrale</li><li>Tu disponga di un PIN utente</li></ul></div>",
+    "footerDisplay": "<div class='text-center mt-4 pt-3 border-top'><p class='text-muted mb-2'>Versione 1.1.6 • Sviluppato da Paolo Trivisonno</p><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' class='btn btn-sm btn-outline-primary mr-2'>Documentazione</a> <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' class='btn btn-sm btn-outline-secondary mr-2'>Segnala Bug</a> <a href='https://github.com/sponsors/paolo-trivi' target='_blank' class='btn btn-sm btn-outline-success'>Supporta</a></div>",
     "schema": {
         "type": "object",
         "properties": {
             "name": {
                 "title": "Nome Piattaforma",
                 "type": "string",
-                "default": "Lares4"
+                "default": "Lares4",
+                "description": "Nome identificativo che apparirà nei log di Homebridge",
+                "minLength": 1,
+                "maxLength": 50
             },
             "ip": {
-                "title": "Indirizzo IP",
+                "title": "Indirizzo IP Centrale",
                 "type": "string",
                 "format": "ipv4",
-                "placeholder": "192.168.1.100"
+                "placeholder": "192.168.1.x",
+                "description": "Indirizzo IP locale della centrale Ksenia Lares4",
+                "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
             },
             "port": {
-                "title": "Porta",
+                "title": "Porta WebSocket",
                 "type": "integer",
                 "default": 443,
                 "minimum": 1,
-                "maximum": 65535
+                "maximum": 65535,
+                "description": "Porta di comunicazione (443 per HTTPS, 80 per HTTP)"
             },
             "https": {
-                "title": "Usa HTTPS",
+                "title": "Connessione Sicura (HTTPS)",
                 "type": "boolean",
-                "default": true
+                "default": true,
+                "description": "Usa connessione crittografata - raccomandata per la sicurezza"
             },
             "sender": {
-                "title": "Sender ID",
+                "title": "Identificativo Client",
                 "type": "string",
-                "default": "homebridge"
+                "default": "homebridge",
+                "placeholder": "homebridge",
+                "description": "Nome univoco per identificare questa connessione sulla centrale",
+                "pattern": "^[a-zA-Z0-9_-]+$",
+                "minLength": 1,
+                "maxLength": 32
             },
             "pin": {
-                "title": "PIN Sistema",
-                "type": "string"
+                "title": "PIN di Accesso",
+                "type": "string",
+                "placeholder": "123456",
+                "description": "PIN utente abilitato all'uso delle API WebSocket sulla centrale",
+                "pattern": "^[0-9]+$",
+                "minLength": 4,
+                "maxLength": 8
+            },
+            "showAdvanced": {
+                "title": "Mostra Configurazione Avanzata",
+                "type": "boolean",
+                "default": false,
+                "description": "Abilita per personalizzare timing, heartbeat e parametri di rete"
             },
             "debug": {
-                "title": "Debug Mode",
+                "title": "Modalità Debug",
                 "type": "boolean",
-                "default": false
+                "default": false,
+                "description": "Attiva logging dettagliato per diagnostica - genera molti log"
             },
             "maxSeconds": {
-                "title": "Timeout Massimo (secondi)",
+                "title": "Tempo Massimo Movimento Tapparelle",
                 "type": "integer",
                 "default": 30,
                 "minimum": 5,
-                "maximum": 300
+                "maximum": 300,
+                "description": "Secondi necessari per apertura/chiusura completa delle tapparelle"
             },
             "reconnectInterval": {
-                "title": "Intervallo Riconnessione (ms)",
+                "title": "Intervallo Base Riconnessione",
                 "type": "integer",
                 "default": 5000,
                 "minimum": 1000,
-                "maximum": 60000
+                "maximum": 60000,
+                "description": "Millisecondi prima del primo tentativo di riconnessione (raddoppia ad ogni tentativo)"
             },
             "heartbeatInterval": {
-                "title": "Intervallo Heartbeat (ms)",
+                "title": "Intervallo Heartbeat",
                 "type": "integer",
                 "default": 30000,
                 "minimum": 10000,
-                "maximum": 300000
+                "maximum": 300000,
+                "description": "Millisecondi tra i ping di keep-alive per verificare la connessione"
+            },
+            "coverStepSize": {
+                "title": "Step Animazione Tapparelle",
+                "type": "integer",
+                "default": 5,
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Percentuale di movimento per ogni step di animazione in HomeKit"
+            },
+            "scenarioAutoOffDelay": {
+                "title": "Ritardo Auto-Off Scenari",
+                "type": "integer",
+                "default": 500,
+                "minimum": 100,
+                "maximum": 5000,
+                "description": "Millisecondi prima che uno scenario torni automaticamente a OFF"
+            },
+            "devicesSummaryDelay": {
+                "title": "Ritardo Sommario Dispositivi",
+                "type": "integer",
+                "default": 2000,
+                "minimum": 500,
+                "maximum": 10000,
+                "description": "Millisecondi di attesa prima di stampare il sommario dispositivi nei log"
             },
             "excludeZones": {
                 "title": "Zone da Escludere",
                 "type": "array",
                 "items": {
-                    "type": "string"
-                }
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                },
+                "default": []
             },
             "excludeOutputs": {
                 "title": "Output da Escludere",
                 "type": "array",
                 "items": {
-                    "type": "string"
-                }
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                },
+                "default": []
             },
             "excludeSensors": {
                 "title": "Sensori da Escludere",
                 "type": "array",
                 "items": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                },
+                "default": []
+            },
+            "excludeScenarios": {
+                "title": "Scenari da Escludere",
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": "^[0-9]+$"
+                },
+                "default": []
+            },
+            "customNames": {
+                "type": "object",
+                "properties": {
+                    "zones": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "outputs": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "sensors": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "scenarios": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "temperatureDefaults": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "title": "Temperatura Target Default",
+                        "type": "number",
+                        "default": 21,
+                        "minimum": 5,
+                        "maximum": 35
+                    },
+                    "min": {
+                        "title": "Temperatura Minima",
+                        "type": "number",
+                        "default": 10,
+                        "minimum": 5,
+                        "maximum": 20
+                    },
+                    "max": {
+                        "title": "Temperatura Massima",
+                        "type": "number",
+                        "default": 38,
+                        "minimum": 25,
+                        "maximum": 40
+                    },
+                    "step": {
+                        "title": "Step Regolazione",
+                        "type": "number",
+                        "default": 0.5,
+                        "enum": [0.5, 1]
+                    }
                 }
             },
             "mqtt": {
                 "type": "object",
                 "properties": {
                     "enabled": {
-                        "title": "Abilita MQTT",
+                        "title": "Abilita Bridge MQTT",
                         "type": "boolean",
-                        "default": false
+                        "default": false,
+                        "description": "Pubblica stati e riceve comandi via MQTT"
                     },
                     "broker": {
-                        "title": "Broker MQTT",
+                        "title": "URL Broker MQTT",
                         "type": "string",
-                        "placeholder": "mqtt://192.168.1.100:1883",
-                        "condition": {
-                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
-                        }
+                        "placeholder": "mqtt://192.168.1.x:1883",
+                        "description": "Indirizzo completo del broker (es: mqtt://host:1883 o mqtts://host:8883)"
                     },
                     "username": {
                         "title": "Username",
                         "type": "string",
-                        "condition": {
-                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
-                        }
+                        "placeholder": "mqtt_user",
+                        "description": "Credenziali di accesso al broker (opzionale)"
                     },
                     "password": {
                         "title": "Password",
                         "type": "string",
-                        "condition": {
-                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
-                        }
+                        "placeholder": "password",
+                        "description": "Password per l'autenticazione MQTT"
                     },
                     "clientId": {
                         "title": "Client ID",
                         "type": "string",
+                        "default": "homebridge-klares4",
                         "placeholder": "homebridge-klares4",
-                        "condition": {
-                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
-                        }
+                        "description": "Identificativo univoco per il broker MQTT"
                     },
                     "topicPrefix": {
                         "title": "Prefisso Topic",
                         "type": "string",
                         "default": "homebridge/klares4",
-                        "condition": {
-                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
-                        }
+                        "placeholder": "homebridge/klares4",
+                        "description": "Prefisso per tutti i topic pubblicati"
                     },
                     "qos": {
-                        "title": "QoS",
+                        "title": "Quality of Service",
                         "type": "integer",
                         "default": 1,
-                        "enum": [0, 1, 2],
-                        "condition": {
-                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
-                        }
+                        "oneOf": [
+                            { "title": "0 - At most once (fastest)", "const": 0 },
+                            { "title": "1 - At least once (recommended)", "const": 1 },
+                            { "title": "2 - Exactly once (slowest)", "const": 2 }
+                        ],
+                        "description": "Livello di garanzia consegna messaggi"
                     },
                     "retain": {
                         "title": "Retain Messages",
                         "type": "boolean",
                         "default": true,
-                        "condition": {
-                            "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
-                        }
+                        "description": "Il broker memorizza l'ultimo stato per i nuovi subscriber"
                     }
                 }
             },
@@ -158,10 +281,10 @@
                         "title": "Abilita Mappatura Stanze",
                         "type": "boolean",
                         "default": false,
-                        "description": "Abilita la mappatura dei dispositivi nelle stanze per topic MQTT personalizzati"
+                        "description": "Organizza i topic MQTT per stanza invece che per tipo dispositivo"
                     },
                     "rooms": {
-                        "title": "Configurazione Stanze",
+                        "title": "Stanze",
                         "type": "array",
                         "items": {
                             "type": "object",
@@ -169,7 +292,9 @@
                                 "roomName": {
                                     "title": "Nome Stanza",
                                     "type": "string",
-                                    "placeholder": "Es: sala, cucina, camera"
+                                    "placeholder": "soggiorno",
+                                    "pattern": "^[a-z0-9_]+$",
+                                    "description": "Usare solo lettere minuscole, numeri e underscore"
                                 },
                                 "devices": {
                                     "title": "Dispositivi",
@@ -179,12 +304,13 @@
                                         "properties": {
                                             "deviceId": {
                                                 "title": "ID Dispositivo",
-                                                "type": "string"
+                                                "type": "string",
+                                                "pattern": "^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)[0-9]+$"
                                             },
                                             "deviceName": {
                                                 "title": "Nome Dispositivo",
                                                 "type": "string",
-                                                "readonly": true
+                                                "readOnly": true
                                             }
                                         },
                                         "required": ["deviceId"]
@@ -192,118 +318,342 @@
                                 }
                             },
                             "required": ["roomName"]
-                        },
-                        "condition": {
-                            "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
                         }
                     }
                 }
             }
         },
-        "required": ["name", "ip", "port", "sender", "pin"]
+        "required": ["ip", "pin"]
     },
     "layout": [
         {
             "type": "section",
-            "title": "Configurazione Connessione",
+            "title": "Connessione & Autenticazione",
             "expandable": true,
             "expanded": true,
             "items": [
-                "name",
-                "ip",
-                "port",
-                "https",
-                "sender",
-                "pin"
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-success'><strong>Configurazione Essenziale</strong><p class='mb-0'>Inserisci i dati di connessione alla tua centrale Ksenia Lares4. Puoi trovare l'IP nella configurazione di rete della centrale.</p></div>"
+                },
+                {
+                    "key": "ip",
+                    "type": "string",
+                    "title": "Indirizzo IP Centrale",
+                    "placeholder": "192.168.1.x",
+                    "validationMessage": "Inserisci un indirizzo IP valido (es: 192.168.1.100)"
+                },
+                {
+                    "type": "flex",
+                    "flex-flow": "row wrap",
+                    "items": [
+                        {
+                            "key": "port",
+                            "flex": "1 1 120px"
+                        },
+                        {
+                            "key": "https",
+                            "flex": "1 1 180px"
+                        }
+                    ]
+                },
+                {
+                    "key": "pin",
+                    "type": "password",
+                    "title": "PIN di Accesso",
+                    "placeholder": "Solo numeri (4-8 cifre)",
+                    "validationMessage": "Il PIN deve contenere solo numeri (4-8 cifre)"
+                },
+                {
+                    "type": "flex",
+                    "flex-flow": "row wrap",
+                    "items": [
+                        {
+                            "key": "sender",
+                            "flex": "1 1 200px"
+                        },
+                        {
+                            "key": "name",
+                            "flex": "1 1 200px"
+                        }
+                    ]
+                }
             ]
         },
         {
             "type": "section",
-            "title": "Opzioni Avanzate",
+            "title": "Preferenze Dispositivi",
             "expandable": true,
             "expanded": false,
             "items": [
-                "debug",
-                "maxSeconds",
-                "reconnectInterval",
-                "heartbeatInterval"
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-info'><strong>Personalizza il Comportamento</strong><p class='mb-0'>Configura i parametri di funzionamento per tapparelle, termostati e scenari.</p></div>"
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Tapparelle & Cover",
+                    "expandable": false,
+                    "items": [
+                        {
+                            "type": "flex",
+                            "flex-flow": "row wrap",
+                            "items": [
+                                {
+                                    "key": "maxSeconds",
+                                    "flex": "1 1 200px",
+                                    "description": "Tempo totale apertura/chiusura"
+                                },
+                                {
+                                    "key": "coverStepSize",
+                                    "flex": "1 1 200px",
+                                    "description": "Fluidità animazione (5 = fluido)"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Termostati",
+                    "expandable": false,
+                    "items": [
+                        {
+                            "type": "flex",
+                            "flex-flow": "row wrap",
+                            "items": [
+                                {
+                                    "key": "temperatureDefaults.target",
+                                    "title": "Temp. Target Default (°C)",
+                                    "flex": "1 1 150px"
+                                },
+                                {
+                                    "key": "temperatureDefaults.min",
+                                    "title": "Temp. Minima (°C)",
+                                    "flex": "1 1 150px"
+                                },
+                                {
+                                    "key": "temperatureDefaults.max",
+                                    "title": "Temp. Massima (°C)",
+                                    "flex": "1 1 150px"
+                                },
+                                {
+                                    "key": "temperatureDefaults.step",
+                                    "title": "Step (°C)",
+                                    "flex": "1 1 100px"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Scenari",
+                    "expandable": false,
+                    "items": [
+                        {
+                            "key": "scenarioAutoOffDelay",
+                            "description": "Dopo l'attivazione, lo switch torna OFF automaticamente"
+                        }
+                    ]
+                }
             ]
         },
         {
             "type": "section",
             "title": "Esclusioni Dispositivi",
             "expandable": true,
-            "expanded": true,
+            "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-primary'><h5>📋 Come Escludere Dispositivi</h5><ol><li><strong>Avvia il plugin una volta</strong> per scoprire tutti i dispositivi</li><li><strong>Controlla il file</strong> <code>~/.homebridge/klares4-devices.json</code></li><li><strong>Copia gli ID</strong> dei dispositivi che NON vuoi vedere in HomeKit</li><li><strong>Incollali</strong> nei campi sottostanti</li><li><strong>Riavvia Homebridge</strong></li></ol></div>"
-                },
-                {
-                    "type": "help",
-                    "helpvalue": "<div class='alert alert-info'><h5>💡 Suggerimento</h5><p>Puoi aprire il file <code>klares4-devices.json</code> con un editor di testo per vedere tutti i dispositivi disponibili con i loro ID e nomi.</p><p><strong>Esempio di contenuto del file:</strong></p><pre>{\n  \"outputs\": [\n    {\"id\": \"18\", \"name\": \"Riscaldamento Sala\"},\n    {\"id\": \"31\", \"name\": \"Sirena Esterna\"},\n    ...\n  ]\n}</pre></div>"
+                    "helpvalue": "<div class='alert alert-warning'><strong>Come Trovare gli ID</strong><ol class='mb-0 mt-2'><li>Avvia il plugin una volta</li><li>Apri il file <code>~/.homebridge/klares4-devices.json</code></li><li>Trova gli ID numerici dei dispositivi da escludere</li><li>Aggiungili qui sotto usando il pulsante <strong>+ Aggiungi</strong></li></ol></div>"
                 },
                 {
                     "key": "excludeOutputs",
                     "type": "array",
+                    "title": "Output Esclusi (Luci, Tapparelle, Termostati)",
+                    "description": "Inserisci solo il numero ID, senza prefissi",
                     "orderable": false,
-                    "buttonText": "➕ Aggiungi Output da Escludere",
+                    "buttonText": "+ Aggiungi Output",
                     "items": [
                         {
-                            "type": "div",
-                            "displayFlex": true,
-                            "flex-direction": "row",
-                            "items": [
-                                {
-                                    "key": "excludeOutputs[]",
-                                    "flex": "1 1 50px",
-                                    "notitle": true,
-                                    "placeholder": "ID Output (es: 18 per Riscaldamento Sala)",
-                                    "description": "Inserisci l'ID numerico dell'output da escludere"
-                                }
-                            ]
+                            "key": "excludeOutputs[]",
+                            "notitle": true,
+                            "placeholder": "ID numerico (es: 18)"
                         }
                     ]
                 },
                 {
                     "key": "excludeZones",
                     "type": "array",
+                    "title": "Zone Escluse (Sensori di sicurezza)",
+                    "description": "Zone che non vuoi vedere come sensori contatto in HomeKit",
                     "orderable": false,
-                    "buttonText": "➕ Aggiungi Zona da Escludere",
+                    "buttonText": "+ Aggiungi Zona",
                     "items": [
                         {
-                            "type": "div",
-                            "displayFlex": true,
-                            "flex-direction": "row",
-                            "items": [
-                                {
-                                    "key": "excludeZones[]",
-                                    "flex": "1 1 50px",
-                                    "notitle": true,
-                                    "placeholder": "ID Zona (es: 18 per Finestra Studio)",
-                                    "description": "Inserisci l'ID numerico della zona da escludere"
-                                }
-                            ]
+                            "key": "excludeZones[]",
+                            "notitle": true,
+                            "placeholder": "ID numerico (es: 5)"
                         }
                     ]
                 },
                 {
                     "key": "excludeSensors",
                     "type": "array",
+                    "title": "Sensori Esclusi (Ambientali)",
+                    "description": "Sensori temperatura/umidità/luminosità da nascondere",
                     "orderable": false,
-                    "buttonText": "➕ Aggiungi Sensore da Escludere",
+                    "buttonText": "+ Aggiungi Sensore",
                     "items": [
                         {
-                            "type": "div",
-                            "displayFlex": true,
-                            "flex-direction": "row",
+                            "key": "excludeSensors[]",
+                            "notitle": true,
+                            "placeholder": "ID numerico (es: 1)"
+                        }
+                    ]
+                },
+                {
+                    "key": "excludeScenarios",
+                    "type": "array",
+                    "title": "Scenari Esclusi",
+                    "description": "Scenari che non vuoi attivare da HomeKit",
+                    "orderable": false,
+                    "buttonText": "+ Aggiungi Scenario",
+                    "items": [
+                        {
+                            "key": "excludeScenarios[]",
+                            "notitle": true,
+                            "placeholder": "ID numerico (es: 3)"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "section",
+            "title": "Integrazione MQTT",
+            "expandable": true,
+            "expanded": false,
+            "items": [
+                {
+                    "type": "help",
+                    "helpvalue": "<div class='alert alert-primary'><strong>Bridge MQTT</strong><p class='mb-1'>Pubblica gli stati su MQTT e ricevi comandi per integrazione con Home Assistant, Node-RED, o altri sistemi.</p><small><strong>Topic:</strong> <code>{prefix}/{type}/{slug}/state</code> e <code>.../{type}/{slug}/set</code></small></div>"
+                },
+                {
+                    "key": "mqtt.enabled",
+                    "title": "Abilita Bridge MQTT"
+                },
+                {
+                    "key": "mqtt.broker",
+                    "condition": {
+                        "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                    },
+                    "placeholder": "mqtt://192.168.1.x:1883"
+                },
+                {
+                    "type": "flex",
+                    "flex-flow": "row wrap",
+                    "condition": {
+                        "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                    },
+                    "items": [
+                        {
+                            "key": "mqtt.username",
+                            "flex": "1 1 200px"
+                        },
+                        {
+                            "key": "mqtt.password",
+                            "type": "password",
+                            "flex": "1 1 200px"
+                        }
+                    ]
+                },
+                {
+                    "type": "flex",
+                    "flex-flow": "row wrap",
+                    "condition": {
+                        "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                    },
+                    "items": [
+                        {
+                            "key": "mqtt.clientId",
+                            "flex": "1 1 200px"
+                        },
+                        {
+                            "key": "mqtt.topicPrefix",
+                            "flex": "1 1 200px"
+                        }
+                    ]
+                },
+                {
+                    "type": "flex",
+                    "flex-flow": "row wrap",
+                    "condition": {
+                        "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                    },
+                    "items": [
+                        {
+                            "key": "mqtt.qos",
+                            "flex": "1 1 200px"
+                        },
+                        {
+                            "key": "mqtt.retain",
+                            "flex": "1 1 200px"
+                        }
+                    ]
+                },
+                {
+                    "type": "section",
+                    "title": "Mappatura Stanze",
+                    "expandable": true,
+                    "expanded": false,
+                    "condition": {
+                        "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                    },
+                    "items": [
+                        {
+                            "type": "help",
+                            "helpvalue": "<div class='alert alert-success'><strong>Organizza per stanza:</strong> invece di <code>klares4/light/luce_sala</code> ottieni <code>soggiorno/light/luce_sala</code></div>"
+                        },
+                        {
+                            "key": "roomMapping.enabled",
+                            "title": "Abilita Mappatura Stanze"
+                        },
+                        {
+                            "key": "roomMapping.rooms",
+                            "type": "array",
+                            "title": "Configurazione Stanze",
+                            "orderable": true,
+                            "buttonText": "+ Aggiungi Stanza",
+                            "condition": {
+                                "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
+                            },
                             "items": [
                                 {
-                                    "key": "excludeSensors[]",
-                                    "flex": "1 1 50px",
-                                    "notitle": true,
-                                    "placeholder": "ID Sensore (es: 1 per Term. Sala)",
-                                    "description": "Inserisci l'ID numerico del sensore da escludere"
+                                    "type": "fieldset",
+                                    "items": [
+                                        {
+                                            "key": "roomMapping.rooms[].roomName",
+                                            "title": "Nome Stanza (minuscolo)",
+                                            "placeholder": "soggiorno"
+                                        },
+                                        {
+                                            "key": "roomMapping.rooms[].devices",
+                                            "type": "array",
+                                            "title": "Dispositivi",
+                                            "orderable": false,
+                                            "buttonText": "+ Dispositivo",
+                                            "items": [
+                                                {
+                                                    "key": "roomMapping.rooms[].devices[].deviceId",
+                                                    "title": "ID Dispositivo",
+                                                    "placeholder": "light_9 o sensor_temp_1"
+                                                }
+                                            ]
+                                        }
+                                    ]
                                 }
                             ]
                         }
@@ -313,88 +663,63 @@
         },
         {
             "type": "section",
-            "title": "MQTT Bridge",
+            "title": "Configurazione Avanzata",
             "expandable": true,
             "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-warning'><h5>🚧 Funzionalità Sperimentale</h5><p>Il bridge MQTT permette di:</p><ul><li>📤 <strong>Pubblicare</strong> gli stati degli accessori su MQTT</li><li>📥 <strong>Ricevere</strong> comandi da MQTT per controllare gli accessori</li></ul><p><strong>Formato Topic:</strong></p><ul><li>Stati: <code>homebridge/klares4/{type}/{id}/state</code></li><li>Comandi: <code>homebridge/klares4/{type}/{id}/set</code></li></ul></div>"
-                },
-                "mqtt.enabled",
-                "mqtt.broker",
-                "mqtt.username",
-                "mqtt.password",
-                "mqtt.clientId",
-                "mqtt.topicPrefix",
-                "mqtt.qos",
-                "mqtt.retain"
-            ]
-        },
-        {
-            "type": "section",
-            "title": "Mappatura Stanze MQTT",
-            "expandable": true,
-            "expanded": false,
-            "items": [
-                {
-                    "type": "help",
-                    "helpvalue": "<div class='alert alert-info'><h5>🏠 Mappatura Stanze MQTT</h5><p>Organizza i dispositivi per stanza nei topic MQTT:</p><ul><li>🔧 <strong>Disabilitato:</strong> <code>homebridge/klares4/{type}/{id}/state</code></li><li>🏠 <strong>Abilitato:</strong> <code>homebridge/{stanza}/{type}/{id}/state</code></li></ul><p><strong>Esempio:</strong></p><ul><li><code>homebridge/sala/sensor/sensor_temp_1/state</code></li><li><code>homebridge/cucina/light/light_9/state</code></li></ul><p>💡 I dispositivi non assegnati useranno <code>klares4</code> come stanza predefinita.</p></div>"
+                    "helpvalue": "<div class='alert alert-danger'><strong>Solo per Utenti Esperti</strong><p class='mb-0'>Modifica questi parametri solo se sai cosa stai facendo. Valori errati possono causare disconnessioni frequenti o comportamenti anomali.</p></div>"
                 },
                 {
-                    "type": "help",
-                    "helpvalue": "<div class='alert alert-primary'><h5>📋 Dispositivi del Tuo Sistema</h5><p>💡 <strong>Il plugin genera automaticamente la lista dei tuoi dispositivi:</strong></p><ol><li><strong>Avvia il plugin</strong> una volta per scoprire tutti i dispositivi</li><li><strong>Controlla i log</strong> per vedere l'elenco completo con ID e nomi</li><li><strong>Apri i file generati:</strong><ul><li><code>~/.homebridge/klares4-devices.json</code> - Lista completa dispositivi</li><li><code>~/.homebridge/klares4-room-mapping-example.json</code> - Esempio configurazione</li></ul></li><li><strong>Copia gli ID</strong> dai file e usali nei campi sottostanti</li></ol><p><strong>🎯 Vantaggi:</strong></p><ul><li>✅ Lista sempre aggiornata con i tuoi dispositivi reali</li><li>✅ Nomi originali dal sistema Lares4</li><li>✅ Esempio di configurazione pronto all'uso</li><li>✅ Nessun hardcoding - tutto dinamico!</li></ul></div>"
+                    "key": "showAdvanced",
+                    "title": "Sblocca Parametri Avanzati",
+                    "description": "Abilita per modificare timing e parametri di rete"
                 },
-                "roomMapping.enabled",
                 {
-                    "key": "roomMapping.rooms",
-                    "type": "array",
-                    "orderable": true,
-                    "buttonText": "🏠 Aggiungi Nuova Stanza",
+                    "type": "fieldset",
+                    "title": "Parametri di Rete",
                     "condition": {
-                        "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
+                        "functionBody": "return model.showAdvanced === true;"
                     },
                     "items": [
                         {
-                            "type": "div",
-                            "displayFlex": true,
-                            "flex-direction": "column",
+                            "type": "flex",
+                            "flex-flow": "row wrap",
                             "items": [
                                 {
-                                    "key": "roomMapping.rooms[].roomName",
-                                    "title": "Nome Stanza",
-                                    "placeholder": "Es: sala, cucina, camera, studio"
+                                    "key": "reconnectInterval",
+                                    "flex": "1 1 200px",
+                                    "description": "Base per exponential backoff (v1.1.6)"
                                 },
                                 {
-                                    "key": "roomMapping.rooms[].devices",
-                                    "title": "Dispositivi in questa stanza",
-                                    "type": "array",
-                                    "orderable": false,
-                                    "buttonText": "📱 Aggiungi Dispositivo",
-                                    "items": [
-                                        {
-                                            "type": "div",
-                                            "displayFlex": true,
-                                            "flex-direction": "column",
-                                            "items": [
-                                                {
-                                                    "key": "roomMapping.rooms[].devices[].deviceId",
-                                                    "title": "ID Dispositivo",
-                                                    "type": "string",
-                                                    "placeholder": "Es: light_9, sensor_temp_1, cover_1, zone_18",
-                                                    "description": "Inserisci l'ID del dispositivo (vedi lista sopra per esempi)",
-                                                    "pattern": "^(light_|cover_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)[0-9]+$"
-                                                },
-                                                {
-                                                    "key": "roomMapping.rooms[].devices[].deviceName",
-                                                    "title": "Nome Dispositivo",
-                                                    "type": "string",
-                                                    "readonly": true,
-                                                    "description": "Nome automatico basato sull'ID (verrà popolato dal plugin)"
-                                                }
-                                            ]
-                                        }
-                                    ]
+                                    "key": "heartbeatInterval",
+                                    "flex": "1 1 200px",
+                                    "description": "Frequenza ping keep-alive con timeout PONG (v1.1.6)"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Debug & Diagnostica",
+                    "condition": {
+                        "functionBody": "return model.showAdvanced === true;"
+                    },
+                    "items": [
+                        {
+                            "type": "flex",
+                            "flex-flow": "row wrap",
+                            "items": [
+                                {
+                                    "key": "debug",
+                                    "flex": "1 1 200px"
+                                },
+                                {
+                                    "key": "devicesSummaryDelay",
+                                    "flex": "1 1 200px",
+                                    "description": "Ritardo stampa lista dispositivi"
                                 }
                             ]
                         }

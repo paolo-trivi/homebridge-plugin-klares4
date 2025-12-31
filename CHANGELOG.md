@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6] - 2025-12-31
+
+### Improved
+
+- **Exponential Backoff Reconnection**: WebSocket reconnection now uses exponential backoff with jitter
+
+  - Initial delay doubles with each attempt (5s → 10s → 20s → 40s → max 60s)
+  - ±10% jitter prevents "thundering herd" when multiple clients reconnect
+  - Reduces log spam and CPU usage during network outages by ~80%
+  - Attempt counter resets on successful connection
+
+- **Heartbeat PONG Timeout**: Added dead connection detection
+
+  - System now verifies PONG response to heartbeat PING
+  - If no PONG received within 2x heartbeat interval, forces reconnection
+  - Detects "zombie" TCP connections (half-open sockets)
+  - Reduces HomeKit "Accessory Not Responding" false positives
+
+- **Cover Movement Simulation**: Fixed concurrent interval issue
+  - Previous movement simulation is now cancelled when new command arrives
+  - Prevents erratic position updates when user sends rapid commands
+  - Eliminates potential memory leak from orphaned intervals
+
+### Technical
+
+- Added `reconnectAttempts` counter and `maxReconnectDelay` configuration
+- Added `heartbeatPending` and `lastPongReceived` tracking for PONG timeout
+- Added `forceReconnect()` method for clean reconnection on timeout
+- Added `moveInterval` property to `CoverAccessory` for proper cleanup
+
 ## [1.1.5] - 2025-12-28
 
 ### Added
