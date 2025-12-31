@@ -165,6 +165,15 @@ export class KseniaWebSocketClient {
                     this.log.error('WebSocket error:', error.message);
                     reject(error);
                 });
+
+                // Native WebSocket pong handler for heartbeat
+                this.ws.on('pong', (): void => {
+                    this.heartbeatPending = false;
+                    this.lastPongReceived = Date.now();
+                    if (this.options.debug) {
+                        this.log.debug('Native WebSocket PONG received - connection healthy');
+                    }
+                });
             } catch (error: unknown) {
                 reject(error);
             }
@@ -228,13 +237,7 @@ export class KseniaWebSocketClient {
                         this.log.debug('PING received from system');
                     }
                     break;
-                case 'PONG':
-                    this.heartbeatPending = false;
-                    this.lastPongReceived = Date.now();
-                    if (this.options.debug) {
-                        this.log.debug('PONG received - connection healthy');
-                    }
-                    break;
+                // Note: PONG is handled via native WebSocket 'pong' event, not as JSON message
                 default:
                     if (this.options.debug) {
                         this.log.debug(`Unhandled message: ${message.CMD}`);
@@ -1030,7 +1033,7 @@ export class KseniaWebSocketClient {
         this.heartbeatPending = false;
 
         this.heartbeatTimer = setInterval((): void => {
-            if (this.isConnected && this.idLogin) {
+            if (this.isConnected && this.ws) {
                 // Check if previous heartbeat got a response
                 if (this.heartbeatPending) {
                     const timeSinceLastPong = Date.now() - this.lastPongReceived;
@@ -1044,14 +1047,19 @@ export class KseniaWebSocketClient {
                 }
 
                 this.heartbeatPending = true;
-                this.sendKseniaCommand('PING', 'HEARTBEAT', {
-                    ID_LOGIN: this.idLogin,
-                }).catch((err: unknown): void => {
+                // Use native WebSocket ping instead of application-level JSON command
+                // Ksenia Lares4 does not support custom PING commands
+                try {
+                    this.ws.ping();
+                    if (this.options.debug) {
+                        this.log.debug('Native WebSocket PING sent');
+                    }
+                } catch (err: unknown) {
                     this.log.error(
-                        'Heartbeat error:',
+                        'Heartbeat ping error:',
                         err instanceof Error ? err.message : String(err),
                     );
-                });
+                }
             }
         }, this.options.heartbeatInterval);
     }
