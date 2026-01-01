@@ -3,6 +3,8 @@ import * as https from 'https';
 import * as crypto from 'crypto';
 import type { Logger } from 'homebridge';
 
+import { LogLevel, maskSensitiveData, getEffectiveLogLevel } from './log-levels';
+
 import type {
     KseniaMessage,
     KseniaMessagePayload,
@@ -87,6 +89,11 @@ export class KseniaWebSocketClient {
     private idLogin?: string;
     private heartbeatTimer?: ReturnType<typeof setInterval>;
     private reconnectTimer?: ReturnType<typeof setTimeout>;
+    private heartbeatPending = false;
+    private lastPongReceived = 0;
+    private reconnectAttempts = 0;
+    private readonly maxReconnectDelay = 60000; // Max 60 seconds between attempts
+    private readonly logLevel: LogLevel;
 
     public onDeviceDiscovered?: (device: KseniaDevice) => void;
     public onDeviceStatusUpdate?: (device: KseniaDevice) => void;
@@ -106,10 +113,12 @@ export class KseniaWebSocketClient {
     ) {
         this.options = {
             debug: false,
+            logLevel: LogLevel.NORMAL,
             reconnectInterval: 5000,
             heartbeatInterval: 30000,
             ...options,
         };
+        this.logLevel = getEffectiveLogLevel(options.logLevel, options.debug);
     }
 
     public async connect(): Promise<void> {
@@ -161,6 +170,15 @@ export class KseniaWebSocketClient {
                     this.log.error('WebSocket error:', error.message);
                     reject(error);
                 });
+
+                // Native WebSocket pong handler for heartbeat
+                this.ws.on('pong', (): void => {
+                    this.heartbeatPending = false;
+                    this.lastPongReceived = Date.now();
+                    if (this.options.debug) {
+                        this.log.debug('Native WebSocket PONG received - connection healthy');
+                    }
+                });
             } catch (error: unknown) {
                 reject(error);
             }
@@ -191,14 +209,13 @@ export class KseniaWebSocketClient {
         try {
             const message = JSON.parse(data) as KseniaMessage;
 
-            const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
-            const isGenericRealtime =
-                message.CMD === 'REALTIME' && message.PAYLOAD_TYPE === 'CHANGES';
-
-            if (this.options.debug || (!isHeartbeat && !isGenericRealtime)) {
-                this.log.info(`Received: ${data}`);
-            } else if (isHeartbeat || isGenericRealtime) {
-                this.log.debug(`Debug: ${data}`);
+            // Security: Never log raw JSON as it may contain PIN
+            // Only log message type for DEBUG level, with sensitive data masked
+            if (this.logLevel >= LogLevel.DEBUG) {
+                const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
+                if (!isHeartbeat) {
+                    this.log.debug(`Message: ${message.CMD} / ${message.PAYLOAD_TYPE}`);
+                }
             }
 
             switch (message.CMD) {
@@ -224,6 +241,7 @@ export class KseniaWebSocketClient {
                         this.log.debug('PING received from system');
                     }
                     break;
+                // Note: PONG is handled via native WebSocket 'pong' event, not as JSON message
                 default:
                     if (this.options.debug) {
                         this.log.debug(`Unhandled message: ${message.CMD}`);
@@ -425,45 +443,63 @@ export class KseniaWebSocketClient {
 
         const payload = message.PAYLOAD;
         if (payload.STATUS_OUTPUTS) {
-            this.log.info(`Updating states for ${payload.STATUS_OUTPUTS.length} outputs`);
+            if (this.logLevel >= LogLevel.NORMAL) {
+                this.log.info(`Updating states for ${payload.STATUS_OUTPUTS.length} outputs`);
+            }
             this.updateOutputStatuses(payload.STATUS_OUTPUTS);
         }
         if (payload.STATUS_BUS_HA_SENSORS) {
-            this.log.info(`Updating states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
+            if (this.logLevel >= LogLevel.NORMAL) {
+                this.log.info(`Updating states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
+            }
             this.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
         }
         if (payload.STATUS_ZONES) {
-            this.log.info(`Updating states for ${payload.STATUS_ZONES.length} zones`);
+            if (this.logLevel >= LogLevel.NORMAL) {
+                this.log.info(`Updating states for ${payload.STATUS_ZONES.length} zones`);
+            }
             this.updateZoneStatuses(payload.STATUS_ZONES);
         }
         if (payload.STATUS_SYSTEM) {
-            this.log.info('Updating initial system temperatures');
+            if (this.logLevel >= LogLevel.NORMAL) {
+                this.log.info('Updating initial system temperatures');
+            }
             this.updateSystemTemperatures(payload.STATUS_SYSTEM as unknown as SystemTemperatureData[]);
         }
     }
 
     private handleStatusUpdate(message: KseniaMessage): void {
         const payload = message.PAYLOAD;
-        this.log.debug(`handleStatusUpdate called, payload keys: ${Object.keys(payload)}`);
+        if (this.logLevel >= LogLevel.DEBUG) {
+            this.log.debug(`handleStatusUpdate called, payload keys: ${Object.keys(payload)}`);
+        }
 
         for (const [, data] of Object.entries(payload)) {
             if (data && typeof data === 'object') {
                 const statusData = data as RealtimeStatusData;
 
                 if (statusData.STATUS_OUTPUTS) {
-                    this.log.info(`Real-time update for ${statusData.STATUS_OUTPUTS.length} outputs`);
+                    if (this.logLevel >= LogLevel.DEBUG) {
+                        this.log.debug(`Real-time update for ${statusData.STATUS_OUTPUTS.length} outputs`);
+                    }
                     this.updateOutputStatuses(statusData.STATUS_OUTPUTS);
                 }
                 if (statusData.STATUS_BUS_HA_SENSORS) {
-                    this.log.info(`Real-time update for ${statusData.STATUS_BUS_HA_SENSORS.length} sensors`);
+                    if (this.logLevel >= LogLevel.DEBUG) {
+                        this.log.debug(`Real-time update for ${statusData.STATUS_BUS_HA_SENSORS.length} sensors`);
+                    }
                     this.updateSensorStatuses(statusData.STATUS_BUS_HA_SENSORS);
                 }
                 if (statusData.STATUS_ZONES) {
-                    this.log.info(`Real-time update for ${statusData.STATUS_ZONES.length} zones`);
+                    if (this.logLevel >= LogLevel.DEBUG) {
+                        this.log.debug(`Real-time update for ${statusData.STATUS_ZONES.length} zones`);
+                    }
                     this.updateZoneStatuses(statusData.STATUS_ZONES);
                 }
                 if (statusData.STATUS_SYSTEM) {
-                    this.log.info('System temperature update');
+                    if (this.logLevel >= LogLevel.DEBUG) {
+                        this.log.debug('System temperature update');
+                    }
                     this.updateSystemTemperatures(statusData.STATUS_SYSTEM);
                 }
             }
@@ -666,9 +702,11 @@ export class KseniaWebSocketClient {
     private updateSensorStatuses(sensors: KseniaSensorStatusRaw[]): void {
         sensors.forEach((sensor: KseniaSensorStatusRaw): void => {
             if (sensor.DOMUS) {
-                this.log.debug(
-                    `Sensor update ${sensor.ID}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
-                );
+                if (this.logLevel >= LogLevel.DEBUG) {
+                    this.log.debug(
+                        `Sensor update ${sensor.ID}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
+                    );
+                }
 
                 const tempDevice = this.devices.get(`sensor_temp_${sensor.ID}`);
                 if (tempDevice && tempDevice.type === 'sensor') {
@@ -676,8 +714,8 @@ export class KseniaWebSocketClient {
                     const oldTemp = tempStatus.value;
                     const newTemp = parseFloat(sensor.DOMUS.TEM ?? '0');
                     tempStatus.value = newTemp;
-                    if (oldTemp !== newTemp && newTemp > 0) {
-                        this.log.info(`${tempDevice.name}: ${newTemp}C`);
+                    if (oldTemp !== newTemp && newTemp > 0 && this.logLevel >= LogLevel.DEBUG) {
+                        this.log.debug(`${tempDevice.name}: ${newTemp}C`);
                     }
                     this.onDeviceStatusUpdate?.(tempDevice);
                 }
@@ -688,8 +726,8 @@ export class KseniaWebSocketClient {
                     const oldHum = humStatus.value;
                     const newHum = parseInt(sensor.DOMUS.HUM ?? '50', 10);
                     humStatus.value = newHum;
-                    if (oldHum !== newHum) {
-                        this.log.info(`${humDevice.name}: ${newHum}%`);
+                    if (oldHum !== newHum && this.logLevel >= LogLevel.DEBUG) {
+                        this.log.debug(`${humDevice.name}: ${newHum}%`);
                     }
                     this.onDeviceStatusUpdate?.(humDevice);
                 }
@@ -700,8 +738,8 @@ export class KseniaWebSocketClient {
                     const oldLight = lightStatus.value;
                     const newLight = parseInt(sensor.DOMUS.LHT ?? '100', 10);
                     lightStatus.value = newLight;
-                    if (oldLight !== newLight) {
-                        this.log.info(`${lightSensorDevice.name}: ${newLight}lux`);
+                    if (oldLight !== newLight && this.logLevel >= LogLevel.DEBUG) {
+                        this.log.debug(`${lightSensorDevice.name}: ${newLight}lux`);
                     }
                     this.onDeviceStatusUpdate?.(lightSensorDevice);
                 }
@@ -711,7 +749,9 @@ export class KseniaWebSocketClient {
 
     private updateZoneStatuses(zones: KseniaZoneStatusRaw[]): void {
         zones.forEach((zone: KseniaZoneStatusRaw): void => {
-            this.log.debug(`Zone update ${zone.ID}: STA=${zone.STA}, BYP=${zone.BYP}, A=${zone.A}`);
+            if (this.logLevel >= LogLevel.DEBUG) {
+                this.log.debug(`Zone update ${zone.ID}: STA=${zone.STA}, BYP=${zone.BYP}, A=${zone.A}`);
+            }
 
             const zoneDevice = this.devices.get(`zone_${zone.ID}`);
             if (zoneDevice && zoneDevice.type === 'zone') {
@@ -725,7 +765,13 @@ export class KseniaWebSocketClient {
                 zoneStatus.fault = zone.FM === 'T';
 
                 if (oldOpen !== newOpen) {
-                    this.log.info(`${zoneDevice.name}: ${newOpen ? 'OPEN/ALARM' : 'IDLE'}`);
+                    // ALARM events always logged (security critical)
+                    // IDLE events only logged at NORMAL level or above
+                    if (newOpen) {
+                        this.log.info(`${zoneDevice.name}: OPEN/ALARM`);
+                    } else if (this.logLevel >= LogLevel.NORMAL) {
+                        this.log.info(`${zoneDevice.name}: IDLE`);
+                    }
                 }
 
                 this.onDeviceStatusUpdate?.(zoneDevice);
@@ -926,10 +972,11 @@ export class KseniaWebSocketClient {
 
         const isPing = cmd === 'PING' || payloadType === 'HEARTBEAT';
 
-        if (this.options.debug || !isPing) {
-            this.log.info(`Sending: ${jsonMessage}`);
-        } else {
-            this.log.debug(`Debug: ${jsonMessage}`);
+        // Log commands only at NORMAL level or above, and always mask PIN for security
+        if (!isPing && this.logLevel >= LogLevel.NORMAL) {
+            this.log.info(`Sending: ${maskSensitiveData(jsonMessage)}`);
+        } else if (this.logLevel >= LogLevel.DEBUG) {
+            this.log.debug(`Sending: ${maskSensitiveData(jsonMessage)}`);
         }
 
         if (cmd === 'CMD_USR' && this.options.debug) {
@@ -1015,18 +1062,57 @@ export class KseniaWebSocketClient {
             clearInterval(this.heartbeatTimer);
         }
 
+        this.lastPongReceived = Date.now();
+        this.heartbeatPending = false;
+
         this.heartbeatTimer = setInterval((): void => {
-            if (this.isConnected && this.idLogin) {
-                this.sendKseniaCommand('PING', 'HEARTBEAT', {
-                    ID_LOGIN: this.idLogin,
-                }).catch((err: unknown): void => {
+            if (this.isConnected && this.ws) {
+                // Check if previous heartbeat got a response
+                if (this.heartbeatPending) {
+                    const timeSinceLastPong = Date.now() - this.lastPongReceived;
+                    const heartbeatTimeout = (this.options.heartbeatInterval ?? 30000) * 2;
+
+                    if (timeSinceLastPong > heartbeatTimeout) {
+                        this.log.warn(`Heartbeat timeout: no PONG received for ${Math.round(timeSinceLastPong / 1000)}s - forcing reconnection`);
+                        this.forceReconnect();
+                        return;
+                    }
+                }
+
+                this.heartbeatPending = true;
+                // Use native WebSocket ping instead of application-level JSON command
+                // Ksenia Lares4 does not support custom PING commands
+                try {
+                    this.ws.ping();
+                    if (this.options.debug) {
+                        this.log.debug('Native WebSocket PING sent');
+                    }
+                } catch (err: unknown) {
                     this.log.error(
-                        'Heartbeat error:',
+                        'Heartbeat ping error:',
                         err instanceof Error ? err.message : String(err),
                     );
-                });
+                }
             }
         }, this.options.heartbeatInterval);
+    }
+
+    private forceReconnect(): void {
+        this.log.info('Forcing reconnection due to heartbeat timeout...');
+        this.heartbeatPending = false;
+
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = undefined;
+        }
+
+        if (this.ws) {
+            this.ws.terminate(); // Force close without waiting for graceful shutdown
+        }
+
+        this.isConnected = false;
+        this.onDisconnected?.();
+        this.scheduleReconnect();
     }
 
     private scheduleReconnect(): void {
@@ -1034,16 +1120,37 @@ export class KseniaWebSocketClient {
             clearTimeout(this.reconnectTimer);
         }
 
+        // Exponential backoff with jitter
+        const baseDelay = this.options.reconnectInterval ?? 5000;
+        const exponentialDelay = Math.min(
+            baseDelay * Math.pow(2, this.reconnectAttempts),
+            this.maxReconnectDelay,
+        );
+        // Add jitter (±10%) to prevent thundering herd
+        const jitter = exponentialDelay * 0.1 * (Math.random() * 2 - 1);
+        const finalDelay = Math.round(exponentialDelay + jitter);
+
+        this.log.info(
+            `Scheduling reconnection attempt ${this.reconnectAttempts + 1} in ${Math.round(finalDelay / 1000)}s...`,
+        );
+
         this.reconnectTimer = setTimeout((): void => {
-            this.log.info('Attempting reconnection...');
-            this.connect().catch((err: unknown): void => {
-                this.log.error(
-                    'Reconnection failed:',
-                    err instanceof Error ? err.message : String(err),
-                );
-                this.scheduleReconnect();
-            });
-        }, this.options.reconnectInterval);
+            this.reconnectAttempts++;
+            this.log.info(`Attempting reconnection (attempt ${this.reconnectAttempts})...`);
+            this.connect()
+                .then((): void => {
+                    // Reset attempts on successful connection
+                    this.reconnectAttempts = 0;
+                    this.log.info('Reconnection successful');
+                })
+                .catch((err: unknown): void => {
+                    this.log.error(
+                        'Reconnection failed:',
+                        err instanceof Error ? err.message : String(err),
+                    );
+                    this.scheduleReconnect();
+                });
+        }, finalDelay);
     }
 
     public disconnect(): void {

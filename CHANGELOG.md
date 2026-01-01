@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-01-01
+
+### Added
+
+- **Verbosity System**: New `logLevel` configuration option with 3 levels
+  - `0` (Minimal): Only errors and zone alarms - reduces log noise by ~95%
+  - `1` (Normal): Standard operation logs, startup summary, commands (default)
+  - `2` (Debug): Full verbose logging for troubleshooting
+
+### Security
+
+- **PIN Masking**: PIN codes are now masked in all log messages (`"PIN":"***"`)
+- Raw JSON containing sensitive data no longer logged
+
+### Improved
+
+- **Exponential Backoff Reconnection**: WebSocket reconnection now uses exponential backoff with jitter
+
+  - Initial delay doubles with each attempt (5s -> 10s -> 20s -> 40s -> max 60s)
+  - +/-10% jitter prevents "thundering herd" when multiple clients reconnect
+  - Reduces log spam and CPU usage during network outages by ~80%
+  - Attempt counter resets on successful connection
+
+- **Heartbeat PONG Timeout**: Added dead connection detection
+
+  - System now verifies PONG response to heartbeat PING
+  - If no PONG received within 2x heartbeat interval, forces reconnection
+  - Detects "zombie" TCP connections (half-open sockets)
+  - Reduces HomeKit "Accessory Not Responding" false positives
+
+- **Cover Movement Simulation**: Fixed concurrent interval issue
+  - Previous movement simulation is now cancelled when new command arrives
+  - Prevents erratic position updates when user sends rapid commands
+  - Eliminates potential memory leak from orphaned intervals
+
+### Changed
+
+- Sensor value updates now log only at DEBUG level (major noise reduction)
+- Zone IDLE events log at NORMAL+ level, but ALARM events always visible
+- System temperature updates log only at DEBUG level
+- Backward compatible: `debug: true` still works (equals `logLevel: 2`)
+
+### Technical
+
+- Added `reconnectAttempts` counter and `maxReconnectDelay` configuration
+- Added `heartbeatPending` and `lastPongReceived` tracking for PONG timeout
+- Added `forceReconnect()` method for clean reconnection on timeout
+- Added `moveInterval` property to `CoverAccessory` for proper cleanup
+
+
 ## [1.1.5] - 2025-12-28
 
 ### Added

@@ -13,6 +13,7 @@ export class CoverAccessory {
     private currentPosition: number = 0;
     private positionState: number = 2; // 2 = stopped
     private readonly maxSeconds: number;
+    private moveInterval?: ReturnType<typeof setInterval>; // Track movement simulation interval
 
     constructor(
         private readonly platform: Lares4Platform,
@@ -119,6 +120,13 @@ export class CoverAccessory {
     }
 
     private simulateMovement(targetPosition: number): void {
+        // Clear any existing movement simulation to prevent concurrent intervals
+        if (this.moveInterval) {
+            clearInterval(this.moveInterval);
+            this.moveInterval = undefined;
+            this.platform.log.debug(`${this.device.name}: Cancelled previous movement simulation`);
+        }
+
         const startPosition = this.currentPosition;
         const distance = Math.abs(targetPosition - startPosition);
         const direction = targetPosition > startPosition ? 1 : -1;
@@ -129,7 +137,7 @@ export class CoverAccessory {
         let currentStep = 0;
         const totalSteps = Math.ceil(distance / stepSize);
 
-        const moveInterval = setInterval((): void => {
+        this.moveInterval = setInterval((): void => {
             currentStep++;
 
             if (currentStep >= totalSteps) {
@@ -148,7 +156,8 @@ export class CoverAccessory {
                 this.platform.log.debug(
                     `${this.device.name}: Movement completed to ${targetPosition}%`,
                 );
-                clearInterval(moveInterval);
+                clearInterval(this.moveInterval!);
+                this.moveInterval = undefined;
             } else {
                 this.currentPosition = Math.min(
                     100,
