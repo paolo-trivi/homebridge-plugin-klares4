@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.6-beta.2] - 2026-01-01
+## [1.1.6] - 2026-01-01
 
 ### Added
 
@@ -21,21 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PIN Masking**: PIN codes are now masked in all log messages (`"PIN":"***"`)
 - Raw JSON containing sensitive data no longer logged
 
-### Changed
-
-- Sensor value updates now log only at DEBUG level (major noise reduction)
-- Zone IDLE events log at NORMAL+ level, but ALARM events always visible
-- System temperature updates log only at DEBUG level
-- Backward compatible: `debug: true` still works (equals `logLevel: 2`)
-
-## [1.1.6] - 2025-12-31
-
 ### Improved
 
 - **Exponential Backoff Reconnection**: WebSocket reconnection now uses exponential backoff with jitter
 
-  - Initial delay doubles with each attempt (5s → 10s → 20s → 40s → max 60s)
-  - ±10% jitter prevents "thundering herd" when multiple clients reconnect
+  - Initial delay doubles with each attempt (5s -> 10s -> 20s -> 40s -> max 60s)
+  - +/-10% jitter prevents "thundering herd" when multiple clients reconnect
   - Reduces log spam and CPU usage during network outages by ~80%
   - Attempt counter resets on successful connection
 
@@ -51,12 +42,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents erratic position updates when user sends rapid commands
   - Eliminates potential memory leak from orphaned intervals
 
+### Changed
+
+- Sensor value updates now log only at DEBUG level (major noise reduction)
+- Zone IDLE events log at NORMAL+ level, but ALARM events always visible
+- System temperature updates log only at DEBUG level
+- Backward compatible: `debug: true` still works (equals `logLevel: 2`)
+
 ### Technical
 
 - Added `reconnectAttempts` counter and `maxReconnectDelay` configuration
 - Added `heartbeatPending` and `lastPongReceived` tracking for PONG timeout
 - Added `forceReconnect()` method for clean reconnection on timeout
 - Added `moveInterval` property to `CoverAccessory` for proper cleanup
+
 
 ## [1.1.5] - 2025-12-28
 
