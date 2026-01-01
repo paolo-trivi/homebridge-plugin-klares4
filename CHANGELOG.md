@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-beta.2] - 2026-01-01
+
+### Added
+
+- **Verbosity System**: New `logLevel` configuration option with 3 levels
+  - `0` (Minimal): Only errors and zone alarms - reduces log noise by ~95%
+  - `1` (Normal): Standard operation logs, startup summary, commands (default)
+  - `2` (Debug): Full verbose logging for troubleshooting
+
+### Security
+
+- **PIN Masking**: PIN codes are now masked in all log messages (`"PIN":"***"`)
+- Raw JSON containing sensitive data no longer logged
+
+### Changed
+
+- Sensor value updates now log only at DEBUG level (major noise reduction)
+- Zone IDLE events log at NORMAL+ level, but ALARM events always visible
+- System temperature updates log only at DEBUG level
+- Backward compatible: `debug: true` still works (equals `logLevel: 2`)
+
 ## [1.1.6] - 2025-12-31
 
 ### Improved

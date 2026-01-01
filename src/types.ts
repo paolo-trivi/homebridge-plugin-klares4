@@ -134,6 +134,7 @@ export interface KseniaMessage {
 
 export interface KseniaWebSocketOptions {
     debug?: boolean;
+    logLevel?: number;
     reconnectInterval?: number;
     heartbeatInterval?: number;
 }

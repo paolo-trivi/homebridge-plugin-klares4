@@ -3,7 +3,7 @@
     "pluginType": "platform",
     "singular": true,
     "customUi": false,
-"headerDisplay": "<div class='text-center mb-3'><h3>klares4 - Ksenia Lares4 per Homebridge</h3><p class='text-muted'>Integrazione professionale per sistemi di sicurezza Ksenia Lares 4.0</p></div><div class='alert alert-info'><strong>Prima di iniziare, verifica che:</strong><ul class='mb-0 mt-2'><li>La centrale Lares4 sia raggiungibile in rete locale</li><li>L'accesso WebSocket sia abilitato sulla centrale</li><li>Tu disponga di un PIN utente</li></ul></div>",
+    "headerDisplay": "<div class='text-center mb-3'><h3>klares4 - Ksenia Lares4 per Homebridge</h3><p class='text-muted'>Integrazione professionale per sistemi di sicurezza Ksenia Lares 4.0</p></div><div class='alert alert-info'><strong>Prima di iniziare, verifica che:</strong><ul class='mb-0 mt-2'><li>La centrale Lares4 sia raggiungibile in rete locale</li><li>L'accesso WebSocket sia abilitato sulla centrale</li><li>Tu disponga di un PIN utente</li></ul></div>",
     "footerDisplay": "<div class='text-center mt-4 pt-3 border-top'><p class='text-muted mb-2'>Versione 1.1.6 • Sviluppato da Paolo Trivisonno</p><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' class='btn btn-sm btn-outline-primary mr-2'>Documentazione</a> <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' class='btn btn-sm btn-outline-secondary mr-2'>Segnala Bug</a> <a href='https://github.com/sponsors/paolo-trivi' target='_blank' class='btn btn-sm btn-outline-success'>Supporta</a></div>",
     "schema": {
         "type": "object",
@@ -64,10 +64,30 @@
                 "description": "Abilita per personalizzare timing, heartbeat e parametri di rete"
             },
             "debug": {
-                "title": "Modalità Debug",
+                "title": "Modalita Debug (Legacy)",
                 "type": "boolean",
                 "default": false,
-                "description": "Attiva logging dettagliato per diagnostica - genera molti log"
+                "description": "Deprecated: usa logLevel invece. Attiva logging dettagliato"
+            },
+            "logLevel": {
+                "title": "Livello Log",
+                "type": "integer",
+                "default": 1,
+                "oneOf": [
+                    {
+                        "title": "0 - Minimal (solo errori e allarmi)",
+                        "const": 0
+                    },
+                    {
+                        "title": "1 - Normal (funzionamento standard)",
+                        "const": 1
+                    },
+                    {
+                        "title": "2 - Debug (dettagliato per diagnostica)",
+                        "const": 2
+                    }
+                ],
+                "description": "Controlla la quantita di messaggi nei log"
             },
             "maxSeconds": {
                 "title": "Tempo Massimo Movimento Tapparelle",
@@ -210,7 +230,10 @@
                         "title": "Step Regolazione",
                         "type": "number",
                         "default": 0.5,
-                        "enum": [0.5, 1]
+                        "enum": [
+                            0.5,
+                            1
+                        ]
                     }
                 }
             },
@@ -260,9 +283,18 @@
                         "type": "integer",
                         "default": 1,
                         "oneOf": [
-                            { "title": "0 - At most once (fastest)", "const": 0 },
-                            { "title": "1 - At least once (recommended)", "const": 1 },
-                            { "title": "2 - Exactly once (slowest)", "const": 2 }
+                            {
+                                "title": "0 - At most once (fastest)",
+                                "const": 0
+                            },
+                            {
+                                "title": "1 - At least once (recommended)",
+                                "const": 1
+                            },
+                            {
+                                "title": "2 - Exactly once (slowest)",
+                                "const": 2
+                            }
                         ],
                         "description": "Livello di garanzia consegna messaggi"
                     },
@@ -313,17 +345,24 @@
                                                 "readOnly": true
                                             }
                                         },
-                                        "required": ["deviceId"]
+                                        "required": [
+                                            "deviceId"
+                                        ]
                                     }
                                 }
                             },
-                            "required": ["roomName"]
+                            "required": [
+                                "roomName"
+                            ]
                         }
                     }
                 }
             }
         },
-        "required": ["ip", "pin"]
+        "required": [
+            "ip",
+            "pin"
+        ]
     },
     "layout": [
         {

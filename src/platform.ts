@@ -10,6 +10,8 @@ import type {
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { getEffectiveLogLevel } from './log-levels';
+
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { KseniaWebSocketClient } from './websocket-client';
 import type {
@@ -52,6 +54,7 @@ export interface Lares4Config extends PlatformConfig {
     https?: boolean;
     port?: number;
     debug?: boolean;
+    logLevel?: number;
     maxSeconds?: number;
     reconnectInterval?: number;
     heartbeatInterval?: number;
@@ -175,6 +178,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 this.log,
                 {
                     debug: this.config.debug ?? false,
+                    logLevel: getEffectiveLogLevel(this.config.logLevel, this.config.debug),
                     reconnectInterval: this.config.reconnectInterval ?? 5000,
                     heartbeatInterval: this.config.heartbeatInterval ?? 30000,
                 },
