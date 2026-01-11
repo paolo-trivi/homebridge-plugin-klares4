@@ -26,6 +26,7 @@ import type {
     RoomMappingConfig,
 } from './types';
 import { MqttBridge } from './mqtt-bridge';
+import { DebugCaptureManager } from './debug-capture';
 import { LightAccessory } from './accessories/light-accessory';
 import { CoverAccessory } from './accessories/cover-accessory';
 import { SensorAccessory } from './accessories/sensor-accessory';
@@ -79,6 +80,7 @@ export interface Lares4Config extends PlatformConfig {
     devicesSummaryDelay?: number;
     mqtt?: MqttConfig;
     roomMapping?: RoomMappingConfig;
+    generateDebugFile?: boolean;
 }
 
 /**
@@ -196,6 +198,16 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             if (this.config.mqtt?.enabled) {
                 this.mqttBridge = new MqttBridge(this.config.mqtt, this.log, this);
                 this.log.info('MQTT Bridge initialized');
+            }
+
+            // Check if debug file generation was requested
+            if (this.config.generateDebugFile) {
+                this.log.warn('⚠️  Debug capture requested - starting 60-second capture...');
+                const debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
+                debugCapture.startCapture(this.wsClient, 60000);
+                
+                // Disable the flag after starting capture
+                this.disableDebugFlag();
             }
 
             this.log.info('Ksenia Lares4 initialized successfully');
@@ -629,5 +641,27 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.log.info('Removing accessory:', accessory.displayName);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
         this.accessories.delete(accessory.UUID);
+    }
+
+    /**
+     * Disable the debug flag in config.json to prevent re-triggering
+     */
+    private disableDebugFlag(): void {
+        try {
+            const configPath = path.join(this.api.user.storagePath(), 'config.json');
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            
+            const platformConfig = config.platforms?.find((p: any) => p.platform === 'Lares4Complete');
+            if (platformConfig && platformConfig.generateDebugFile) {
+                platformConfig.generateDebugFile = false;
+                fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+                this.log.info('✅ Debug flag disabled in config.json');
+            }
+        } catch (error: unknown) {
+            this.log.error(
+                'Failed to disable debug flag:',
+                error instanceof Error ? error.message : String(error),
+            );
+        }
     }
 }

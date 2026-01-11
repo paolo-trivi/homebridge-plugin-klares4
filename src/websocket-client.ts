@@ -1257,4 +1257,11 @@ export class KseniaWebSocketClient {
             }
         });
     }
+
+    /**
+     * Get all discovered devices (for debug purposes)
+     */
+    public getAllDevices(): KseniaDevice[] {
+        return Array.from(this.devices.values());
+    }
 }
