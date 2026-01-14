@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-01-14
+
+### Added
+
+- **Comprehensive Debug Capture System**: New 60-second diagnostic tool
+  - Captures ALL raw WebSocket messages (incoming and outgoing)
+  - Multiple device snapshots every 10 seconds during capture
+  - Complete message analysis by type and command
+  - Automatic PIN masking for security
+  - Clear on-screen instructions for users to test non-working entities
+  - Generates complete JSON file with everything needed for support
+  - File location printed in logs: `~/.homebridge/klares4-debug-*.json`
+
+### Improved
+
+- **Enhanced Config UI**: Better debug section with step-by-step instructions
+  - Added helpful alerts explaining what to do during capture
+  - Clear file location display in UI
+  - Simplified user experience for generating debug files
+
 ## [1.1.6] - 2026-01-01
 
 ### Added
