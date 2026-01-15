@@ -12,6 +12,7 @@ import type {
     KseniaDevice,
     KseniaLight,
     KseniaCover,
+    KseniaGate,
     KseniaThermostat,
     KseniaSensor,
     KseniaZone,
@@ -332,7 +333,7 @@ export class KseniaWebSocketClient {
                 this.log.info(`Found ${payload.OUTPUTS.length} outputs`);
                 payload.OUTPUTS.forEach((output: KseniaOutputData): void => {
                     const category = output.CAT ?? output.TYPE ?? '';
-                    const type = this.determineOutputType(category);
+                    const type = this.determineOutputType(category, output.MOD);
 
                     if (type === 'thermostat' && this.options.debug) {
                         this.log.debug(
@@ -521,9 +522,10 @@ export class KseniaWebSocketClient {
         };
     }
 
-    private parseOutputData(outputData: KseniaOutputData): KseniaLight | KseniaCover | null {
+    private parseOutputData(outputData: KseniaOutputData): KseniaLight | KseniaCover | KseniaGate | null {
         const category = outputData.CAT ?? outputData.TYPE ?? '';
         const categoryUpper = category.toUpperCase();
+        const mode = outputData.MOD;
         const systemId = outputData.ID;
 
         if (categoryUpper === 'LIGHT') {
@@ -550,6 +552,19 @@ export class KseniaWebSocketClient {
                 },
             };
         } else if (categoryUpper === 'GATE') {
+            // GATE monostabili (MOD: M) sono switch
+            if (mode === 'M') {
+                return {
+                    id: `gate_${systemId}`,
+                    type: 'gate',
+                    name: outputData.DES || `Gate ${systemId}`,
+                    description: outputData.DES || '',
+                    status: {
+                        on: false,
+                    },
+                };
+            }
+            // Altri GATE sono cover
             return {
                 id: `cover_${systemId}`,
                 type: 'cover',
@@ -578,10 +593,10 @@ export class KseniaWebSocketClient {
         };
     }
 
-    private determineOutputType(category: string): 'light' | 'cover' | 'thermostat' | 'scenario' {
+    private determineOutputType(category: string, mode?: string): 'light' | 'cover' | 'gate' | 'thermostat' | 'scenario' {
         const catUpper = category.toUpperCase();
 
-        this.log.debug(`Determining type for category: "${category}" (normalized: "${catUpper}")`);
+        this.log.debug(`Determining type for category: "${category}" (normalized: "${catUpper}"), mode: "${mode || 'N/A'}"`);
 
         if (catUpper === 'ROLL') {
             this.log.debug(`Identified as cover: ${category}`);
@@ -594,6 +609,11 @@ export class KseniaWebSocketClient {
         }
 
         if (catUpper === 'GATE') {
+            // GATE monostabili (MOD: M) sono switch, altri possono essere cover
+            if (mode === 'M') {
+                this.log.debug(`Identified as gate (monostable switch): ${category}`);
+                return 'gate';
+            }
             this.log.debug(`Identified as gate (treated as cover): ${category}`);
             return 'cover';
         }
@@ -886,6 +906,24 @@ export class KseniaWebSocketClient {
         });
 
         this.log.info(`Cover command sent: Output ${systemOutputId} -> ${command}`);
+    }
+
+    public async toggleGate(gateId: string): Promise<void> {
+        if (!this.idLogin) throw new Error('Not connected');
+
+        const systemOutputId = gateId.replace('gate_', '');
+
+        // GATE monostabili usano comando ON
+        await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
+            ID_LOGIN: 'true',
+            PIN: 'true',
+            OUTPUT: {
+                ID: systemOutputId,
+                STA: 'ON',
+            },
+        });
+
+        this.log.info(`Gate command sent: Output ${systemOutputId} -> ON (momentary)`);
     }
 
     public async setThermostatMode(

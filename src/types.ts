@@ -43,6 +43,10 @@ export interface ScenarioStatus {
     active: boolean;
 }
 
+export interface GateStatus {
+    on: boolean;
+}
+
 // ============================================================================
 // Device Interfaces (Discriminated Union)
 // ============================================================================
@@ -87,6 +91,11 @@ export interface KseniaScenario extends KseniaDeviceBase {
     status: ScenarioStatus;
 }
 
+export interface KseniaGate extends KseniaDeviceBase {
+    type: 'gate';
+    status: GateStatus;
+}
+
 /**
  * Discriminated union of all device types
  */
@@ -96,7 +105,8 @@ export type KseniaDevice =
     | KseniaThermostat
     | KseniaSensor
     | KseniaZone
-    | KseniaScenario;
+    | KseniaScenario
+    | KseniaGate;
 
 // ============================================================================
 // WebSocket Message Interfaces
@@ -151,6 +161,7 @@ export interface KseniaOutputData {
     POS?: string;
     ENABLED: string;
     CAT?: string;
+    MOD?: string; // Modalità: M=Monostabile, B=Bistabile, BDP=Biposizionale, etc.
 }
 
 export interface KseniaZoneData {

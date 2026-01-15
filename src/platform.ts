@@ -18,6 +18,7 @@ import type {
     KseniaDevice,
     KseniaLight,
     KseniaCover,
+    KseniaGate,
     KseniaThermostat,
     KseniaSensor,
     KseniaZone,
@@ -29,6 +30,7 @@ import { MqttBridge } from './mqtt-bridge';
 import { DebugCaptureManager } from './debug-capture';
 import { LightAccessory } from './accessories/light-accessory';
 import { CoverAccessory } from './accessories/cover-accessory';
+import { GateAccessory } from './accessories/gate-accessory';
 import { SensorAccessory } from './accessories/sensor-accessory';
 import { ZoneAccessory } from './accessories/zone-accessory';
 import { ThermostatAccessory } from './accessories/thermostat-accessory';
@@ -40,6 +42,7 @@ import { ScenarioAccessory } from './accessories/scenario-accessory';
 export type AccessoryHandler =
     | LightAccessory
     | CoverAccessory
+    | GateAccessory
     | SensorAccessory
     | ZoneAccessory
     | ThermostatAccessory
@@ -268,6 +271,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 } else if (
                     device.type === 'light' ||
                     device.type === 'cover' ||
+                    device.type === 'gate' ||
                     device.type === 'thermostat'
                 ) {
                     devicesList.outputs.push(deviceInfo);
@@ -484,6 +488,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         if (
             (device.type === 'light' ||
                 device.type === 'cover' ||
+                device.type === 'gate' ||
                 device.type === 'thermostat') &&
             this.config.excludeOutputs?.includes(id)
         ) {
@@ -511,7 +516,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         if (device.type === 'zone') {
             return this.config.customNames?.zones?.[id];
         }
-        if (device.type === 'light' || device.type === 'cover' || device.type === 'thermostat') {
+        if (device.type === 'light' || device.type === 'cover' || device.type === 'gate' || device.type === 'thermostat') {
             return this.config.customNames?.outputs?.[id];
         }
         if (device.type === 'sensor') {
@@ -610,6 +615,10 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             case 'cover':
                 handler = new CoverAccessory(this, accessory);
                 this.log.debug(`Created handler for cover: ${device.name}`);
+                break;
+            case 'gate':
+                handler = new GateAccessory(this, accessory);
+                this.log.debug(`Created handler for gate: ${device.name}`);
                 break;
             case 'sensor':
                 handler = new SensorAccessory(this, accessory);
