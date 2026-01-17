@@ -223,14 +223,12 @@ export interface KseniaZoneStatusRaw {
 }
 
 export interface KseniaSystemStatus {
-    TEMPS?: KseniaSystemTemperature[];
+    ID?: string;
+    TEMP?: {
+        IN?: string;
+        OUT?: string;
+    };
     [key: string]: unknown;
-}
-
-export interface KseniaSystemTemperature {
-    ID: string;
-    VALUE: string;
-    UNIT?: string;
 }
 
 export interface KseniaOutputCommand {

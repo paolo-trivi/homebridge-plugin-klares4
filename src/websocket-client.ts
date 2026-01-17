@@ -59,6 +59,7 @@ interface SystemTemperatureData {
         IN?: string;
         OUT?: string;
     };
+    [key: string]: unknown;
 }
 
 /**
@@ -1232,37 +1233,52 @@ export class KseniaWebSocketClient {
             }
 
             if (system.TEMP) {
-                const internalTemp = system.TEMP.IN
-                    ? parseFloat(system.TEMP.IN.replace('+', ''))
+                // Parse temperature values, checking for 'NA' (not available)
+                const internalTempStr = system.TEMP.IN;
+                const externalTempStr = system.TEMP.OUT;
+                
+                const internalTemp = internalTempStr && internalTempStr !== 'NA'
+                    ? parseFloat(internalTempStr.replace('+', ''))
                     : undefined;
-                const externalTemp = system.TEMP.OUT
-                    ? parseFloat(system.TEMP.OUT.replace('+', ''))
+                const externalTemp = externalTempStr && externalTempStr !== 'NA'
+                    ? parseFloat(externalTempStr.replace('+', ''))
                     : undefined;
 
-                let logTemperatures = this.options.debug ?? false;
-
-                if (internalTemp !== undefined) {
-                    this.devices.forEach((device: KseniaDevice): void => {
-                        if (device.type === 'thermostat') {
-                            const thermostatStatus = device.status as ThermostatStatus;
-                            const oldCurrentTemp = thermostatStatus.currentTemperature;
-                            if (
-                                oldCurrentTemp === undefined ||
-                                Math.abs(oldCurrentTemp - internalTemp) >= 0.5
-                            ) {
-                                logTemperatures = true;
-                            }
+                // Handle internal temperature sensor
+                if (internalTemp !== undefined && !isNaN(internalTemp)) {
+                    const sensorId = 'sensor_system_temp_in';
+                    let tempDevice = this.devices.get(sensorId);
+                    
+                    if (!tempDevice) {
+                        // Create new internal temperature sensor
+                        tempDevice = {
+                            id: sensorId,
+                            type: 'sensor',
+                            name: 'Temperatura Interna',
+                            description: 'Temperatura interna centrale',
+                            status: {
+                                sensorType: 'temperature',
+                                value: internalTemp,
+                                unit: 'C',
+                            },
+                        } as KseniaSensor;
+                        this.devices.set(sensorId, tempDevice);
+                        this.onDeviceDiscovered?.(tempDevice);
+                        if (this.logLevel >= LogLevel.NORMAL) {
+                            this.log.info(`Internal temperature sensor discovered: ${internalTemp}C`);
                         }
-                    });
-                }
-
-                if (logTemperatures) {
-                    this.log.info(
-                        `System temperatures: Internal=${internalTemp}C, External=${externalTemp}C`,
-                    );
-                }
-
-                if (internalTemp !== undefined) {
+                    } else if (tempDevice.type === 'sensor') {
+                        // Update existing sensor
+                        const tempStatus = tempDevice.status as SensorStatus;
+                        const oldTemp = tempStatus.value;
+                        tempStatus.value = internalTemp;
+                        if (oldTemp !== internalTemp && this.logLevel >= LogLevel.DEBUG) {
+                            this.log.debug(`Temperatura Interna: ${internalTemp}C`);
+                        }
+                        this.onDeviceStatusUpdate?.(tempDevice);
+                    }
+                    
+                    // Update thermostats with internal temperature
                     this.devices.forEach((device: KseniaDevice): void => {
                         if (device.type === 'thermostat') {
                             const thermostatStatus = device.status as ThermostatStatus;
@@ -1283,14 +1299,51 @@ export class KseniaWebSocketClient {
                                 oldCurrentTemp === undefined ||
                                 Math.abs(oldCurrentTemp - internalTemp) >= 0.5
                             ) {
-                                this.log.info(
-                                    `${device.name}: Current temperature updated to ${internalTemp}C`,
-                                );
+                                if (this.logLevel >= LogLevel.NORMAL) {
+                                    this.log.info(
+                                        `${device.name}: Current temperature updated to ${internalTemp}C`,
+                                    );
+                                }
                             }
 
                             this.onDeviceStatusUpdate?.(device);
                         }
                     });
+                }
+
+                // Handle external temperature sensor
+                if (externalTemp !== undefined && !isNaN(externalTemp)) {
+                    const sensorId = 'sensor_system_temp_out';
+                    let tempDevice = this.devices.get(sensorId);
+                    
+                    if (!tempDevice) {
+                        // Create new external temperature sensor
+                        tempDevice = {
+                            id: sensorId,
+                            type: 'sensor',
+                            name: 'Temperatura Esterna',
+                            description: 'Temperatura esterna centrale',
+                            status: {
+                                sensorType: 'temperature',
+                                value: externalTemp,
+                                unit: 'C',
+                            },
+                        } as KseniaSensor;
+                        this.devices.set(sensorId, tempDevice);
+                        this.onDeviceDiscovered?.(tempDevice);
+                        if (this.logLevel >= LogLevel.NORMAL) {
+                            this.log.info(`External temperature sensor discovered: ${externalTemp}C`);
+                        }
+                    } else if (tempDevice.type === 'sensor') {
+                        // Update existing sensor
+                        const tempStatus = tempDevice.status as SensorStatus;
+                        const oldTemp = tempStatus.value;
+                        tempStatus.value = externalTemp;
+                        if (oldTemp !== externalTemp && this.logLevel >= LogLevel.DEBUG) {
+                            this.log.debug(`Temperatura Esterna: ${externalTemp}C`);
+                        }
+                        this.onDeviceStatusUpdate?.(tempDevice);
+                    }
                 }
             }
         });
