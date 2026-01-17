@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.7-beta2] - 2026-01-17
+
+### Added
+
+- **System Temperature Sensors**: New automatic sensors for system temperatures
+  - Internal temperature sensor (`Temperatura Interna`) from central unit
+  - External temperature sensor (`Temperatura Esterna`) from external probe (if available)
+  - Sensors are created dynamically only when temperature data is available (not "NA")
+  - Real-time updates via STATUS_SYSTEM messages
+  - Follows the same pattern as BUS_HA sensors for consistency
+  - Can be assigned to different rooms and used in HomeKit automations
+
+### Improved
+
+- Enhanced temperature handling with proper NA (not available) detection
+- Type-safe implementation with updated interfaces for STATUS_SYSTEM data structure
+
 ## [1.1.6-beta.4] - 2026-01-11
 
 ### Added
