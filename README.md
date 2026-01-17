@@ -17,6 +17,7 @@ Complete plugin for Ksenia Lares4 systems integrating security zones, lights, co
 - **Smart Covers**: Percentage control with configurable timing
 - **Thermostats**: Temperature and heating/cooling mode control
 - **Environmental Sensors**: Real-time temperature, humidity, and light levels
+- **System Temperature Sensors**: Internal and external temperature from central unit
 - **Real-time Updates**: WebSocket connection with automatic reconnection
 - **UI Configuration**: Complete graphical interface in Homebridge UI
 - **Customization**: Custom names and selective entity exclusion
@@ -232,6 +233,42 @@ Enable debug logging for detailed diagnostics:
 }
 ```
 
+### Roadmap
+
+#### Planned for v1.1.8-beta
+
+The following entity types are currently not supported but are planned for the next beta release:
+
+##### 🚿 Irrigation Systems (IRR)
+
+- **Type**: Switch (bistable)
+- **Examples**: Drip irrigation, garden zones, lawn sprinklers
+- **HomeKit Mapping**: Valve/Switch accessories
+- **Status**: Planned
+
+##### 🔔 Indicators & Status LEDs (GEN, MOD:S)
+
+- **Type**: Read-only sensors/switches
+- **Examples**: Zone status indicators, system LEDs
+- **HomeKit Mapping**: Contact Sensor (read-only)
+- **Status**: Planned
+
+##### 🚨 Sirens & Alarms (GEN, MOD:AT)
+
+- **Type**: Switch (manual control)
+- **Examples**: External siren, internal siren
+- **HomeKit Mapping**: Switch with security considerations
+- **Status**: Under evaluation
+
+##### 🔗 Alarm Bridges (GEN, MOD:A)
+
+- **Type**: Read-only sensors
+- **Examples**: State bridges, alarm bridges
+- **HomeKit Mapping**: Contact Sensor (read-only)
+- **Status**: Planned
+
+**Note**: These features will be implemented based on user feedback and testing. If you have one of these devices and would like to help with testing, please open an issue on GitHub.
+
 ### License
 
 This project is released under the MIT license.
@@ -240,7 +277,7 @@ This project is released under the MIT license.
 
 - [Homebridge](https://homebridge.io/)
 - [Homebridge UI](https://github.com/homebridge/homebridge-config-ui-x)
-- [Ksenia Security](https://www.ksenia.it/)
+- [Ksenia Security](https://www.kseniasecurity.com/)
 
 ---
 
@@ -252,8 +289,7 @@ This project is released under the MIT license.
 - **Controllo Luci**: Accensione/spegnimento di tutte le luci del sistema
 - **Tapparelle Intelligenti**: Controllo percentuale con timing configurabile
 - **Termostati**: Controllo temperatura e modalita riscaldamento/raffreddamento
-- **Sensori Ambientali**: Temperatura, umidita e luminosita in tempo reale
-- **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
+- **Sensori Ambientali**: Temperatura, umidita e luminosita in tempo reale- **Sensori Temperatura Sistema**: Temperatura interna ed esterna dalla centrale- **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
 - **Configurazione UI**: Interfaccia grafica completa in Homebridge UI
 - **Personalizzazione**: Nomi personalizzati ed esclusione selettiva di entita
 - **Bridge MQTT**: Pubblicazione stati e ricezione comandi via MQTT (opzionale)
@@ -482,11 +518,47 @@ I contributi sono benvenuti! Per contribuire:
 
 Questo progetto e rilasciato sotto licenza MIT.
 
+### Roadmap
+
+#### Pianificato per v1.1.8-beta
+
+I seguenti tipi di entità non sono attualmente supportati ma sono pianificati per la prossima release beta:
+
+##### 🚿 Sistemi di Irrigazione (IRR)
+
+- **Tipo**: Switch (bistabile)
+- **Esempi**: Irrigazione a goccia, zone giardino, irrigatori
+- **Mappatura HomeKit**: Accessori Valve/Switch
+- **Stato**: Pianificato
+
+##### 🔔 Indicatori e LED di Stato (GEN, MOD:S)
+
+- **Tipo**: Sensori/switch in sola lettura
+- **Esempi**: Spie stato zone, LED di sistema
+- **Mappatura HomeKit**: Sensore di contatto (sola lettura)
+- **Stato**: Pianificato
+
+##### 🚨 Sirene e Allarmi (GEN, MOD:AT)
+
+- **Tipo**: Switch (controllo manuale)
+- **Esempi**: Sirena esterna, sirena interna
+- **Mappatura HomeKit**: Switch con considerazioni di sicurezza
+- **Stato**: In valutazione
+
+##### 🔗 Ponti Allarme (GEN, MOD:A)
+
+- **Tipo**: Sensori in sola lettura
+- **Esempi**: Ponti di stato, ponti allarme
+- **Mappatura HomeKit**: Sensore di contatto (sola lettura)
+- **Stato**: Pianificato
+
+**Nota**: Queste funzionalità verranno implementate in base al feedback degli utenti e ai test. Se hai uno di questi dispositivi e desideri aiutare con i test, apri una issue su GitHub.
+
 ### Link Utili
 
 - [Homebridge](https://homebridge.io/)
 - [Homebridge UI](https://github.com/homebridge/homebridge-config-ui-x)
-- [Ksenia Security](https://www.ksenia.it/)
+- [Ksenia Security](https://www.kseniasecurity.com/)
 
 ---
 
