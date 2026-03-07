@@ -1,6 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { Lares4Platform, Lares4Config } from '../platform';
-import type { KseniaCover, CoverStatus } from '../types';
+import type { KseniaCover } from '../types';
 
 /**
  * Cover Accessory Handler

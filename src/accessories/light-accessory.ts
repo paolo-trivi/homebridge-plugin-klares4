@@ -1,6 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { Lares4Platform } from '../platform';
-import type { KseniaLight, LightStatus } from '../types';
+import type { KseniaLight } from '../types';
 
 /**
  * Light Accessory Handler

@@ -1,6 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { Lares4Platform } from '../platform';
-import type { KseniaSensor, SensorStatus } from '../types';
+import type { KseniaSensor } from '../types';
 
 /**
  * Sensor Accessory Handler
