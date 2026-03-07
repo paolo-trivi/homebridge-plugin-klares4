@@ -1,6 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { Lares4Platform } from '../platform';
-import type { KseniaZone, ZoneStatus } from '../types';
+import type { KseniaZone } from '../types';
 
 /**
  * Zone Accessory Handler

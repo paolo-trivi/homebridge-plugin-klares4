@@ -1,6 +1,12 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { Lares4Platform, Lares4Config } from '../platform';
-import type { KseniaThermostat, ThermostatStatus } from '../types';
+import type { KseniaThermostat } from '../types';
+import {
+    deriveHomeKitCurrentState,
+    domainModeToHomeKitTarget,
+    homeKitTargetToDomainMode,
+} from '../thermostat-mode';
+import { syncThermostatTopLevelFromStatus, updateThermostatStatus } from '../thermostat-state';
 
 /**
  * Thermostat Accessory Handler
@@ -15,6 +21,7 @@ export class ThermostatAccessory {
         private readonly accessory: PlatformAccessory,
     ) {
         this.device = accessory.context.device as KseniaThermostat;
+        syncThermostatTopLevelFromStatus(this.device);
 
         const accessoryInfoService = this.accessory.getService(
             this.platform.Service.AccessoryInformation,
@@ -72,53 +79,19 @@ export class ThermostatAccessory {
     }
 
     public async getCurrentHeatingCoolingState(): Promise<CharacteristicValue> {
-        // 0 = Off, 1 = Heat, 2 = Cool
-        switch (this.device.mode) {
-            case 'heat':
-                return this.device.currentTemperature < this.device.targetTemperature ? 1 : 0;
-            case 'cool':
-                return this.device.currentTemperature > this.device.targetTemperature ? 2 : 0;
-            default:
-                return 0; // Off
-        }
+        return this.deriveCurrentState(this.device);
     }
 
     public async getTargetHeatingCoolingState(): Promise<CharacteristicValue> {
-        // 0 = Off, 1 = Heat, 2 = Cool, 3 = Auto
-        switch (this.device.mode) {
-            case 'heat':
-                return 1;
-            case 'cool':
-                return 2;
-            case 'auto':
-                return 3;
-            default:
-                return 0; // Off
-        }
+        return domainModeToHomeKitTarget(this.device.mode);
     }
 
     public async setTargetHeatingCoolingState(value: CharacteristicValue): Promise<void> {
-        const targetState = value as number;
-        let newMode: 'off' | 'heat' | 'cool' | 'auto';
-
-        switch (targetState) {
-            case 1:
-                newMode = 'heat';
-                break;
-            case 2:
-                newMode = 'cool';
-                break;
-            case 3:
-                newMode = 'auto';
-                break;
-            default:
-                newMode = 'off';
-                break;
-        }
+        const newMode = homeKitTargetToDomainMode(value as number);
 
         try {
             await this.platform.wsClient?.setThermostatMode(this.device.id, newMode);
-            this.device.mode = newMode;
+            updateThermostatStatus(this.device, { mode: newMode });
 
             this.platform.log.info(`${this.device.name}: Mode ${newMode}`);
         } catch (error: unknown) {
@@ -163,7 +136,7 @@ export class ThermostatAccessory {
 
         try {
             await this.platform.wsClient?.setThermostatTemperature(this.device.id, targetTemperature);
-            this.device.targetTemperature = targetTemperature;
+            updateThermostatStatus(this.device, { targetTemperature });
 
             this.platform.log.info(`${this.device.name}: Target temperature ${targetTemperature}C`);
         } catch (error: unknown) {
@@ -189,30 +162,8 @@ export class ThermostatAccessory {
     }
 
     private updateCharacteristics(): void {
-        let currentState = 0; // Off
-        switch (this.device.mode) {
-            case 'heat':
-                currentState =
-                    this.device.currentTemperature < this.device.targetTemperature ? 1 : 0;
-                break;
-            case 'cool':
-                currentState =
-                    this.device.currentTemperature > this.device.targetTemperature ? 2 : 0;
-                break;
-        }
-
-        let targetState = 0; // Off
-        switch (this.device.mode) {
-            case 'heat':
-                targetState = 1;
-                break;
-            case 'cool':
-                targetState = 2;
-                break;
-            case 'auto':
-                targetState = 3;
-                break;
-        }
+        const currentState = this.deriveCurrentState(this.device);
+        const targetState = this.deriveTargetState(this.device.mode);
 
         this.service.updateCharacteristic(
             this.platform.Characteristic.CurrentHeatingCoolingState,
@@ -255,6 +206,7 @@ export class ThermostatAccessory {
     }
 
     public updateStatus(newDevice: KseniaThermostat): void {
+        syncThermostatTopLevelFromStatus(newDevice);
         const oldDevice = this.device;
         this.device = newDevice;
 
@@ -272,39 +224,22 @@ export class ThermostatAccessory {
             );
         }
 
-        if (oldDevice.mode !== newDevice.mode) {
-            let targetState = 0;
-            switch (newDevice.mode) {
-                case 'heat':
-                    targetState = 1;
-                    break;
-                case 'cool':
-                    targetState = 2;
-                    break;
-                case 'auto':
-                    targetState = 3;
-                    break;
-            }
-
-            let currentState = 0;
-            switch (newDevice.mode) {
-                case 'heat':
-                    currentState =
-                        newDevice.currentTemperature < newDevice.targetTemperature ? 1 : 0;
-                    break;
-                case 'cool':
-                    currentState =
-                        newDevice.currentTemperature > newDevice.targetTemperature ? 2 : 0;
-                    break;
-            }
-
+        if (
+            oldDevice.mode !== newDevice.mode ||
+            oldDevice.currentTemperature !== newDevice.currentTemperature ||
+            oldDevice.targetTemperature !== newDevice.targetTemperature
+        ) {
             this.service.updateCharacteristic(
                 this.platform.Characteristic.TargetHeatingCoolingState,
-                targetState,
+                domainModeToHomeKitTarget(newDevice.mode),
             );
             this.service.updateCharacteristic(
                 this.platform.Characteristic.CurrentHeatingCoolingState,
-                currentState,
+                deriveHomeKitCurrentState(
+                    newDevice.mode,
+                    newDevice.currentTemperature,
+                    newDevice.targetTemperature,
+                ),
             );
         }
 
@@ -317,6 +252,18 @@ export class ThermostatAccessory {
 
         this.platform.log.debug(
             `Updated thermostat ${this.device.name}: ${this.device.currentTemperature}C -> ${this.device.targetTemperature}C (${this.device.mode})`,
+        );
+    }
+
+    private deriveTargetState(mode: 'off' | 'heat' | 'cool' | 'auto'): 0 | 1 | 2 | 3 {
+        return domainModeToHomeKitTarget(mode);
+    }
+
+    private deriveCurrentState(device: KseniaThermostat): 0 | 1 | 2 {
+        return deriveHomeKitCurrentState(
+            device.mode,
+            device.currentTemperature,
+            device.targetTemperature,
         );
     }
 }
