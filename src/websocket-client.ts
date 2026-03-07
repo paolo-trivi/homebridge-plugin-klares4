@@ -95,6 +95,7 @@ export class KseniaWebSocketClient {
     private lastPongReceived = 0;
     private reconnectAttempts = 0;
     private readonly maxReconnectDelay = 60000; // Max 60 seconds between attempts
+    private isManualClose = false; // Prevents close event from scheduling reconnect when we close intentionally
     private readonly logLevel: LogLevel;
 
     public onDeviceDiscovered?: (device: KseniaDevice) => void;
@@ -165,7 +166,10 @@ export class KseniaWebSocketClient {
                     this.log.warn(`WebSocket closed: ${code} - ${reason.toString()}`);
                     this.isConnected = false;
                     this.onDisconnected?.();
-                    this.scheduleReconnect();
+                    if (!this.isManualClose) {
+                        this.scheduleReconnect();
+                    }
+                    this.isManualClose = false;
                 });
 
                 this.ws.on('error', (error: Error): void => {
@@ -1039,7 +1043,7 @@ export class KseniaWebSocketClient {
         }
 
         const messageStr = JSON.stringify(message);
-        this.log.info(`Sending: ${messageStr}`);
+        this.log.info(`Sending: ${maskSensitiveData(messageStr)}`);
 
         this.ws.send(messageStr);
     }
@@ -1146,7 +1150,21 @@ export class KseniaWebSocketClient {
         }
 
         if (this.ws) {
-            this.ws.terminate(); // Force close without waiting for graceful shutdown
+            // Mark as intentional so the close event does not double-schedule reconnect
+            this.isManualClose = true;
+            const ws = this.ws;
+            // Graceful close: sends CLOSE frame so firmware can clean up the session
+            try {
+                ws.close(1001, 'Heartbeat timeout');
+            } catch {
+                ws.terminate();
+            }
+            // Fallback: if firmware does not acknowledge CLOSE within 3s, force-terminate
+            setTimeout(() => {
+                if (ws.readyState !== WebSocket.CLOSED) {
+                    ws.terminate();
+                }
+            }, 3000);
         }
 
         this.isConnected = false;
@@ -1200,6 +1218,7 @@ export class KseniaWebSocketClient {
             clearTimeout(this.reconnectTimer);
         }
         if (this.ws) {
+            this.isManualClose = true; // Prevent close event from triggering reconnect
             this.ws.close();
         }
         this.isConnected = false;
