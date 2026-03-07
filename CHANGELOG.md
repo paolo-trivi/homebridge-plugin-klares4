@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.0] - 2026-03-07
+
+### Added
+
+- **Modular architecture rollout** with facade compatibility preserved:
+  - `platform/` split with dedicated lifecycle/discovery/registry/config services
+  - `websocket-client/` split with transport/router/dispatcher/projector internals
+  - `mqtt-bridge/` split with command execution and accessory indexing services
+  - `debug-capture/` split with capture/analysis/file generation modules
+- **Governance quality gates**:
+  - `npm run check:max-lines` enforcing `src/**/*.ts <= 300` lines
+  - `npm run verify` for strict TypeScript + tests + build
+  - CI workflow for automated gate execution on push/PR
+- **Release scripts**:
+  - `npm run release:dry-run`
+  - `npm run release:beta`
+
+### Changed
+
+- Internal architecture now follows explicit layered hierarchy:
+  - `Communication -> Domain -> Infrastructure`
+- `ARCHITECTURE.md` updated to document module responsibilities and flows.
+
+### Compatibility
+
+- No breaking changes to Homebridge runtime contract:
+  - `PLATFORM_NAME` / `PLUGIN_NAME` unchanged
+  - accessory UUID generation unchanged
+  - config schema keys unchanged
+  - MQTT topic/payload contract unchanged
+  - public facades (`Lares4Platform`, `KseniaWebSocketClient`, `MqttBridge`, `DebugCaptureManager`) preserved
+
+## [1.1.9-beta0] - 2026-03-07
+
+### Added
+
+- **Command response timeout control**: Added `commandTimeoutMs` configuration to tune write command ACK timeout.
+- **Refactoring architecture modules** (internal, non-breaking):
+  - `device-id` helpers for canonical ID parsing/building
+  - `thermostat-mode` mapping helpers
+  - `thermostat-state` compatibility adapter (status as canonical)
+  - WebSocket internal components (`command-dispatcher`, `protocol-router`, `device-state-projector`, `ws-transport`)
+  - MQTT internal helpers (`topic-parser`, `state-payload-mapper`)
+  - Platform internal services (`accessory-registry`, `discovery-service`, `platform-lifecycle-service`)
+- **Architecture documentation**: Added `ARCHITECTURE.md`.
+- **Extended automated test suite**: Added characterization/contract tests for lifecycle helpers, WS command flow components, topic/payload contracts, thermostat mappings and ID utilities (`node --test`).
+
+### Fixed
+
+- **Thermostat discovery gap**: Outputs recognized as thermostats are now discovered and exposed correctly.
+- **Login false-positive**: WebSocket `connect()` now resolves only after `LOGIN_RES=OK` with explicit login timeout.
+- **Accessory cache drift**: Added stale accessory pruning after initial sync to remove ghost accessories.
+- **Race conditions on commands**: Added per-device command queueing and command ACK waiting to avoid concurrent command overlap.
+- **Runtime value validation**: Added numeric parsing/clamping guards before HomeKit characteristic updates to avoid `NaN`/out-of-range propagation.
+- **Gate handling consistency**: Added `gate_` normalization in IDs and room mapping validation.
+- **Shutdown cleanup**: Improved disconnect flow for WebSocket and MQTT bridge on Homebridge shutdown.
+- **Debug capture safety**: Masked sensitive parsed payload data and restored WebSocket hooks reliably after capture.
+
+### Security
+
+- **TLS verification policy**: Certificate verification is strict by default; insecure TLS requires explicit `allowInsecureTls=true`.
+
 ## [1.1.8] - 2026-03-07
 
 ### Fixed

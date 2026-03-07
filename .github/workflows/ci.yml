@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Enforce source file size limit
+        run: npm run check:max-lines
+
+      - name: TypeScript strict checks
+        run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+
+      - name: Test suite
+        run: npm test
+
+      - name: Build package
+        run: npm run build
