@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.2] - 2026-03-07
+
+### Fixed
+
+- Output/scenario commands no longer wait for strict `CMD_USR_RES` ACK, preventing 8s command timeouts on centrales that apply command and emit only realtime state updates.
+- Reconnect scheduler now avoids duplicate timer registration, removing duplicated "Scheduling reconnection..." log lines after connection failures.
+
 ## [2.0.0-beta.1] - 2026-03-07
 
 ### Changed

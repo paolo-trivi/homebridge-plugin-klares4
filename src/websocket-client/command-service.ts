@@ -92,9 +92,6 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: on ? 'ON' : 'OFF',
                 },
-            }, {
-                awaitResponse: true,
-                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Light command sent: Output ${systemOutputId} -> ${on ? 'ON' : 'OFF'}`);
@@ -111,9 +108,6 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: safeBrightness.toString(),
                 },
-            }, {
-                awaitResponse: true,
-                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Dimmer command sent: Output ${systemOutputId} -> ${safeBrightness}%`);
@@ -131,9 +125,6 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: command,
                 },
-            }, {
-                awaitResponse: true,
-                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Cover command sent: Output ${systemOutputId} -> ${command}`);
@@ -149,9 +140,6 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: 'ON',
                 },
-            }, {
-                awaitResponse: true,
-                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Gate command sent: Output ${systemOutputId} -> ON (momentary)`);
@@ -194,9 +182,6 @@ export class CommandService {
                 SCENARIO: {
                     ID: systemScenarioId,
                 },
-            }, {
-                awaitResponse: true,
-                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Scenario ${systemScenarioId} executed`);

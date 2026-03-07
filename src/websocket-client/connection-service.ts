@@ -190,6 +190,7 @@ export class ConnectionService {
         }
         if (this.deps.state.reconnectTimer) {
             clearTimeout(this.deps.state.reconnectTimer);
+            this.deps.state.reconnectTimer = undefined;
         }
         if (this.deps.state.ws) {
             this.deps.state.isManualClose = true;
@@ -230,7 +231,7 @@ export class ConnectionService {
 
     private scheduleReconnect(): void {
         if (this.deps.state.reconnectTimer) {
-            clearTimeout(this.deps.state.reconnectTimer);
+            return;
         }
 
         const baseDelay = this.deps.options.reconnectInterval ?? 5000;
@@ -246,6 +247,7 @@ export class ConnectionService {
         );
 
         this.deps.state.reconnectTimer = setTimeout((): void => {
+            this.deps.state.reconnectTimer = undefined;
             this.deps.state.reconnectAttempts++;
             this.deps.log.info(`Attempting reconnection (attempt ${this.deps.state.reconnectAttempts})...`);
             this.connect()
