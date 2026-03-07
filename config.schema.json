@@ -4,7 +4,7 @@
     "singular": true,
     "customUi": false,
     "headerDisplay": "<div class='text-center mb-3'><h3>klares4 - Ksenia Lares4 per Homebridge</h3><p class='text-muted'>Integrazione professionale per sistemi di sicurezza Ksenia Lares 4.0</p></div><div class='alert alert-info'><strong>Prima di iniziare, verifica che:</strong><ul class='mb-0 mt-2'><li>La centrale Lares4 sia raggiungibile in rete locale</li><li>L'accesso WebSocket sia abilitato sulla centrale</li><li>Tu disponga di un PIN utente</li></ul></div>",
-    "footerDisplay": "<div class='text-center mt-4 pt-3 border-top'><p class='text-muted mb-2'>Versione 1.1.6 • Sviluppato da Paolo Trivisonno</p><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' class='btn btn-sm btn-outline-primary mr-2'>Documentazione</a> <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' class='btn btn-sm btn-outline-secondary mr-2'>Segnala Bug</a> <a href='https://github.com/sponsors/paolo-trivi' target='_blank' class='btn btn-sm btn-outline-success'>Supporta</a></div>",
+    "footerDisplay": "<div class='text-center mt-4 pt-3 border-top'><p class='text-muted mb-2'>Versione 1.1.8 • Sviluppato da Paolo Trivisonno</p><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' class='btn btn-sm btn-outline-primary mr-2'>Documentazione</a> <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' class='btn btn-sm btn-outline-secondary mr-2'>Segnala Bug</a> <a href='https://github.com/sponsors/paolo-trivi' target='_blank' class='btn btn-sm btn-outline-success'>Supporta</a></div>",
     "schema": {
         "type": "object",
         "properties": {
@@ -357,6 +357,12 @@
                         }
                     }
                 }
+            },
+            "generateDebugFile": {
+                "title": "Genera File Debug",
+                "type": "boolean",
+                "default": false,
+                "description": "Attiva per generare un file di diagnostica completo al prossimo riavvio (si disabilita automaticamente dopo la generazione)"
             }
         },
         "required": [
@@ -761,6 +767,31 @@
                                     "description": "Ritardo stampa lista dispositivi"
                                 }
                             ]
+                        }
+                    ]
+                },
+                {
+                    "type": "section",
+                    "title": "Diagnostica & Debug",
+                    "expandable": true,
+                    "expanded": false,
+                    "items": [
+                        {
+                            "type": "help",
+                            "helpvalue": "<div class='alert alert-warning'><strong>Strumento di Diagnostica Completa</strong><p class='mb-2'>Genera un file di debug con TUTTO il necessario per diagnosticare problemi:</p><ul class='mb-2'><li><strong>Tutti i messaggi WebSocket RAW</strong> per 60 secondi</li><li><strong>Lista completa dispositivi</strong> dalla centrale Ksenia</li><li><strong>Tutti i comandi disponibili</strong> (ZONES, OUTPUTS, BUS_HAS, SCENARIOS, STATUS)</li><li><strong>Stati in tempo reale</strong> durante la cattura</li></ul><p class='mb-0 text-danger'><strong>IMPORTANTE:</strong> Durante i 60 secondi di cattura, <strong>prova tutte le entità che non funzionano usando l'app Ksenia</strong> (accendi/spegni luci, apri/chiudi tapparelle, cambia zone, ecc). Questo ci permetterà di vedere esattamente come la centrale risponde ai comandi.</p></div>"
+                        },
+                        {
+                            "key": "generateDebugFile",
+                            "title": "Genera File Debug al Prossimo Avvio",
+                            "description": "Si disattiverà automaticamente dopo la generazione del file"
+                        },
+                        {
+                            "type": "help",
+                            "helpvalue": "<div class='alert alert-info'><strong>Procedura consigliata:</strong><ol class='mb-0'><li><strong>Attiva</strong> l'opzione sopra e <strong>salva</strong> la configurazione</li><li><strong>Riavvia Homebridge</strong> (il debug inizierà automaticamente)</li><li><strong>Nei prossimi 60 secondi</strong>: apri l'app Ksenia e <strong>testa TUTTE le entità che non funzionano</strong> (luci on/off, tapparelle su/giù, scenari, zone, ecc)</li><li><strong>Attendi</strong> che la cattura finisca (vedrai conferma nei log con il percorso del file)</li><li><strong>Trova il file</strong> usando il pulsante qui sotto o nei log</li><li><strong>Condividi</strong> il file per supporto (PIN già mascherati automaticamente)</li></ol></div>"
+                        },
+                        {
+                            "type": "help",
+                            "helpvalue": "<div class='alert alert-success'><strong>Percorso File Debug:</strong><p class='mb-2'>I file di debug vengono salvati in:</p><p class='mb-2'><code>~/.homebridge/klares4-debug-*.json</code></p><p class='mb-2'>oppure su macOS:</p><p class='mb-2'><code>/Users/[tuo-username]/.homebridge/klares4-debug-*.json</code></p><p class='mb-0'><strong>Suggerimento:</strong> Cerca il file più recente con nome <code>klares4-debug-</code> seguito dalla data/ora. Il percorso esatto viene mostrato nei log di Homebridge quando il file viene generato.</p></div>"
                         }
                     ]
                 }

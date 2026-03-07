@@ -12,6 +12,7 @@ import type {
     KseniaDevice,
     KseniaLight,
     KseniaCover,
+    KseniaGate,
     KseniaThermostat,
     KseniaSensor,
     KseniaZone,
@@ -58,6 +59,7 @@ interface SystemTemperatureData {
         IN?: string;
         OUT?: string;
     };
+    [key: string]: unknown;
 }
 
 /**
@@ -93,6 +95,7 @@ export class KseniaWebSocketClient {
     private lastPongReceived = 0;
     private reconnectAttempts = 0;
     private readonly maxReconnectDelay = 60000; // Max 60 seconds between attempts
+    private isManualClose = false; // Prevents close event from scheduling reconnect when we close intentionally
     private readonly logLevel: LogLevel;
 
     public onDeviceDiscovered?: (device: KseniaDevice) => void;
@@ -163,7 +166,10 @@ export class KseniaWebSocketClient {
                     this.log.warn(`WebSocket closed: ${code} - ${reason.toString()}`);
                     this.isConnected = false;
                     this.onDisconnected?.();
-                    this.scheduleReconnect();
+                    if (!this.isManualClose) {
+                        this.scheduleReconnect();
+                    }
+                    this.isManualClose = false;
                 });
 
                 this.ws.on('error', (error: Error): void => {
@@ -332,7 +338,7 @@ export class KseniaWebSocketClient {
                 this.log.info(`Found ${payload.OUTPUTS.length} outputs`);
                 payload.OUTPUTS.forEach((output: KseniaOutputData): void => {
                     const category = output.CAT ?? output.TYPE ?? '';
-                    const type = this.determineOutputType(category);
+                    const type = this.determineOutputType(category, output.MOD);
 
                     if (type === 'thermostat' && this.options.debug) {
                         this.log.debug(
@@ -521,9 +527,10 @@ export class KseniaWebSocketClient {
         };
     }
 
-    private parseOutputData(outputData: KseniaOutputData): KseniaLight | KseniaCover | null {
+    private parseOutputData(outputData: KseniaOutputData): KseniaLight | KseniaCover | KseniaGate | null {
         const category = outputData.CAT ?? outputData.TYPE ?? '';
         const categoryUpper = category.toUpperCase();
+        const mode = outputData.MOD;
         const systemId = outputData.ID;
 
         if (categoryUpper === 'LIGHT') {
@@ -550,6 +557,19 @@ export class KseniaWebSocketClient {
                 },
             };
         } else if (categoryUpper === 'GATE') {
+            // GATE monostabili (MOD: M) sono switch
+            if (mode === 'M') {
+                return {
+                    id: `gate_${systemId}`,
+                    type: 'gate',
+                    name: outputData.DES || `Gate ${systemId}`,
+                    description: outputData.DES || '',
+                    status: {
+                        on: false,
+                    },
+                };
+            }
+            // Altri GATE sono cover
             return {
                 id: `cover_${systemId}`,
                 type: 'cover',
@@ -578,10 +598,10 @@ export class KseniaWebSocketClient {
         };
     }
 
-    private determineOutputType(category: string): 'light' | 'cover' | 'thermostat' | 'scenario' {
+    private determineOutputType(category: string, mode?: string): 'light' | 'cover' | 'gate' | 'thermostat' | 'scenario' {
         const catUpper = category.toUpperCase();
 
-        this.log.debug(`Determining type for category: "${category}" (normalized: "${catUpper}")`);
+        this.log.debug(`Determining type for category: "${category}" (normalized: "${catUpper}"), mode: "${mode || 'N/A'}"`);
 
         if (catUpper === 'ROLL') {
             this.log.debug(`Identified as cover: ${category}`);
@@ -594,6 +614,11 @@ export class KseniaWebSocketClient {
         }
 
         if (catUpper === 'GATE') {
+            // GATE monostabili (MOD: M) sono switch, altri possono essere cover
+            if (mode === 'M') {
+                this.log.debug(`Identified as gate (monostable switch): ${category}`);
+                return 'gate';
+            }
             this.log.debug(`Identified as gate (treated as cover): ${category}`);
             return 'cover';
         }
@@ -888,6 +913,24 @@ export class KseniaWebSocketClient {
         this.log.info(`Cover command sent: Output ${systemOutputId} -> ${command}`);
     }
 
+    public async toggleGate(gateId: string): Promise<void> {
+        if (!this.idLogin) throw new Error('Not connected');
+
+        const systemOutputId = gateId.replace('gate_', '');
+
+        // GATE monostabili usano comando ON
+        await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
+            ID_LOGIN: 'true',
+            PIN: 'true',
+            OUTPUT: {
+                ID: systemOutputId,
+                STA: 'ON',
+            },
+        });
+
+        this.log.info(`Gate command sent: Output ${systemOutputId} -> ON (momentary)`);
+    }
+
     public async setThermostatMode(
         thermostatId: string,
         mode: 'off' | 'heat' | 'cool' | 'auto',
@@ -1000,7 +1043,7 @@ export class KseniaWebSocketClient {
         }
 
         const messageStr = JSON.stringify(message);
-        this.log.info(`Sending: ${messageStr}`);
+        this.log.info(`Sending: ${maskSensitiveData(messageStr)}`);
 
         this.ws.send(messageStr);
     }
@@ -1107,7 +1150,21 @@ export class KseniaWebSocketClient {
         }
 
         if (this.ws) {
-            this.ws.terminate(); // Force close without waiting for graceful shutdown
+            // Mark as intentional so the close event does not double-schedule reconnect
+            this.isManualClose = true;
+            const ws = this.ws;
+            // Graceful close: sends CLOSE frame so firmware can clean up the session
+            try {
+                ws.close(1001, 'Heartbeat timeout');
+            } catch {
+                ws.terminate();
+            }
+            // Fallback: if firmware does not acknowledge CLOSE within 3s, force-terminate
+            setTimeout(() => {
+                if (ws.readyState !== WebSocket.CLOSED) {
+                    ws.terminate();
+                }
+            }, 3000);
         }
 
         this.isConnected = false;
@@ -1161,6 +1218,7 @@ export class KseniaWebSocketClient {
             clearTimeout(this.reconnectTimer);
         }
         if (this.ws) {
+            this.isManualClose = true; // Prevent close event from triggering reconnect
             this.ws.close();
         }
         this.isConnected = false;
@@ -1194,37 +1252,52 @@ export class KseniaWebSocketClient {
             }
 
             if (system.TEMP) {
-                const internalTemp = system.TEMP.IN
-                    ? parseFloat(system.TEMP.IN.replace('+', ''))
+                // Parse temperature values, checking for 'NA' (not available)
+                const internalTempStr = system.TEMP.IN;
+                const externalTempStr = system.TEMP.OUT;
+                
+                const internalTemp = internalTempStr && internalTempStr !== 'NA'
+                    ? parseFloat(internalTempStr.replace('+', ''))
                     : undefined;
-                const externalTemp = system.TEMP.OUT
-                    ? parseFloat(system.TEMP.OUT.replace('+', ''))
+                const externalTemp = externalTempStr && externalTempStr !== 'NA'
+                    ? parseFloat(externalTempStr.replace('+', ''))
                     : undefined;
 
-                let logTemperatures = this.options.debug ?? false;
-
-                if (internalTemp !== undefined) {
-                    this.devices.forEach((device: KseniaDevice): void => {
-                        if (device.type === 'thermostat') {
-                            const thermostatStatus = device.status as ThermostatStatus;
-                            const oldCurrentTemp = thermostatStatus.currentTemperature;
-                            if (
-                                oldCurrentTemp === undefined ||
-                                Math.abs(oldCurrentTemp - internalTemp) >= 0.5
-                            ) {
-                                logTemperatures = true;
-                            }
+                // Handle internal temperature sensor
+                if (internalTemp !== undefined && !isNaN(internalTemp)) {
+                    const sensorId = 'sensor_system_temp_in';
+                    let tempDevice = this.devices.get(sensorId);
+                    
+                    if (!tempDevice) {
+                        // Create new internal temperature sensor
+                        tempDevice = {
+                            id: sensorId,
+                            type: 'sensor',
+                            name: 'Temperatura Interna',
+                            description: 'Temperatura interna centrale',
+                            status: {
+                                sensorType: 'temperature',
+                                value: internalTemp,
+                                unit: 'C',
+                            },
+                        } as KseniaSensor;
+                        this.devices.set(sensorId, tempDevice);
+                        this.onDeviceDiscovered?.(tempDevice);
+                        if (this.logLevel >= LogLevel.NORMAL) {
+                            this.log.info(`Internal temperature sensor discovered: ${internalTemp}C`);
                         }
-                    });
-                }
-
-                if (logTemperatures) {
-                    this.log.info(
-                        `System temperatures: Internal=${internalTemp}C, External=${externalTemp}C`,
-                    );
-                }
-
-                if (internalTemp !== undefined) {
+                    } else if (tempDevice.type === 'sensor') {
+                        // Update existing sensor
+                        const tempStatus = tempDevice.status as SensorStatus;
+                        const oldTemp = tempStatus.value;
+                        tempStatus.value = internalTemp;
+                        if (oldTemp !== internalTemp && this.logLevel >= LogLevel.DEBUG) {
+                            this.log.debug(`Temperatura Interna: ${internalTemp}C`);
+                        }
+                        this.onDeviceStatusUpdate?.(tempDevice);
+                    }
+                    
+                    // Update thermostats with internal temperature
                     this.devices.forEach((device: KseniaDevice): void => {
                         if (device.type === 'thermostat') {
                             const thermostatStatus = device.status as ThermostatStatus;
@@ -1245,16 +1318,60 @@ export class KseniaWebSocketClient {
                                 oldCurrentTemp === undefined ||
                                 Math.abs(oldCurrentTemp - internalTemp) >= 0.5
                             ) {
-                                this.log.info(
-                                    `${device.name}: Current temperature updated to ${internalTemp}C`,
-                                );
+                                if (this.logLevel >= LogLevel.NORMAL) {
+                                    this.log.info(
+                                        `${device.name}: Current temperature updated to ${internalTemp}C`,
+                                    );
+                                }
                             }
 
                             this.onDeviceStatusUpdate?.(device);
                         }
                     });
                 }
+
+                // Handle external temperature sensor
+                if (externalTemp !== undefined && !isNaN(externalTemp)) {
+                    const sensorId = 'sensor_system_temp_out';
+                    let tempDevice = this.devices.get(sensorId);
+                    
+                    if (!tempDevice) {
+                        // Create new external temperature sensor
+                        tempDevice = {
+                            id: sensorId,
+                            type: 'sensor',
+                            name: 'Temperatura Esterna',
+                            description: 'Temperatura esterna centrale',
+                            status: {
+                                sensorType: 'temperature',
+                                value: externalTemp,
+                                unit: 'C',
+                            },
+                        } as KseniaSensor;
+                        this.devices.set(sensorId, tempDevice);
+                        this.onDeviceDiscovered?.(tempDevice);
+                        if (this.logLevel >= LogLevel.NORMAL) {
+                            this.log.info(`External temperature sensor discovered: ${externalTemp}C`);
+                        }
+                    } else if (tempDevice.type === 'sensor') {
+                        // Update existing sensor
+                        const tempStatus = tempDevice.status as SensorStatus;
+                        const oldTemp = tempStatus.value;
+                        tempStatus.value = externalTemp;
+                        if (oldTemp !== externalTemp && this.logLevel >= LogLevel.DEBUG) {
+                            this.log.debug(`Temperatura Esterna: ${externalTemp}C`);
+                        }
+                        this.onDeviceStatusUpdate?.(tempDevice);
+                    }
+                }
             }
         });
+    }
+
+    /**
+     * Get all discovered devices (for debug purposes)
+     */
+    public getAllDevices(): KseniaDevice[] {
+        return Array.from(this.devices.values());
     }
 }

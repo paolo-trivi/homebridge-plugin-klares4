@@ -18,6 +18,7 @@ import type {
     KseniaDevice,
     KseniaLight,
     KseniaCover,
+    KseniaGate,
     KseniaThermostat,
     KseniaSensor,
     KseniaZone,
@@ -26,8 +27,10 @@ import type {
     RoomMappingConfig,
 } from './types';
 import { MqttBridge } from './mqtt-bridge';
+import { DebugCaptureManager } from './debug-capture';
 import { LightAccessory } from './accessories/light-accessory';
 import { CoverAccessory } from './accessories/cover-accessory';
+import { GateAccessory } from './accessories/gate-accessory';
 import { SensorAccessory } from './accessories/sensor-accessory';
 import { ZoneAccessory } from './accessories/zone-accessory';
 import { ThermostatAccessory } from './accessories/thermostat-accessory';
@@ -39,6 +42,7 @@ import { ScenarioAccessory } from './accessories/scenario-accessory';
 export type AccessoryHandler =
     | LightAccessory
     | CoverAccessory
+    | GateAccessory
     | SensorAccessory
     | ZoneAccessory
     | ThermostatAccessory
@@ -79,6 +83,7 @@ export interface Lares4Config extends PlatformConfig {
     devicesSummaryDelay?: number;
     mqtt?: MqttConfig;
     roomMapping?: RoomMappingConfig;
+    generateDebugFile?: boolean;
 }
 
 /**
@@ -198,6 +203,16 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 this.log.info('MQTT Bridge initialized');
             }
 
+            // Check if debug file generation was requested
+            if (this.config.generateDebugFile) {
+                this.log.warn('[DEBUG] Debug capture requested - starting 60-second capture...');
+                const debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
+                debugCapture.startCapture(this.wsClient, 60000);
+                
+                // Disable the flag after starting capture
+                this.disableDebugFlag();
+            }
+
             this.log.info('Ksenia Lares4 initialized successfully');
         } catch (error: unknown) {
             this.log.error(
@@ -256,6 +271,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 } else if (
                     device.type === 'light' ||
                     device.type === 'cover' ||
+                    device.type === 'gate' ||
                     device.type === 'thermostat'
                 ) {
                     devicesList.outputs.push(deviceInfo);
@@ -472,6 +488,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         if (
             (device.type === 'light' ||
                 device.type === 'cover' ||
+                device.type === 'gate' ||
                 device.type === 'thermostat') &&
             this.config.excludeOutputs?.includes(id)
         ) {
@@ -499,7 +516,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         if (device.type === 'zone') {
             return this.config.customNames?.zones?.[id];
         }
-        if (device.type === 'light' || device.type === 'cover' || device.type === 'thermostat') {
+        if (device.type === 'light' || device.type === 'cover' || device.type === 'gate' || device.type === 'thermostat') {
             return this.config.customNames?.outputs?.[id];
         }
         if (device.type === 'sensor') {
@@ -599,6 +616,10 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 handler = new CoverAccessory(this, accessory);
                 this.log.debug(`Created handler for cover: ${device.name}`);
                 break;
+            case 'gate':
+                handler = new GateAccessory(this, accessory);
+                this.log.debug(`Created handler for gate: ${device.name}`);
+                break;
             case 'sensor':
                 handler = new SensorAccessory(this, accessory);
                 this.log.debug(`Created handler for sensor: ${device.name}`);
@@ -629,5 +650,27 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.log.info('Removing accessory:', accessory.displayName);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
         this.accessories.delete(accessory.UUID);
+    }
+
+    /**
+     * Disable the debug flag in config.json to prevent re-triggering
+     */
+    private disableDebugFlag(): void {
+        try {
+            const configPath = path.join(this.api.user.storagePath(), 'config.json');
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            
+            const platformConfig = config.platforms?.find((p: any) => p.platform === 'Lares4Complete');
+            if (platformConfig && platformConfig.generateDebugFile) {
+                platformConfig.generateDebugFile = false;
+                fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+                this.log.info('Debug flag disabled in config.json');
+            }
+        } catch (error: unknown) {
+            this.log.error(
+                'Failed to disable debug flag:',
+                error instanceof Error ? error.message : String(error),
+            );
+        }
     }
 }
