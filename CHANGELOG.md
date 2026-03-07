@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-beta.1] - 2026-03-07
+
+### Changed
+
+- Release version bump for npm publication continuity after `2.0.0-beta.0` version lock.
+
 ## [2.0.0-beta.0] - 2026-03-07
 
 ### Added
