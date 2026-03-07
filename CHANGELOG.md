@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.7] - 2026-03-07
+## [1.1.8] - 2026-03-07
 
 ### Fixed
 
@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Removed all emoji characters from log messages, documentation, and UI schema
-- Version bumped from 1.1.7-beta2 to 1.1.7 (stable release)
+- Version bumped from 1.1.7-beta2 to 1.1.8 (stable release)
 
 ## [1.1.7-beta2] - 2026-01-17
 

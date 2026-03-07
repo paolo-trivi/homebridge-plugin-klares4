@@ -211,7 +211,7 @@ export class DebugCaptureManager {
 
             const debugData = {
                 generated: new Date().toISOString(),
-                version: '1.1.7',
+                version: '1.1.8',
                 captureInfo: {
                     duration: '60 seconds',
                     totalRawMessages: this.rawMessages.length,
