@@ -235,32 +235,32 @@ Enable debug logging for detailed diagnostics:
 
 ### Roadmap
 
-#### Planned for v1.1.8-beta
+#### Planned for v1.2.0
 
 The following entity types are currently not supported but are planned for the next beta release:
 
-##### 🚿 Irrigation Systems (IRR)
+##### Irrigation Systems (IRR)
 
 - **Type**: Switch (bistable)
 - **Examples**: Drip irrigation, garden zones, lawn sprinklers
 - **HomeKit Mapping**: Valve/Switch accessories
 - **Status**: Planned
 
-##### 🔔 Indicators & Status LEDs (GEN, MOD:S)
+##### Indicators & Status LEDs (GEN, MOD:S)
 
 - **Type**: Read-only sensors/switches
 - **Examples**: Zone status indicators, system LEDs
 - **HomeKit Mapping**: Contact Sensor (read-only)
 - **Status**: Planned
 
-##### 🚨 Sirens & Alarms (GEN, MOD:AT)
+##### Sirens & Alarms (GEN, MOD:AT)
 
 - **Type**: Switch (manual control)
 - **Examples**: External siren, internal siren
 - **HomeKit Mapping**: Switch with security considerations
 - **Status**: Under evaluation
 
-##### 🔗 Alarm Bridges (GEN, MOD:A)
+##### Alarm Bridges (GEN, MOD:A)
 
 - **Type**: Read-only sensors
 - **Examples**: State bridges, alarm bridges
@@ -520,32 +520,32 @@ Questo progetto e rilasciato sotto licenza MIT.
 
 ### Roadmap
 
-#### Pianificato per v1.1.8-beta
+#### Pianificato per v1.2.0
 
 I seguenti tipi di entità non sono attualmente supportati ma sono pianificati per la prossima release beta:
 
-##### 🚿 Sistemi di Irrigazione (IRR)
+##### Sistemi di Irrigazione (IRR)
 
 - **Tipo**: Switch (bistabile)
 - **Esempi**: Irrigazione a goccia, zone giardino, irrigatori
 - **Mappatura HomeKit**: Accessori Valve/Switch
 - **Stato**: Pianificato
 
-##### 🔔 Indicatori e LED di Stato (GEN, MOD:S)
+##### Indicatori e LED di Stato (GEN, MOD:S)
 
 - **Tipo**: Sensori/switch in sola lettura
 - **Esempi**: Spie stato zone, LED di sistema
 - **Mappatura HomeKit**: Sensore di contatto (sola lettura)
 - **Stato**: Pianificato
 
-##### 🚨 Sirene e Allarmi (GEN, MOD:AT)
+##### Sirene e Allarmi (GEN, MOD:AT)
 
 - **Tipo**: Switch (controllo manuale)
 - **Esempi**: Sirena esterna, sirena interna
 - **Mappatura HomeKit**: Switch con considerazioni di sicurezza
 - **Stato**: In valutazione
 
-##### 🔗 Ponti Allarme (GEN, MOD:A)
+##### Ponti Allarme (GEN, MOD:A)
 
 - **Tipo**: Sensori in sola lettura
 - **Esempi**: Ponti di stato, ponti allarme
