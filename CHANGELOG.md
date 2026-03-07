@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-03-07
+
+### Fixed
+
+- **WebSocket session leak (firmware crash)**: Replaced `ws.terminate()` with graceful `ws.close(1001, 'Heartbeat timeout')` in `forceReconnect()`. The firmware now receives the WebSocket CLOSE frame and can properly release the session. Previously, abrupt TCP disconnects left "ghost" sessions accumulating on the firmware over weeks, eventually causing firmware lockup requiring full reset.
+- **Double reconnect scheduling**: Added `isManualClose` flag to prevent the `close` event handler from calling `scheduleReconnect()` when the disconnect was intentional (from `forceReconnect()` or `disconnect()`). This fixes the broken exponential backoff caused by double-scheduling.
+- **PIN exposed in logs**: Applied `maskSensitiveData()` to `sendMessage()` log output. The PIN was previously logged in plain text during the login message.
+- **Cover movement simulation race condition**: `updateStatus()` no longer overwrites `currentPosition`/`targetPosition` while a local movement simulation interval is active. This prevents conflicting updates between the local simulation and real-time firmware messages.
+- **Cover simulation not stopped on firmware stop**: The movement simulation interval is now cancelled when the firmware signals `state: 'stopped'` (e.g., user stops cover physically via Ksenia app).
+- **Cover NaN stepTime in setInterval**: Added guard to detect `distance === 0` or invalid `stepTime` before starting the simulation interval, preventing `setInterval(fn, NaN)` which fires immediately and continuously.
+
+### Changed
+
+- Removed all emoji characters from log messages, documentation, and UI schema
+- Version bumped from 1.1.7-beta2 to 1.1.8 (stable release)
+
 ## [1.1.7-beta2] - 2026-01-17
 
 ### Added

@@ -134,6 +134,13 @@ export class CoverAccessory {
         const totalTime = (distance / 100) * (this.maxSeconds * 1000);
         const stepTime = totalTime / (distance / stepSize);
 
+        // Guard: nothing to simulate (position already reached during async moveCover, or invalid values)
+        if (distance === 0 || isNaN(stepTime) || stepTime <= 0) {
+            this.positionState = 2; // Stopped
+            this.service.updateCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
+            return;
+        }
+
         let currentStep = 0;
         const totalSteps = Math.ceil(distance / stepSize);
 
@@ -174,18 +181,29 @@ export class CoverAccessory {
     public updateStatus(newDevice: KseniaCover): void {
         this.device = newDevice;
 
-        if (this.device.status?.position !== this.currentPosition) {
-            this.currentPosition = this.device.status?.position ?? 0;
-            this.targetPosition = this.device.status?.position ?? 0;
+        // If firmware signals the cover has stopped, cancel any running simulation
+        if (this.moveInterval && newDevice.status?.state === 'stopped') {
+            clearInterval(this.moveInterval);
+            this.moveInterval = undefined;
+            this.platform.log.debug(`${this.device.name}: Simulation cancelled by firmware stop`);
+        }
 
-            this.service.updateCharacteristic(
-                this.platform.Characteristic.CurrentPosition,
-                this.currentPosition,
-            );
-            this.service.updateCharacteristic(
-                this.platform.Characteristic.TargetPosition,
-                this.targetPosition,
-            );
+        // Only update position/target from firmware when simulation is not active,
+        // to avoid the simulation and real firmware updates conflicting
+        if (!this.moveInterval) {
+            if (this.device.status?.position !== this.currentPosition) {
+                this.currentPosition = this.device.status?.position ?? 0;
+                this.targetPosition = this.device.status?.position ?? 0;
+
+                this.service.updateCharacteristic(
+                    this.platform.Characteristic.CurrentPosition,
+                    this.currentPosition,
+                );
+                this.service.updateCharacteristic(
+                    this.platform.Characteristic.TargetPosition,
+                    this.targetPosition,
+                );
+            }
         }
 
         switch (this.device.status?.state) {

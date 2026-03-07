@@ -44,15 +44,15 @@ export class DebugCaptureManager {
 
         this.log.warn('');
         this.log.warn('═══════════════════════════════════════════════════════════');
-        this.log.warn('🔍 DEBUG CAPTURE STARTED - 60 SECONDS');
+        this.log.warn('[DEBUG] DEBUG CAPTURE STARTED - 60 SECONDS');
         this.log.warn('═══════════════════════════════════════════════════════════');
-        this.log.warn('📱 NOW: Open Ksenia app and TEST ALL NON-WORKING ENTITIES!');
+        this.log.warn('[ACTION] NOW: Open Ksenia app and TEST ALL NON-WORKING ENTITIES!');
         this.log.warn('   - Turn lights ON/OFF');
         this.log.warn('   - Open/Close covers');
         this.log.warn('   - Activate scenarios');
         this.log.warn('   - Change zones');
         this.log.warn('   - Adjust thermostats');
-        this.log.warn('⏱️  You have 60 seconds...');
+        this.log.warn('[TIMER] You have 60 seconds...');
         this.log.warn('═══════════════════════════════════════════════════════════');
         this.log.warn('');
         
@@ -126,7 +126,7 @@ export class DebugCaptureManager {
                 return originalSend(data, ...args);
             };
 
-            this.log.info('✅ WebSocket hooks installed - capturing ALL traffic');
+            this.log.info('[OK] WebSocket hooks installed - capturing ALL traffic');
         } catch (error: unknown) {
             this.log.error(
                 'Failed to hook WebSocket:',
@@ -179,7 +179,7 @@ export class DebugCaptureManager {
 
         this.log.warn('');
         this.log.warn('═══════════════════════════════════════════════════════════');
-        this.log.warn('🛑 DEBUG CAPTURE COMPLETED');
+        this.log.warn('[DONE] DEBUG CAPTURE COMPLETED');
         this.log.warn('═══════════════════════════════════════════════════════════');
         
         this.isCapturing = false;
@@ -211,7 +211,7 @@ export class DebugCaptureManager {
 
             const debugData = {
                 generated: new Date().toISOString(),
-                version: '1.1.7',
+                version: '1.1.8',
                 captureInfo: {
                     duration: '60 seconds',
                     totalRawMessages: this.rawMessages.length,
@@ -251,19 +251,19 @@ export class DebugCaptureManager {
 
             fs.writeFileSync(filepath, JSON.stringify(debugData, null, 2));
             
-            this.log.warn('✅ COMPREHENSIVE DEBUG FILE GENERATED!');
-            this.log.warn('📁 Location: ' + filepath);
-            this.log.warn('📊 Contains:');
+            this.log.warn('[OK] COMPREHENSIVE DEBUG FILE GENERATED!');
+            this.log.warn('[FILE] Location: ' + filepath);
+            this.log.warn('[INFO] Contains:');
             this.log.warn(`   - ${debugData.rawMessages.length} raw WebSocket messages`);
             this.log.warn(`   - ${debugData.deviceSnapshots.length} device snapshots`);
             this.log.warn(`   - ${debugData.statistics.devices} total devices`);
             this.log.warn('');
-            this.log.warn('📤 Share this file for support - PINs are already masked!');
+            this.log.warn('[SHARE] Share this file for support - PINs are already masked!');
             this.log.warn('═══════════════════════════════════════════════════════════');
             this.log.warn('');
         } catch (error: unknown) {
             this.log.error(
-                '❌ Error generating debug file:',
+                'Error generating debug file:',
                 error instanceof Error ? error.message : String(error),
             );
         }

@@ -205,7 +205,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
             // Check if debug file generation was requested
             if (this.config.generateDebugFile) {
-                this.log.warn('⚠️  Debug capture requested - starting 60-second capture...');
+                this.log.warn('[DEBUG] Debug capture requested - starting 60-second capture...');
                 const debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
                 debugCapture.startCapture(this.wsClient, 60000);
                 
@@ -664,7 +664,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             if (platformConfig && platformConfig.generateDebugFile) {
                 platformConfig.generateDebugFile = false;
                 fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-                this.log.info('✅ Debug flag disabled in config.json');
+                this.log.info('Debug flag disabled in config.json');
             }
         } catch (error: unknown) {
             this.log.error(
