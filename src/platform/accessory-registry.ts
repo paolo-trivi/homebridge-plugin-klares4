@@ -40,9 +40,14 @@ export class AccessoryRegistry {
         if (existingAccessory) {
             this.options.log.info('Restoring existing accessory from cache:', device.name);
             existingAccessory.context.device = device;
-            const handler = this.options.createAccessoryHandler(existingAccessory, device);
-            if (handler) {
-                this.options.accessoryHandlers.set(uuid, handler);
+            const existingHandler = this.options.accessoryHandlers.get(uuid);
+            if (existingHandler) {
+                this.options.updateAccessoryHandler(existingHandler, device);
+            } else {
+                const handler = this.options.createAccessoryHandler(existingAccessory, device);
+                if (handler) {
+                    this.options.accessoryHandlers.set(uuid, handler);
+                }
             }
             return;
         }
@@ -87,6 +92,10 @@ export class AccessoryRegistry {
 
     public removeAccessory(accessory: PlatformAccessory): void {
         this.options.log.info('Removing accessory:', accessory.displayName);
+        const handler = this.options.accessoryHandlers.get(accessory.UUID);
+        if (handler && 'dispose' in handler && typeof handler.dispose === 'function') {
+            handler.dispose();
+        }
         this.options.api.unregisterPlatformAccessories(
             this.options.pluginName,
             this.options.platformName,

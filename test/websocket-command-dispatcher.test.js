@@ -33,6 +33,26 @@ test('CommandDispatcher resolves pending command on expected response', async ()
   assert.ok(true);
 });
 
+test('CommandDispatcher resolves single compatible pending command when response ID mismatches', async () => {
+  const dispatcher = new CommandDispatcher();
+  const pending = dispatcher.registerPendingCommand('42', 500, ['WRITE_RES']);
+
+  dispatcher.resolvePendingCommand({ ID: '999', CMD: 'WRITE_RES' });
+
+  await pending;
+  assert.ok(true);
+});
+
+test('CommandDispatcher does not resolve on mismatched ID when multiple compatible pending commands exist', async () => {
+  const dispatcher = new CommandDispatcher();
+  const pendingA = dispatcher.registerPendingCommand('42', 500, ['WRITE_RES']);
+  const pendingB = dispatcher.registerPendingCommand('43', 500, ['WRITE_RES']);
+
+  dispatcher.resolvePendingCommand({ ID: '999', CMD: 'WRITE_RES' });
+
+  await assert.rejects(Promise.all([pendingA, pendingB]), /timed out/);
+});
+
 test('CommandDispatcher rejects on timeout', async () => {
   const dispatcher = new CommandDispatcher();
 

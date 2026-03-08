@@ -107,6 +107,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `heartbeatInterval` | number   | 30000        | Heartbeat interval (ms)         |
 | `commandTimeoutMs`  | number   | 8000         | API command response timeout (ms) |
 | `allowInsecureTls`  | boolean  | false        | Disable TLS certificate validation (trusted LAN only) |
+| `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | enabled/freshness defaults | DOMUS thermostat mapping, manual overrides, freshness fallback |
 | `debug`             | boolean  | false        | Detailed logging                |
 | `excludeZones`      | string[] | []           | Zones to exclude                |
@@ -259,7 +260,7 @@ This runs:
 
 #### Planned for v1.2.0
 
-The following entity types are currently not supported but are planned for the next beta release:
+The following entity types are currently not supported but are planned for a future release:
 
 ##### Irrigation Systems (IRR)
 
@@ -398,6 +399,7 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `maxSeconds`        | number   | 30           | Tempo max tapparelle (secondi)  |
 | `reconnectInterval` | number   | 5000         | Intervallo riconnessione (ms)   |
 | `heartbeatInterval` | number   | 30000        | Intervallo heartbeat (ms)       |
+| `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | default attivi | Mapping termostati DOMUS, override manuali e fallback freshness |
 | `debug`             | boolean  | false        | Logging dettagliato             |
 | `excludeZones`      | string[] | []           | Zone da escludere               |
@@ -549,7 +551,7 @@ Questo progetto e rilasciato sotto licenza MIT.
 
 #### Pianificato per v1.2.0
 
-I seguenti tipi di entità non sono attualmente supportati ma sono pianificati per la prossima release beta:
+I seguenti tipi di entità non sono attualmente supportati ma sono pianificati per una futura release:
 
 ##### Sistemi di Irrigazione (IRR)
 

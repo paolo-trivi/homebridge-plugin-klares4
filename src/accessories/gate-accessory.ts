@@ -59,7 +59,10 @@ export class GateAccessory {
             }
 
             // Send momentary ON command to gate
-            await this.platform.wsClient?.toggleGate(this.device.id);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.toggleGate(this.device.id);
             this.platform.log.info(`${this.device.name}: Gate activated`);
 
             // Auto-off after 500ms to simulate momentary press
@@ -89,5 +92,12 @@ export class GateAccessory {
     public updateDevice(device: KseniaGate): void {
         this.device = device;
         this.accessory.context.device = device;
+    }
+
+    public dispose(): void {
+        if (this.autoOffTimeout) {
+            clearTimeout(this.autoOffTimeout);
+            this.autoOffTimeout = undefined;
+        }
     }
 }

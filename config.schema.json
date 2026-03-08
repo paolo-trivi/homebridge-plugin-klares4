@@ -3,15 +3,15 @@
     "pluginType": "platform",
     "singular": true,
     "customUi": false,
-    "headerDisplay": "<div class='text-center mb-3'><h3>klares4 - Ksenia Lares4 per Homebridge</h3><p class='text-muted'>Integrazione professionale per sistemi di sicurezza Ksenia Lares 4.0</p></div><div class='alert alert-info'><strong>Prima di iniziare, verifica che:</strong><ul class='mb-0 mt-2'><li>La centrale Lares4 sia raggiungibile in rete locale</li><li>L'accesso WebSocket sia abilitato sulla centrale</li><li>Tu disponga di un PIN utente</li></ul></div>",
-    "footerDisplay": "<div class='text-center mt-4 pt-3 border-top'><p class='text-muted mb-2'>Versione 1.1.9-beta0 • Sviluppato da Paolo Trivisonno</p><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' class='btn btn-sm btn-outline-primary mr-2'>Documentazione</a> <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' class='btn btn-sm btn-outline-secondary mr-2'>Segnala Bug</a> <a href='https://github.com/sponsors/paolo-trivi' target='_blank' class='btn btn-sm btn-outline-success'>Supporta</a></div>",
+    "headerDisplay": "<div style='margin-bottom:12px;'><h3 style='margin:0 0 6px 0;'>Klares4 - Ksenia Lares4 per Homebridge</h3><p style='margin:0 0 12px 0;'>Plugin Homebridge per controllo locale della centrale Ksenia Lares4.</p><div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Prerequisiti:</strong><ul style='margin:8px 0 0 18px;padding:0;'><li>Centrale raggiungibile in rete locale</li><li>Interfaccia WebSocket abilitata</li><li>PIN utente valido (4-8 cifre)</li></ul></div></div>",
+    "footerDisplay": "<div style='margin-top:16px;padding-top:12px;border-top:1px solid currentColor;'><p style='margin:0 0 8px 0;'>Versione 2.0.0-rc.0 • Sviluppato da Paolo Trivisonno</p><p style='margin:0;'><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' rel='noopener noreferrer'>Documentazione</a> | <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' rel='noopener noreferrer'>Segnala Bug</a> | <a href='https://github.com/sponsors/paolo-trivi' target='_blank' rel='noopener noreferrer'>Supporta</a></p></div>",
     "schema": {
         "type": "object",
         "properties": {
             "name": {
                 "title": "Nome Piattaforma",
                 "type": "string",
-                "default": "Lares4",
+                "default": "Klares4",
                 "description": "Nome identificativo che apparirà nei log di Homebridge",
                 "minLength": 1,
                 "maxLength": 50
@@ -367,6 +367,33 @@
                         "default": true,
                         "description": "Il broker memorizza l'ultimo stato per i nuovi subscriber"
                     }
+                },
+                "dependencies": {
+                    "enabled": {
+                        "oneOf": [
+                            {
+                                "properties": {
+                                    "enabled": {
+                                        "const": false
+                                    }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "enabled": {
+                                        "const": true
+                                    },
+                                    "broker": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                },
+                                "required": [
+                                    "broker"
+                                ]
+                            }
+                        ]
+                    }
                 }
             },
             "roomMapping": {
@@ -400,7 +427,7 @@
                                             "deviceId": {
                                                 "title": "ID Dispositivo",
                                                 "type": "string",
-                                                "pattern": "^(light_|cover_|gate_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)[0-9]+$"
+                                                "pattern": "^(light_|cover_|gate_|zone_|thermostat_|scenario_)[0-9]+$|^sensor_(temp|hum|light)_[0-9]+$|^sensor_system_temp_(in|out)$"
                                             },
                                             "deviceName": {
                                                 "title": "Nome Dispositivo",
@@ -442,7 +469,7 @@
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-success'><strong>Configurazione Essenziale</strong><p class='mb-0'>Inserisci i dati di connessione alla tua centrale Ksenia Lares4. Puoi trovare l'IP nella configurazione di rete della centrale.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Configurazione essenziale</strong><p style='margin:8px 0 0 0;'>Inserisci IP, porta e PIN della centrale. Se non conosci l'IP, verificalo nella configurazione di rete del pannello.</p></div>"
                 },
                 {
                     "key": "ip",
@@ -496,7 +523,7 @@
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-info'><strong>Personalizza il Comportamento</strong><p class='mb-0'>Configura i parametri di funzionamento per tapparelle, termostati e scenari.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Preferenze dispositivi</strong><p style='margin:8px 0 0 0;'>Regola i parametri di comportamento per tapparelle, termostati e scenari senza cambiare la logica di discovery.</p></div>"
                 },
                 {
                     "type": "fieldset",
@@ -605,15 +632,15 @@
                 }
             ]
         },
-        {
-            "type": "section",
-            "title": "Esclusioni Dispositivi",
-            "expandable": true,
-            "expanded": false,
+                {
+                    "type": "section",
+                    "title": "Esclusioni Dispositivi",
+                    "expandable": true,
+                    "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-warning'><strong>Come Trovare gli ID</strong><ol class='mb-0 mt-2'><li>Avvia il plugin una volta</li><li>Apri il file <code>~/.homebridge/klares4-devices.json</code></li><li>Trova gli ID numerici dei dispositivi da escludere</li><li>Aggiungili qui sotto usando il pulsante <strong>+ Aggiungi</strong></li></ol></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Come trovare gli ID</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Avvia il plugin almeno una volta</li><li>Apri il file <code>~/.homebridge/klares4-devices.json</code></li><li>Copia l'ID numerico del dispositivo da escludere</li><li>Inseriscilo qui con il pulsante <strong>+ Aggiungi</strong></li></ol></div>"
                 },
                 {
                     "key": "excludeOutputs",
@@ -679,13 +706,73 @@
         },
         {
             "type": "section",
+            "title": "Nomi Personalizzati",
+            "expandable": true,
+            "expanded": false,
+            "items": [
+                {
+                    "type": "help",
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Rinomina entita in HomeKit</strong><p style='margin:8px 0 0 0;'>Imposta coppie <code>ID: nome</code> per sovrascrivere i nomi trovati in automatico (esempio: <code>\"18\": \"Riscaldamento Soggiorno\"</code>).</p></div>"
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Zone",
+                    "items": [
+                        {
+                            "key": "customNames.zones",
+                            "title": "Mappa nomi zone",
+                            "type": "object",
+                            "description": "Esempio: { \"1\": \"Porta Ingresso\" }"
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Output (Luci/Cover/Thermostat/Gate)",
+                    "items": [
+                        {
+                            "key": "customNames.outputs",
+                            "title": "Mappa nomi output",
+                            "type": "object",
+                            "description": "Esempio: { \"18\": \"Riscaldamento Soggiorno\" }"
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Sensori Ambientali",
+                    "items": [
+                        {
+                            "key": "customNames.sensors",
+                            "title": "Mappa nomi sensori",
+                            "type": "object",
+                            "description": "Esempio: { \"1\": \"Termostato Sala\" }"
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Scenari",
+                    "items": [
+                        {
+                            "key": "customNames.scenarios",
+                            "title": "Mappa nomi scenari",
+                            "type": "object",
+                            "description": "Esempio: { \"3\": \"Buonanotte\" }"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "section",
             "title": "Integrazione MQTT",
             "expandable": true,
             "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-primary'><strong>Bridge MQTT</strong><p class='mb-1'>Pubblica gli stati su MQTT e ricevi comandi per integrazione con Home Assistant, Node-RED, o altri sistemi.</p><small><strong>Topic:</strong> <code>{prefix}/{type}/{slug}/state</code> e <code>.../{type}/{slug}/set</code></small></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Bridge MQTT</strong><p style='margin:8px 0 6px 0;'>Pubblica stati su MQTT e riceve comandi da sistemi esterni (Home Assistant, Node-RED, automazioni custom).</p><p style='margin:0;'><strong>Topic:</strong> <code>{prefix}/{type}/{slug}/state</code> e <code>{prefix}/{type}/{slug}/set</code></p></div>"
                 },
                 {
                     "key": "mqtt.enabled",
@@ -761,7 +848,7 @@
                     "items": [
                         {
                             "type": "help",
-                            "helpvalue": "<div class='alert alert-success'><strong>Organizza per stanza:</strong> invece di <code>klares4/light/luce_sala</code> ottieni <code>soggiorno/light/luce_sala</code></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Organizza i topic per stanza</strong><p style='margin:8px 0 0 0;'>Esempio: da <code>klares4/light/luce_sala</code> a <code>soggiorno/light/luce_sala</code>. Usa <code>roomName</code> in minuscolo con underscore.</p></div>"
                         },
                         {
                             "key": "roomMapping.enabled",
@@ -795,7 +882,7 @@
                                                 {
                                                     "key": "roomMapping.rooms[].devices[].deviceId",
                                                     "title": "ID Dispositivo",
-                                                    "placeholder": "light_9 o sensor_temp_1"
+                                                    "placeholder": "light_9, sensor_temp_1 o sensor_system_temp_in"
                                                 }
                                             ]
                                         }
@@ -815,7 +902,7 @@
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div class='alert alert-danger'><strong>Solo per Utenti Esperti</strong><p class='mb-0'>Modifica questi parametri solo se sai cosa stai facendo. Valori errati possono causare disconnessioni frequenti o comportamenti anomali.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Sezione avanzata</strong><p style='margin:8px 0 0 0;'>Modifica questi parametri solo se necessario. Valori non corretti possono causare timeout, riconnessioni frequenti o stato No Response.</p></div>"
                 },
                 {
                     "key": "showAdvanced",
@@ -869,6 +956,11 @@
                             "flex-flow": "row wrap",
                             "items": [
                                 {
+                                    "key": "logLevel",
+                                    "flex": "1 1 220px",
+                                    "description": "0 minimal, 1 normale, 2 diagnostica"
+                                },
+                                {
                                     "key": "debug",
                                     "flex": "1 1 200px"
                                 },
@@ -889,7 +981,7 @@
                     "items": [
                         {
                             "type": "help",
-                            "helpvalue": "<div class='alert alert-warning'><strong>Strumento di Diagnostica Completa</strong><p class='mb-2'>Genera un file di debug con TUTTO il necessario per diagnosticare problemi:</p><ul class='mb-2'><li><strong>Tutti i messaggi WebSocket RAW</strong> per 60 secondi</li><li><strong>Lista completa dispositivi</strong> dalla centrale Ksenia</li><li><strong>Tutti i comandi disponibili</strong> (ZONES, OUTPUTS, BUS_HAS, SCENARIOS, STATUS)</li><li><strong>Stati in tempo reale</strong> durante la cattura</li></ul><p class='mb-0 text-danger'><strong>IMPORTANTE:</strong> Durante i 60 secondi di cattura, <strong>prova tutte le entità che non funzionano usando l'app Ksenia</strong> (accendi/spegni luci, apri/chiudi tapparelle, cambia zone, ecc). Questo ci permetterà di vedere esattamente come la centrale risponde ai comandi.</p></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Strumento diagnostico completo</strong><p style='margin:8px 0 8px 0;'>Genera un file di supporto con:</p><ul style='margin:0 0 8px 18px;padding:0;'><li>messaggi WebSocket RAW (60 secondi)</li><li>lista dispositivi rilevati</li><li>snapshot di stati e comandi principali</li></ul><p style='margin:0;'><strong>Importante:</strong> durante la cattura prova le entita che non funzionano dall'app Ksenia, cosi il trace include il comportamento reale del pannello.</p></div>"
                         },
                         {
                             "key": "generateDebugFile",
@@ -898,11 +990,11 @@
                         },
                         {
                             "type": "help",
-                            "helpvalue": "<div class='alert alert-info'><strong>Procedura consigliata:</strong><ol class='mb-0'><li><strong>Attiva</strong> l'opzione sopra e <strong>salva</strong> la configurazione</li><li><strong>Riavvia Homebridge</strong> (il debug inizierà automaticamente)</li><li><strong>Nei prossimi 60 secondi</strong>: apri l'app Ksenia e <strong>testa TUTTE le entità che non funzionano</strong> (luci on/off, tapparelle su/giù, scenari, zone, ecc)</li><li><strong>Attendi</strong> che la cattura finisca (vedrai conferma nei log con il percorso del file)</li><li><strong>Trova il file</strong> usando il pulsante qui sotto o nei log</li><li><strong>Condividi</strong> il file per supporto (PIN già mascherati automaticamente)</li></ol></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Procedura consigliata</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Attiva l'opzione e salva la configurazione</li><li>Riavvia Homebridge</li><li>Nei successivi 60 secondi testa le entita problematiche dall'app Ksenia</li><li>Attendi la conferma di fine cattura nei log</li><li>Recupera e condividi il file generato (PIN gia mascherati)</li></ol></div>"
                         },
                         {
                             "type": "help",
-                            "helpvalue": "<div class='alert alert-success'><strong>Percorso File Debug:</strong><p class='mb-2'>I file di debug vengono salvati in:</p><p class='mb-2'><code>~/.homebridge/klares4-debug-*.json</code></p><p class='mb-2'>oppure su macOS:</p><p class='mb-2'><code>/Users/[tuo-username]/.homebridge/klares4-debug-*.json</code></p><p class='mb-0'><strong>Suggerimento:</strong> Cerca il file più recente con nome <code>klares4-debug-</code> seguito dalla data/ora. Il percorso esatto viene mostrato nei log di Homebridge quando il file viene generato.</p></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Percorso file debug</strong><p style='margin:8px 0;'>Percorso standard:</p><p style='margin:8px 0;'><code>~/.homebridge/klares4-debug-*.json</code></p><p style='margin:8px 0;'>Su macOS in genere coincide con:</p><p style='margin:8px 0;'><code>/Users/[tuo-username]/.homebridge/klares4-debug-*.json</code></p><p style='margin:8px 0 0 0;'>Nei log trovi sempre il percorso completo del file appena creato.</p></div>"
                         }
                     ]
                 }

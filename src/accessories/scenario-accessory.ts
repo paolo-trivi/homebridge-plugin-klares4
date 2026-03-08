@@ -10,6 +10,7 @@ import type { KseniaScenario } from '../types';
 export class ScenarioAccessory {
     private service: Service;
     public readonly device: KseniaScenario;
+    private autoOffTimeout?: NodeJS.Timeout;
 
     constructor(
         private readonly platform: Lares4Platform,
@@ -53,7 +54,10 @@ export class ScenarioAccessory {
 
                 const autoOffDelay =
                     (this.platform.config as Lares4Config).scenarioAutoOffDelay ?? 500;
-                setTimeout((): void => {
+                if (this.autoOffTimeout) {
+                    clearTimeout(this.autoOffTimeout);
+                }
+                this.autoOffTimeout = setTimeout((): void => {
                     if (this.service) {
                         this.service.updateCharacteristic(this.platform.Characteristic.On, false);
                         this.platform.log.debug(
@@ -77,5 +81,12 @@ export class ScenarioAccessory {
     public async getOn(): Promise<CharacteristicValue> {
         // Scenarios don't have persistent state, always return false
         return false;
+    }
+
+    public dispose(): void {
+        if (this.autoOffTimeout) {
+            clearTimeout(this.autoOffTimeout);
+            this.autoOffTimeout = undefined;
+        }
     }
 }
