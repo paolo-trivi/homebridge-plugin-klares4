@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-03-08
+
+### Added
+
+- DOMUS thermostat command pipeline with automatic command-id resolution (`OUTPUT` -> `CFG_THERMOSTATS`) and cached config sync.
+- Manual override support for command IDs via `domusThermostat.manualCommandPairs`.
+- Runtime snapshot sync from `CFG_THERMOSTATS` to keep HomeKit thermostat mode/target aligned with panel state.
+
+### Fixed
+
+- DOMUS ID normalization across discovery (`BUS_HAS`) and realtime/status updates (`STATUS_BUS_HA_SENSORS`), including leading-zero cases (`01` -> `1`).
+- Thermostat setpoint/mode regressions introduced in early RC builds by restoring the stable `beta.8` command flow.
+- Config UI footer version and release metadata alignment.
+
 ## [2.0.0-beta.2] - 2026-03-07
 
 ### Fixed
