@@ -1,6 +1,15 @@
+import type { DomusThermostatConfig } from '../types';
 import type { WebSocketClientState } from './types';
 
-export function createInitialWebSocketClientState(): WebSocketClientState {
+export function createInitialWebSocketClientState(
+    domusThermostatConfig?: DomusThermostatConfig,
+): WebSocketClientState {
+    const resolvedDomusConfig: Required<DomusThermostatConfig> = {
+        enabled: domusThermostatConfig?.enabled ?? true,
+        manualPairs: domusThermostatConfig?.manualPairs ?? [],
+        sensorFreshnessMs: domusThermostatConfig?.sensorFreshnessMs ?? 300000,
+    };
+
     return {
         isConnected: false,
         heartbeatPending: false,
@@ -12,5 +21,11 @@ export function createInitialWebSocketClientState(): WebSocketClientState {
         pendingSensorStatuses: new Map(),
         pendingZoneStatuses: new Map(),
         devices: new Map(),
+        domusThermostatConfig: resolvedDomusConfig,
+        thermostatOutputs: new Map(),
+        domusSensors: new Map(),
+        thermostatToDomus: new Map(),
+        thermostatMappingSource: new Map(),
+        domusLatest: new Map(),
     };
 }
