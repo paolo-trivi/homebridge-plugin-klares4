@@ -10,7 +10,7 @@
         "release:dry-run": "npm publish --tag rc --dry-run",
         "release:rc": "npm publish --tag rc",
         "release:beta": "npm publish --tag beta",
-        "test": "npm run build && node --test test/**/*.test.js",
+        "test": "npm run build && node --test $(find test -name '*.test.js' -print)",
         "prepublishOnly": "npm run build"
     },
     "keywords": [
