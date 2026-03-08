@@ -1,5 +1,6 @@
 import type { KseniaDevice, KseniaSensor } from '../types';
 import type { Logger } from 'homebridge';
+import { stripDevicePrefix } from '../device-id';
 import { LogLevel } from '../log-levels';
 import { updateThermostatStatus } from '../thermostat-state';
 import { parseFloatInRange } from '../websocket/device-state-projector';
@@ -65,6 +66,31 @@ export class SystemTemperatureUpdater {
                 this.deps.state.devices.forEach((device: KseniaDevice): void => {
                     if (device.type !== 'thermostat') {
                         return;
+                    }
+
+                    const thermostatOutputId = stripDevicePrefix(device.id);
+                    const mappedSensorId = this.deps.state.thermostatToDomus.get(thermostatOutputId);
+                    const freshnessMs = this.deps.state.domusThermostatConfig.sensorFreshnessMs;
+                    const latestDomus = mappedSensorId
+                        ? this.deps.state.domusLatest.get(mappedSensorId)
+                        : undefined;
+                    const isDomusFresh =
+                        latestDomus !== undefined &&
+                        Date.now() - latestDomus.ts <= freshnessMs;
+
+                    if (this.deps.state.domusThermostatConfig.enabled && mappedSensorId && isDomusFresh) {
+                        return;
+                    }
+
+                    if (
+                        this.deps.debugEnabled &&
+                        this.deps.state.domusThermostatConfig.enabled &&
+                        mappedSensorId &&
+                        !isDomusFresh
+                    ) {
+                        this.deps.log.debug(
+                            `DOMUS stale fallback for thermostat_${thermostatOutputId}: sensor_${mappedSensorId}`,
+                        );
                     }
 
                     if (

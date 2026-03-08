@@ -1,5 +1,8 @@
 import type {
+    DomusThermostatConfig,
+    KseniaBusHaData,
     KseniaDevice,
+    KseniaOutputData,
     KseniaOutputStatusRaw,
     KseniaSensorStatusRaw,
     KseniaZoneStatusRaw,
@@ -45,9 +48,11 @@ export interface KseniaCommandPayload {
     ID_THERMOSTAT?: string;
     MODE?: string;
     TARGET_TEMP?: string;
+    CFG_THERMOSTATS?: Array<Record<string, unknown>>;
     SCENARIO?: {
         ID: string;
     };
+    [key: string]: unknown;
 }
 
 export interface SendCommandOptions {
@@ -83,6 +88,12 @@ export interface WebSocketClientState {
     pendingSensorStatuses: Map<string, KseniaSensorStatusRaw>;
     pendingZoneStatuses: Map<string, KseniaZoneStatusRaw>;
     devices: Map<string, KseniaDevice>;
+    domusThermostatConfig: Required<DomusThermostatConfig>;
+    thermostatOutputs: Map<string, KseniaOutputData>;
+    domusSensors: Map<string, KseniaBusHaData>;
+    thermostatToDomus: Map<string, string>;
+    thermostatMappingSource: Map<string, 'manual' | 'auto' | 'fallback'>;
+    domusLatest: Map<string, { temp?: number; hum?: number; ts: number }>;
 }
 
 export interface MessagePipeline {
