@@ -58,3 +58,8 @@ CLAUDE.md
 CONTEXT.md
 log.txt
 klares4-debug*
+
+# Reverse engineering artifacts (must stay local)
+research/
+scripts/reverse/
+lares 4.0.app/
