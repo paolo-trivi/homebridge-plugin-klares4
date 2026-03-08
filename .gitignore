@@ -50,6 +50,9 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+research/
+scripts/reverse/
+lares 4.0.app/
 
 # Config files
 config.json 
