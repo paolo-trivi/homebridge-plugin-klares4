@@ -17,7 +17,7 @@ export type DeviceIdPrefix = (typeof DEVICE_ID_PREFIXES)[number];
 const DEVICE_ID_PREFIXES_BY_LENGTH = [...DEVICE_ID_PREFIXES].sort((a, b) => b.length - a.length);
 
 export const ROOM_MAPPING_DEVICE_ID_PATTERN =
-    '^(light_|cover_|gate_|sensor_temp_|sensor_hum_|sensor_light_|zone_|thermostat_|scenario_)[0-9]+$';
+    '^(light_|cover_|gate_|zone_|thermostat_|scenario_)[0-9]+$|^sensor_(temp|hum|light)_[0-9]+$|^sensor_system_temp_(in|out)$';
 
 export function parseDeviceId(deviceId: string): { prefix: DeviceIdPrefix | null; rawId: string } {
     for (const prefix of DEVICE_ID_PREFIXES_BY_LENGTH) {

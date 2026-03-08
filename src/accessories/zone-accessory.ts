@@ -9,12 +9,20 @@ import type { KseniaZone } from '../types';
 export class ZoneAccessory {
     private service: Service;
     public device: KseniaZone;
+    private lastOpen: boolean;
+    private lastActive: boolean;
+    private lastFault: boolean;
+    private lastBypassed: boolean;
 
     constructor(
         private readonly platform: Lares4Platform,
         private readonly accessory: PlatformAccessory,
     ) {
         this.device = accessory.context.device as KseniaZone;
+        this.lastOpen = this.device.status.open;
+        this.lastActive = this.isZoneActive(this.device);
+        this.lastFault = this.device.status.fault;
+        this.lastBypassed = this.device.status.bypassed;
 
         const accessoryInfoService = this.accessory.getService(
             this.platform.Service.AccessoryInformation,
@@ -58,7 +66,7 @@ export class ZoneAccessory {
     }
 
     public async getStatusActive(): Promise<CharacteristicValue> {
-        return this.device.status.armed;
+        return this.isZoneActive(this.device);
     }
 
     public async getStatusFault(): Promise<CharacteristicValue> {
@@ -79,7 +87,7 @@ export class ZoneAccessory {
 
         this.service.updateCharacteristic(
             this.platform.Characteristic.StatusActive,
-            this.device.status.armed,
+            this.isZoneActive(this.device),
         );
 
         this.service.updateCharacteristic(
@@ -94,54 +102,58 @@ export class ZoneAccessory {
     }
 
     public updateStatus(newDevice: KseniaZone): void {
-        const oldDevice = this.device;
         this.device = newDevice;
+        const newOpen = newDevice.status.open;
+        const newActive = this.isZoneActive(newDevice);
+        const newFault = newDevice.status.fault;
+        const newBypassed = newDevice.status.bypassed;
 
-        if (oldDevice.status.open !== newDevice.status.open) {
-            this.service.updateCharacteristic(
-                this.platform.Characteristic.ContactSensorState,
-                newDevice.status.open ? 1 : 0,
-            );
-
+        this.service.updateCharacteristic(
+            this.platform.Characteristic.ContactSensorState,
+            newOpen ? 1 : 0,
+        );
+        if (this.lastOpen !== newOpen) {
             this.platform.log.info(
-                `${this.device.name}: ${newDevice.status.open ? 'Open' : 'Closed'}`,
+                `${this.device.name}: ${newOpen ? 'Open' : 'Closed'}`,
             );
         }
 
-        if (oldDevice.status.armed !== newDevice.status.armed) {
-            this.service.updateCharacteristic(
-                this.platform.Characteristic.StatusActive,
-                newDevice.status.armed,
-            );
-
+        this.service.updateCharacteristic(
+            this.platform.Characteristic.StatusActive,
+            newActive,
+        );
+        if (this.lastActive !== newActive) {
             this.platform.log.info(
-                `${this.device.name}: ${newDevice.status.armed ? 'Armed' : 'Disarmed'}`,
+                `${this.device.name}: ${newActive ? 'Active' : 'Inactive'}`,
             );
         }
 
-        if (oldDevice.status.fault !== newDevice.status.fault) {
-            this.service.updateCharacteristic(
-                this.platform.Characteristic.StatusFault,
-                newDevice.status.fault ? 1 : 0,
-            );
-
-            if (newDevice.status.fault) {
-                this.platform.log.warn(`${this.device.name}: Fault detected`);
-            }
+        this.service.updateCharacteristic(
+            this.platform.Characteristic.StatusFault,
+            newFault ? 1 : 0,
+        );
+        if (this.lastFault !== newFault && newFault) {
+            this.platform.log.warn(`${this.device.name}: Fault detected`);
         }
 
-        if (oldDevice.status.bypassed !== newDevice.status.bypassed) {
-            this.service.updateCharacteristic(
-                this.platform.Characteristic.StatusTampered,
-                newDevice.status.bypassed ? 1 : 0,
-            );
-
-            if (newDevice.status.bypassed) {
-                this.platform.log.warn(`${this.device.name}: Zone bypassed`);
-            }
+        this.service.updateCharacteristic(
+            this.platform.Characteristic.StatusTampered,
+            newBypassed ? 1 : 0,
+        );
+        if (this.lastBypassed !== newBypassed && newBypassed) {
+            this.platform.log.warn(`${this.device.name}: Zone bypassed`);
         }
+
+        this.lastOpen = newOpen;
+        this.lastActive = newActive;
+        this.lastFault = newFault;
+        this.lastBypassed = newBypassed;
 
         this.platform.log.debug(`Updated zone state ${this.device.name}: ${this.getZoneStatusString()}`);
+    }
+
+    private isZoneActive(device: KseniaZone): boolean {
+        return !device.status.bypassed;
     }
 
     private getZoneStatusString(): string {

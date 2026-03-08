@@ -1,6 +1,7 @@
 import { RetryableKlaresError } from '../errors';
 
 interface PendingCommandRequest {
+    commandId: string;
     resolve: () => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
@@ -43,6 +44,7 @@ export class CommandDispatcher {
             }, timeoutMs);
 
             this.pendingCommands.set(commandId, {
+                commandId,
                 timeout,
                 resolve: (): void => {
                     clearTimeout(timeout);
@@ -62,15 +64,27 @@ export class CommandDispatcher {
 
     public resolvePendingCommand(message: ResponseLikeMessage): void {
         const pendingCommand = this.pendingCommands.get(message.ID);
-        if (!pendingCommand) {
+        if (pendingCommand) {
+            if (pendingCommand.expectedCmds && !pendingCommand.expectedCmds.has(message.CMD)) {
+                return;
+            }
+            pendingCommand.resolve();
             return;
         }
 
-        if (pendingCommand.expectedCmds && !pendingCommand.expectedCmds.has(message.CMD)) {
-            return;
+        // Some panel firmwares can answer with a response ID different from the request ID.
+        // When there is exactly one compatible pending command, resolve it as fallback.
+        const compatiblePending: PendingCommandRequest[] = [];
+        for (const candidate of this.pendingCommands.values()) {
+            if (candidate.expectedCmds && !candidate.expectedCmds.has(message.CMD)) {
+                continue;
+            }
+            compatiblePending.push(candidate);
         }
 
-        pendingCommand.resolve();
+        if (compatiblePending.length === 1) {
+            compatiblePending[0].resolve();
+        }
     }
 
     public clearPendingCommand(commandId: string): void {

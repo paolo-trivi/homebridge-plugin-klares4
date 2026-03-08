@@ -92,6 +92,9 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: on ? 'ON' : 'OFF',
                 },
+            }, {
+                awaitResponse: true,
+                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Light command sent: Output ${systemOutputId} -> ${on ? 'ON' : 'OFF'}`);
@@ -108,6 +111,9 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: safeBrightness.toString(),
                 },
+            }, {
+                awaitResponse: true,
+                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Dimmer command sent: Output ${systemOutputId} -> ${safeBrightness}%`);
@@ -125,6 +131,9 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: command,
                 },
+            }, {
+                awaitResponse: true,
+                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Cover command sent: Output ${systemOutputId} -> ${command}`);
@@ -140,6 +149,9 @@ export class CommandService {
                     ID: systemOutputId,
                     STA: 'ON',
                 },
+            }, {
+                awaitResponse: true,
+                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Gate command sent: Output ${systemOutputId} -> ON (momentary)`);
@@ -182,6 +194,9 @@ export class CommandService {
                 SCENARIO: {
                     ID: systemScenarioId,
                 },
+            }, {
+                awaitResponse: true,
+                responseCmds: ['CMD_USR_RES'],
             });
         });
         this.deps.log.info(`Scenario ${systemScenarioId} executed`);
@@ -210,9 +225,7 @@ export class CommandService {
         message.CRC_16 = calculateCRC16(JSON.stringify(message));
         const jsonMessage = JSON.stringify(message);
         const isPing = cmd === 'PING' || payloadType === 'HEARTBEAT';
-        if (!isPing && this.deps.logLevel >= LogLevel.NORMAL) {
-            this.deps.log.info(`Sending: ${maskSensitiveData(jsonMessage)}`);
-        } else if (this.deps.logLevel >= LogLevel.DEBUG) {
+        if (!isPing && this.deps.logLevel >= LogLevel.DEBUG) {
             this.deps.log.debug(`Sending: ${maskSensitiveData(jsonMessage)}`);
         }
         let pendingResponsePromise: Promise<void> | undefined;

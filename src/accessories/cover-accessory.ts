@@ -92,7 +92,10 @@ export class CoverAccessory {
                 this.positionState,
             );
 
-            await this.platform.wsClient?.moveCover(this.device.id, targetPosition);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.moveCover(this.device.id, targetPosition);
             this.platform.log.info(`${this.device.name}: Moving to ${targetPosition}%`);
 
             this.simulateMovement(targetPosition);
@@ -223,5 +226,12 @@ export class CoverAccessory {
         );
 
         this.platform.log.debug(`Updated cover state ${this.device.name}: ${this.currentPosition}%`);
+    }
+
+    public dispose(): void {
+        if (this.moveInterval) {
+            clearInterval(this.moveInterval);
+            this.moveInterval = undefined;
+        }
     }
 }

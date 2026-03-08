@@ -50,7 +50,10 @@ export class LightAccessory {
         const on = value as boolean;
 
         try {
-            await this.platform.wsClient?.switchLight(this.device.id, on);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.switchLight(this.device.id, on);
             this.device.status.on = on;
             this.platform.log.info(`${this.device.name}: ${on ? 'On' : 'Off'}`);
         } catch (error: unknown) {
@@ -76,7 +79,10 @@ export class LightAccessory {
         }
 
         try {
-            await this.platform.wsClient?.dimLight(this.device.id, brightness);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.dimLight(this.device.id, brightness);
             this.device.status.brightness = brightness;
             this.device.status.on = brightness > 0;
 
