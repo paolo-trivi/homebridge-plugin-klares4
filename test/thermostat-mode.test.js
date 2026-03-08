@@ -42,6 +42,8 @@ test('homekit target mapping is symmetric with domain values', () => {
 test('deriveHomeKitCurrentState keeps existing behavior', () => {
   assert.equal(deriveHomeKitCurrentState('off', 20, 21), 0);
   assert.equal(deriveHomeKitCurrentState('heat', 19, 21), 1);
+  assert.equal(deriveHomeKitCurrentState('heat', 24, 21), 0);
   assert.equal(deriveHomeKitCurrentState('cool', 24, 21), 2);
+  assert.equal(deriveHomeKitCurrentState('cool', 19, 21), 0);
   assert.equal(deriveHomeKitCurrentState('auto', 21, 21), 0);
 });

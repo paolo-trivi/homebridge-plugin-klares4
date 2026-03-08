@@ -90,6 +90,8 @@ export interface WebSocketClientState {
     devices: Map<string, KseniaDevice>;
     domusThermostatConfig: Required<DomusThermostatConfig>;
     thermostatOutputs: Map<string, KseniaOutputData>;
+    thermostatCommandIdByOutputId: Map<string, string>;
+    thermostatCfgById: Map<string, Record<string, unknown>>;
     domusSensors: Map<string, KseniaBusHaData>;
     thermostatToDomus: Map<string, string>;
     thermostatMappingSource: Map<string, 'manual' | 'auto' | 'fallback'>;

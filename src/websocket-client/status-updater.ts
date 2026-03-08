@@ -125,6 +125,14 @@ export class StatusUpdater {
                         updated = true;
                     }
                 }
+                if (output.MODE === undefined && output.STA === 'ON' && thermostatStatus.mode === 'off') {
+                    const fallbackMode = this.inferThermostatModeFromName(thermostatDevice.name);
+                    if (fallbackMode !== 'off') {
+                        updateThermostatStatus(thermostatDevice, { mode: fallbackMode });
+                        this.deps.log.debug(`${thermostatDevice.name}: Fallback mode inferred from active output -> ${fallbackMode}`);
+                        updated = true;
+                    }
+                }
 
                 if (updated) {
                     this.deps.emitDeviceStatusUpdate(thermostatDevice);
@@ -144,18 +152,18 @@ export class StatusUpdater {
     public updateSensorStatuses(sensors: KseniaSensorStatusRaw[]): void {
         sensors.forEach((sensor: KseniaSensorStatusRaw): void => {
             if (sensor.DOMUS) {
-                const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
+                const sensorId = normalizeDomusSensorId(sensor.ID);
                 let matchedDevice = false;
                 const parsedTemp = parseFloatInRange(sensor.DOMUS.TEM, -50, 100);
                 const parsedHum = parseIntegerInRange(sensor.DOMUS.HUM, 0, 100);
                 const parsedLight = parseIntegerInRange(sensor.DOMUS.LHT, 0, 100000);
                 if (this.deps.logLevel >= LogLevel.DEBUG) {
                     this.deps.log.debug(
-                        `Sensor update ${normalizedSensorId}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
+                        `Sensor update ${sensor.ID}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
                     );
                 }
 
-                const tempDevice = this.deps.state.devices.get(`sensor_temp_${normalizedSensorId}`);
+                const tempDevice = this.deps.state.devices.get(`sensor_temp_${sensorId}`);
                 if (tempDevice && tempDevice.type === 'sensor') {
                     matchedDevice = true;
                     const tempStatus = tempDevice.status as SensorStatus;
@@ -165,7 +173,7 @@ export class StatusUpdater {
                     this.deps.emitDeviceStatusUpdate(tempDevice);
                 }
 
-                const humDevice = this.deps.state.devices.get(`sensor_hum_${normalizedSensorId}`);
+                const humDevice = this.deps.state.devices.get(`sensor_hum_${sensorId}`);
                 if (humDevice && humDevice.type === 'sensor') {
                     matchedDevice = true;
                     const humStatus = humDevice.status as SensorStatus;
@@ -175,7 +183,7 @@ export class StatusUpdater {
                     this.deps.emitDeviceStatusUpdate(humDevice);
                 }
 
-                const lightSensorDevice = this.deps.state.devices.get(`sensor_light_${normalizedSensorId}`);
+                const lightSensorDevice = this.deps.state.devices.get(`sensor_light_${sensorId}`);
                 if (lightSensorDevice && lightSensorDevice.type === 'sensor') {
                     matchedDevice = true;
                     const lightStatus = lightSensorDevice.status as SensorStatus;
@@ -186,7 +194,7 @@ export class StatusUpdater {
                 }
 
                 if (parsedTemp !== undefined || parsedHum !== undefined) {
-                    this.deps.state.domusLatest.set(normalizedSensorId, {
+                    this.deps.state.domusLatest.set(sensorId, {
                         temp: parsedTemp,
                         hum: parsedHum,
                         ts: Date.now(),
@@ -195,7 +203,7 @@ export class StatusUpdater {
 
                 if (this.deps.state.domusThermostatConfig.enabled) {
                     for (const [thermostatOutputId, mappedSensorId] of this.deps.state.thermostatToDomus.entries()) {
-                        if (mappedSensorId !== normalizedSensorId) {
+                        if (mappedSensorId !== sensorId) {
                             continue;
                         }
 
@@ -216,12 +224,9 @@ export class StatusUpdater {
                 }
 
                 if (!matchedDevice) {
-                    this.deps.state.pendingSensorStatuses.set(normalizedSensorId, {
-                        ...sensor,
-                        ID: normalizedSensorId,
-                    });
+                    this.deps.state.pendingSensorStatuses.set(sensorId, { ...sensor, ID: sensorId });
                 } else {
-                    this.deps.state.pendingSensorStatuses.delete(normalizedSensorId);
+                    this.deps.state.pendingSensorStatuses.delete(sensorId);
                 }
             }
         });
@@ -267,5 +272,11 @@ export class StatusUpdater {
             this.deps.state.pendingZoneStatuses.delete(zoneId);
             this.updateZoneStatuses([pendingStatus]);
         }
+    }
+    private inferThermostatModeFromName(name: string): 'off' | 'heat' | 'cool' {
+        const normalized = name.toLowerCase();
+        if (normalized.includes('raffresc') || normalized.includes('cool')) return 'cool';
+        if (normalized.includes('riscald') || normalized.includes('heat')) return 'heat';
+        return 'off';
     }
 }

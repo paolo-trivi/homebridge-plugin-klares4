@@ -73,12 +73,10 @@ export function deriveHomeKitCurrentState(
         return 0;
     }
 
-    if (currentTemperature < targetTemperature) {
-        return 1;
-    }
-    if (currentTemperature > targetTemperature) {
-        return 2;
-    }
+    if (mode === 'heat') return currentTemperature < targetTemperature ? 1 : 0;
+    if (mode === 'cool') return currentTemperature > targetTemperature ? 2 : 0;
+    if (currentTemperature < targetTemperature) return 1;
+    if (currentTemperature > targetTemperature) return 2;
 
     return 0;
 }

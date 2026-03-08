@@ -1,13 +1,25 @@
 import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 import { LogLevel } from '../log-levels';
-import type { KseniaBusHaData, KseniaMessage, KseniaOutputStatusRaw, KseniaScenarioData, KseniaZoneData } from '../types';
+import type {
+    KseniaBusHaData,
+    KseniaMessage,
+    KseniaOutputStatusRaw,
+    KseniaScenarioData,
+    KseniaZoneData,
+} from '../types';
 import type { CommandService } from './command-service';
 import { determineOutputType, isIgnoredScenarioCategory, parseOutputData, parseScenarioData, parseZoneData } from './device-parsers';
-import { buildDomusThermostatMapping, normalizeDomusIdsForConfig, normalizeDomusSensorId, normalizeThermostatOutputId } from './domus-thermostat-mapper';
+import { normalizeDomusSensorId } from './domus-thermostat-mapper';
+import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
+import { applyThermostatConfigSnapshot } from './thermostat-config-sync';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
-import type { CallbackRegistry, RealtimeStatusData, WebSocketClientState } from './types';
+import type {
+    CallbackRegistry,
+    RealtimeStatusData,
+    WebSocketClientState,
+} from './types';
 interface MessageServiceDeps {
     state: WebSocketClientState;
     callbacks: CallbackRegistry;
@@ -24,16 +36,19 @@ interface MessageServiceDeps {
 
 export class MessageService {
     constructor(private readonly deps: MessageServiceDeps) {}
+
     public handleMessage(rawData: string): void {
         this.deps.emitRawMessage('in', rawData);
         try {
             const message = JSON.parse(rawData) as KseniaMessage;
+
             if (this.deps.logLevel >= LogLevel.DEBUG) {
                 const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
                 if (!isHeartbeat) {
                     this.deps.log.debug(`Message: ${message.CMD} / ${message.PAYLOAD_TYPE}`);
                 }
             }
+
             this.deps.routeMessage(message);
         } catch (error: unknown) {
             this.deps.log.error(
@@ -125,10 +140,7 @@ export class MessageService {
                 this.deps.log.info(`Found ${payload.BUS_HAS.length} sensors`);
                 payload.BUS_HAS.forEach((sensor: KseniaBusHaData): void => {
                     const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
-                    this.deps.state.domusSensors.set(normalizedSensorId, {
-                        ...sensor,
-                        ID: normalizedSensorId,
-                    });
+                    this.deps.state.domusSensors.set(normalizedSensorId, { ...sensor, ID: normalizedSensorId });
                     const baseName = sensor.DES || `Sensor ${normalizedSensorId}`;
 
                     const tempDevice = {
@@ -165,6 +177,26 @@ export class MessageService {
             }
 
             this.refreshDomusThermostatMapping();
+            this.applyThermostatConfigSnapshot();
+        }
+
+        if (message.PAYLOAD_TYPE === 'CFG_THERMOSTATS' && Array.isArray(payload.CFG_THERMOSTATS)) {
+            for (const entry of payload.CFG_THERMOSTATS) {
+                if (!entry || typeof entry !== 'object') {
+                    continue;
+                }
+                const thermostatId = String((entry as Record<string, unknown>).ID ?? '');
+                if (!thermostatId) {
+                    continue;
+                }
+                this.deps.state.thermostatCfgById.set(thermostatId, entry as Record<string, unknown>);
+            }
+            if (this.deps.logLevel >= LogLevel.DEBUG) {
+                this.deps.log.debug(
+                    `Cached thermostat configs: ${this.deps.state.thermostatCfgById.size}`,
+                );
+            }
+            this.applyThermostatConfigSnapshot();
         }
 
         if (message.PAYLOAD_TYPE === 'STATUS_OUTPUTS' && payload.STATUS_OUTPUTS) {
@@ -239,54 +271,13 @@ export class MessageService {
     }
 
     private refreshDomusThermostatMapping(): void {
-        const config = this.deps.state.domusThermostatConfig;
-        if (!config.enabled) {
-            this.deps.state.thermostatToDomus.clear();
-            this.deps.state.thermostatMappingSource.clear();
-            return;
-        }
+        refreshDomusThermostatMapping(this.deps.state, this.deps.log);
+    }
 
-        if (this.deps.state.thermostatOutputs.size === 0 || this.deps.state.domusSensors.size === 0) {
-            return;
-        }
-
-        const thermostatOutputs = new Map<string, { id: string; name: string }>();
-        for (const output of this.deps.state.thermostatOutputs.values()) {
-            const normalizedOutputId = normalizeThermostatOutputId(output.ID);
-            thermostatOutputs.set(normalizedOutputId, {
-                id: normalizedOutputId,
-                name: output.DES || `Thermostat ${output.ID}`,
-            });
-        }
-
-        const domusSensors = new Map<string, { id: string; name: string }>();
-        for (const sensor of this.deps.state.domusSensors.values()) {
-            const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
-            domusSensors.set(normalizedSensorId, {
-                id: normalizedSensorId,
-                name: sensor.DES || `Sensor ${sensor.ID}`,
-            });
-        }
-
-        const result = buildDomusThermostatMapping({
-            thermostatOutputs,
-            domusSensors,
-            manualPairs: normalizeDomusIdsForConfig(config.manualPairs),
+    private applyThermostatConfigSnapshot(): void {
+        applyThermostatConfigSnapshot({
+            state: this.deps.state,
+            emitDeviceStatusUpdate: (device): void => this.deps.callbacks.onDeviceStatusUpdate?.(device),
         });
-
-        this.deps.state.thermostatToDomus = result.mapping;
-        this.deps.state.thermostatMappingSource = result.sources;
-
-        this.deps.log.info('DOMUS thermostat mapping initialized');
-        for (const [thermostatId, sensorId] of result.mapping.entries()) {
-            const source = result.sources.get(thermostatId) ?? 'fallback';
-            this.deps.log.info(`DOMUS mapping thermostat_${thermostatId} -> sensor_${sensorId} (${source})`);
-        }
-
-        for (const thermostatId of result.unmatched) {
-            this.deps.log.warn(
-                `DOMUS mapping missing for thermostat_${thermostatId}, using STATUS_SYSTEM fallback`,
-            );
-        }
     }
 }

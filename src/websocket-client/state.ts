@@ -7,6 +7,7 @@ export function createInitialWebSocketClientState(
     const resolvedDomusConfig: Required<DomusThermostatConfig> = {
         enabled: domusThermostatConfig?.enabled ?? true,
         manualPairs: domusThermostatConfig?.manualPairs ?? [],
+        manualCommandPairs: domusThermostatConfig?.manualCommandPairs ?? [],
         sensorFreshnessMs: domusThermostatConfig?.sensorFreshnessMs ?? 300000,
     };
 
@@ -23,6 +24,8 @@ export function createInitialWebSocketClientState(
         devices: new Map(),
         domusThermostatConfig: resolvedDomusConfig,
         thermostatOutputs: new Map(),
+        thermostatCommandIdByOutputId: new Map(),
+        thermostatCfgById: new Map(),
         domusSensors: new Map(),
         thermostatToDomus: new Map(),
         thermostatMappingSource: new Map(),

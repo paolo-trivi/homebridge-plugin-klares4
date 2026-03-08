@@ -86,9 +86,15 @@ export interface DomusThermostatManualPair {
     domusSensorId: string;
 }
 
+export interface DomusThermostatManualCommandPair {
+    thermostatOutputId: string;
+    commandThermostatId: string;
+}
+
 export interface DomusThermostatConfig {
     enabled?: boolean;
     manualPairs?: DomusThermostatManualPair[];
+    manualCommandPairs?: DomusThermostatManualCommandPair[];
     sensorFreshnessMs?: number;
 }
 

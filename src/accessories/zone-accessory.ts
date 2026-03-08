@@ -112,6 +112,7 @@ export class ZoneAccessory {
             this.platform.Characteristic.ContactSensorState,
             newOpen ? 1 : 0,
         );
+
         if (this.lastOpen !== newOpen) {
             this.platform.log.info(
                 `${this.device.name}: ${newOpen ? 'Open' : 'Closed'}`,
@@ -122,6 +123,7 @@ export class ZoneAccessory {
             this.platform.Characteristic.StatusActive,
             newActive,
         );
+
         if (this.lastActive !== newActive) {
             this.platform.log.info(
                 `${this.device.name}: ${newActive ? 'Active' : 'Inactive'}`,
@@ -132,6 +134,7 @@ export class ZoneAccessory {
             this.platform.Characteristic.StatusFault,
             newFault ? 1 : 0,
         );
+
         if (this.lastFault !== newFault && newFault) {
             this.platform.log.warn(`${this.device.name}: Fault detected`);
         }
@@ -140,6 +143,7 @@ export class ZoneAccessory {
             this.platform.Characteristic.StatusTampered,
             newBypassed ? 1 : 0,
         );
+
         if (this.lastBypassed !== newBypassed && newBypassed) {
             this.platform.log.warn(`${this.device.name}: Zone bypassed`);
         }
@@ -148,13 +152,9 @@ export class ZoneAccessory {
         this.lastActive = newActive;
         this.lastFault = newFault;
         this.lastBypassed = newBypassed;
-
         this.platform.log.debug(`Updated zone state ${this.device.name}: ${this.getZoneStatusString()}`);
     }
-
-    private isZoneActive(device: KseniaZone): boolean {
-        return !device.status.bypassed;
-    }
+    private isZoneActive(device: KseniaZone): boolean { return !device.status.bypassed; }
 
     private getZoneStatusString(): string {
         const status: string[] = [];
