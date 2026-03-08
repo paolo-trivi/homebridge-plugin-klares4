@@ -108,6 +108,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `commandTimeoutMs`  | number   | 8000         | API command response timeout (ms) |
 | `allowInsecureTls`  | boolean  | false        | Disable TLS certificate validation (trusted LAN only) |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
+| `domusThermostat`   | object   | enabled/freshness defaults | DOMUS thermostat mapping, manual overrides, freshness fallback |
 | `debug`             | boolean  | false        | Detailed logging                |
 | `excludeZones`      | string[] | []           | Zones to exclude                |
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
@@ -399,6 +400,7 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `reconnectInterval` | number   | 5000         | Intervallo riconnessione (ms)   |
 | `heartbeatInterval` | number   | 30000        | Intervallo heartbeat (ms)       |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
+| `domusThermostat`   | object   | default attivi | Mapping termostati DOMUS, override manuali e fallback freshness |
 | `debug`             | boolean  | false        | Logging dettagliato             |
 | `excludeZones`      | string[] | []           | Zone da escludere               |
 | `excludeOutputs`    | string[] | []           | Output da escludere             |

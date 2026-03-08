@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import type { CommandService } from './command-service';
 import { determineOutputType, isIgnoredScenarioCategory, parseOutputData, parseScenarioData, parseZoneData } from './device-parsers';
+import { buildDomusThermostatMapping, normalizeDomusIdsForConfig } from './domus-thermostat-mapper';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
 import type {
@@ -17,7 +18,6 @@ import type {
     RealtimeStatusData,
     WebSocketClientState,
 } from './types';
-
 interface MessageServiceDeps {
     state: WebSocketClientState;
     callbacks: CallbackRegistry;
@@ -99,6 +99,9 @@ export class MessageService {
                 payload.OUTPUTS.forEach((output): void => {
                     const category = output.CAT ?? output.TYPE ?? '';
                     const type = determineOutputType(category, output.MOD);
+                    if (type === 'thermostat') {
+                        this.deps.state.thermostatOutputs.set(output.ID, output);
+                    }
 
                     if (type === 'thermostat' && this.deps.debugEnabled) {
                         this.deps.log.debug(
@@ -134,6 +137,7 @@ export class MessageService {
             if (payload.BUS_HAS) {
                 this.deps.log.info(`Found ${payload.BUS_HAS.length} sensors`);
                 payload.BUS_HAS.forEach((sensor: KseniaBusHaData): void => {
+                    this.deps.state.domusSensors.set(sensor.ID, sensor);
                     const baseName = sensor.DES || `Sensor ${sensor.ID}`;
 
                     const tempDevice = {
@@ -168,6 +172,8 @@ export class MessageService {
                     this.deps.statusUpdater.applyPendingSensorStatus(sensor.ID);
                 });
             }
+
+            this.refreshDomusThermostatMapping();
         }
 
         if (message.PAYLOAD_TYPE === 'STATUS_OUTPUTS' && payload.STATUS_OUTPUTS) {
@@ -238,6 +244,56 @@ export class MessageService {
                     this.deps.systemTemperatureUpdater.updateSystemTemperatures(statusData.STATUS_SYSTEM);
                 }
             }
+        }
+    }
+
+    private refreshDomusThermostatMapping(): void {
+        const config = this.deps.state.domusThermostatConfig;
+        if (!config.enabled) {
+            this.deps.state.thermostatToDomus.clear();
+            this.deps.state.thermostatMappingSource.clear();
+            return;
+        }
+
+        if (this.deps.state.thermostatOutputs.size === 0 || this.deps.state.domusSensors.size === 0) {
+            return;
+        }
+
+        const thermostatOutputs = new Map<string, { id: string; name: string }>();
+        for (const output of this.deps.state.thermostatOutputs.values()) {
+            thermostatOutputs.set(output.ID, {
+                id: output.ID,
+                name: output.DES || `Thermostat ${output.ID}`,
+            });
+        }
+
+        const domusSensors = new Map<string, { id: string; name: string }>();
+        for (const sensor of this.deps.state.domusSensors.values()) {
+            domusSensors.set(sensor.ID, {
+                id: sensor.ID,
+                name: sensor.DES || `Sensor ${sensor.ID}`,
+            });
+        }
+
+        const result = buildDomusThermostatMapping({
+            thermostatOutputs,
+            domusSensors,
+            manualPairs: normalizeDomusIdsForConfig(config.manualPairs),
+        });
+
+        this.deps.state.thermostatToDomus = result.mapping;
+        this.deps.state.thermostatMappingSource = result.sources;
+
+        this.deps.log.info('DOMUS thermostat mapping initialized');
+        for (const [thermostatId, sensorId] of result.mapping.entries()) {
+            const source = result.sources.get(thermostatId) ?? 'fallback';
+            this.deps.log.info(`DOMUS mapping thermostat_${thermostatId} -> sensor_${sensorId} (${source})`);
+        }
+
+        for (const thermostatId of result.unmatched) {
+            this.deps.log.warn(
+                `DOMUS mapping missing for thermostat_${thermostatId}, using STATUS_SYSTEM fallback`,
+            );
         }
     }
 }

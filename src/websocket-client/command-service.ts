@@ -6,18 +6,11 @@ import { domainModeToKsenia, type ThermostatMode } from '../thermostat-mode';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { clampValue } from '../websocket/device-state-projector';
 import { WsTransport } from '../websocket/ws-transport';
-import type {
-    KseniaMessage,
-    KseniaMessagePayload,
-    KseniaWebSocketOptions,
-} from '../types';
-import type {
-    KseniaCommandPayload,
-    RawMessageDirection,
-    SendCommandOptions,
-    WebSocketClientState,
-} from './types';
+import { buildThermostatModeCfgPayload, buildThermostatSetpointCfgPayload, updateThermostatSeasonHint } from './thermostat-write-payload';
+import type { KseniaMessage, KseniaMessagePayload, KseniaWebSocketOptions } from '../types';
+import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
+
 interface CommandServiceDeps {
     state: WebSocketClientState;
     sender: string;
@@ -31,6 +24,7 @@ interface CommandServiceDeps {
 }
 export class CommandService {
     constructor(private readonly deps: CommandServiceDeps) {}
+    private readonly thermostatWriteSeasonById: Map<string, 'WIN' | 'SUM'> = new Map();
     public async sendLoginCommand(): Promise<void> {
         const loginMessage: KseniaMessage = {
             SENDER: this.deps.sender,
@@ -158,30 +152,69 @@ export class CommandService {
     }
     public async setThermostatMode(thermostatId: string, mode: ThermostatMode): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const modeValue = domainModeToKsenia(mode);
+        const systemThermostatId = stripDevicePrefix(thermostatId);
+        updateThermostatSeasonHint(this.thermostatWriteSeasonById, systemThermostatId, mode);
         await this.deps.commandDispatcher.enqueueDeviceCommand(thermostatId, async (): Promise<void> => {
-            await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
-                ID_LOGIN: this.deps.state.idLogin,
-                ID_THERMOSTAT: stripDevicePrefix(thermostatId),
-                MODE: modeValue,
-            }, {
-                awaitResponse: true,
-                responseCmds: ['WRITE_RES'],
-            });
+            try {
+                await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
+                    ID_LOGIN: 'true',
+                    CFG_THERMOSTATS: [
+                        {
+                            ID: systemThermostatId,
+                            ...buildThermostatModeCfgPayload(mode),
+                        },
+                    ],
+                }, {
+                    awaitResponse: true,
+                    responseCmds: ['WRITE_CFG_RES'],
+                });
+            } catch (error: unknown) {
+                await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
+                    ID_LOGIN: this.deps.state.idLogin,
+                    ID_THERMOSTAT: systemThermostatId,
+                    MODE: domainModeToKsenia(mode),
+                }, {
+                    awaitResponse: true,
+                    responseCmds: ['WRITE_RES'],
+                });
+                this.deps.log.warn(`Thermostat mode fallback to legacy WRITE/THERMOSTAT for ${systemThermostatId}: ${error instanceof Error ? error.message : String(error)}`);
+            }
         });
     }
     public async setThermostatTemperature(thermostatId: string, temperature: number): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const safeTemperature = clampValue(temperature, 5, 40);
+        const systemThermostatId = stripDevicePrefix(thermostatId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(thermostatId, async (): Promise<void> => {
-            await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
-                ID_LOGIN: this.deps.state.idLogin,
-                ID_THERMOSTAT: stripDevicePrefix(thermostatId),
-                TARGET_TEMP: safeTemperature.toString(),
-            }, {
-                awaitResponse: true,
-                responseCmds: ['WRITE_RES'],
-            });
+            try {
+                await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
+                    ID_LOGIN: 'true',
+                    CFG_THERMOSTATS: [
+                        {
+                            ID: systemThermostatId,
+                            ACT_MODE: 'MAN',
+                            ...buildThermostatSetpointCfgPayload(
+                                this.thermostatWriteSeasonById,
+                                systemThermostatId,
+                                safeTemperature,
+                            ),
+                        },
+                    ],
+                }, {
+                    awaitResponse: true,
+                    responseCmds: ['WRITE_CFG_RES'],
+                });
+            } catch (error: unknown) {
+                await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
+                    ID_LOGIN: this.deps.state.idLogin,
+                    ID_THERMOSTAT: systemThermostatId,
+                    TARGET_TEMP: safeTemperature.toString(),
+                }, {
+                    awaitResponse: true,
+                    responseCmds: ['WRITE_RES'],
+                });
+                this.deps.log.warn(`Thermostat temperature fallback to legacy WRITE/THERMOSTAT for ${systemThermostatId}: ${error instanceof Error ? error.message : String(error)}`);
+            }
         });
     }
     public async triggerScenario(scenarioId: string): Promise<void> {

@@ -128,6 +128,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                     heartbeatInterval: this.config.heartbeatInterval ?? 30000,
                     commandTimeoutMs: this.config.commandTimeoutMs ?? 8000,
                     allowInsecureTls: this.config.allowInsecureTls ?? false,
+                    domusThermostat: this.config.domusThermostat,
                 },
             );
 

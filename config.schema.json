@@ -251,6 +251,55 @@
                     }
                 }
             },
+            "domusThermostat": {
+                "type": "object",
+                "default": {
+                    "enabled": true,
+                    "sensorFreshnessMs": 300000,
+                    "manualPairs": []
+                },
+                "properties": {
+                    "enabled": {
+                        "title": "Abilita Mapping DOMUS Termostati",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Usa i sensori DOMUS per la temperatura corrente dei termostati"
+                    },
+                    "sensorFreshnessMs": {
+                        "title": "Freshness Sensore DOMUS (ms)",
+                        "type": "integer",
+                        "default": 300000,
+                        "minimum": 30000,
+                        "maximum": 3600000,
+                        "description": "Dopo questo tempo senza update DOMUS, fallback su STATUS_SYSTEM.TEMP.IN"
+                    },
+                    "manualPairs": {
+                        "title": "Override Manuale Mapping",
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "thermostatOutputId": {
+                                    "title": "Thermostat Output ID",
+                                    "type": "string",
+                                    "pattern": "^(thermostat_)?[0-9]+$",
+                                    "placeholder": "18 o thermostat_18"
+                                },
+                                "domusSensorId": {
+                                    "title": "DOMUS Sensor ID",
+                                    "type": "string",
+                                    "pattern": "^((sensor_(temp|hum|light)_)?[0-9]+)$",
+                                    "placeholder": "1 o sensor_temp_1"
+                                }
+                            },
+                            "required": [
+                                "thermostatOutputId",
+                                "domusSensorId"
+                            ]
+                        }
+                    }
+                }
+            },
             "mqtt": {
                 "type": "object",
                 "properties": {
@@ -527,6 +576,44 @@
                                     "key": "temperatureDefaults.step",
                                     "title": "Step (°C)",
                                     "flex": "1 1 100px"
+                                }
+                            ]
+                        },
+                        {
+                            "key": "domusThermostat.enabled",
+                            "title": "Mapping DOMUS Attivo"
+                        },
+                        {
+                            "key": "domusThermostat.sensorFreshnessMs",
+                            "title": "Freshness DOMUS (ms)",
+                            "condition": {
+                                "functionBody": "return !model.domusThermostat || model.domusThermostat.enabled !== false;"
+                            }
+                        },
+                        {
+                            "key": "domusThermostat.manualPairs",
+                            "type": "array",
+                            "title": "Override Manuale",
+                            "orderable": true,
+                            "buttonText": "+ Aggiungi Pair",
+                            "condition": {
+                                "functionBody": "return !model.domusThermostat || model.domusThermostat.enabled !== false;"
+                            },
+                            "items": [
+                                {
+                                    "type": "fieldset",
+                                    "items": [
+                                        {
+                                            "key": "domusThermostat.manualPairs[].thermostatOutputId",
+                                            "title": "Thermostat Output ID",
+                                            "placeholder": "18 o thermostat_18"
+                                        },
+                                        {
+                                            "key": "domusThermostat.manualPairs[].domusSensorId",
+                                            "title": "DOMUS Sensor ID",
+                                            "placeholder": "1 o sensor_temp_1"
+                                        }
+                                    ]
                                 }
                             ]
                         }

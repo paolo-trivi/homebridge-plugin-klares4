@@ -21,7 +21,7 @@ import type { RawMessageDirection, RawMessageListener } from './types';
 export type { RawMessageDirection, RawMessageListener } from './types';
 
 export class KseniaWebSocketClient {
-    private readonly state = createInitialWebSocketClientState();
+    private readonly state: ReturnType<typeof createInitialWebSocketClientState>;
     private readonly logLevel: LogLevel;
     private readonly commandDispatcher = new CommandDispatcher();
     private readonly wsTransport: WsTransport;
@@ -58,6 +58,7 @@ export class KseniaWebSocketClient {
             loginTimeoutMs: 10000,
             ...options,
         };
+        this.state = createInitialWebSocketClientState(this.options.domusThermostat);
         this.logLevel = getEffectiveLogLevel(this.options.logLevel, this.options.debug);
         this.wsTransport = new WsTransport(this.log);
 

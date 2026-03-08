@@ -144,6 +144,9 @@ export class StatusUpdater {
         sensors.forEach((sensor: KseniaSensorStatusRaw): void => {
             if (sensor.DOMUS) {
                 let matchedDevice = false;
+                const parsedTemp = parseFloatInRange(sensor.DOMUS.TEM, -50, 100);
+                const parsedHum = parseIntegerInRange(sensor.DOMUS.HUM, 0, 100);
+                const parsedLight = parseIntegerInRange(sensor.DOMUS.LHT, 0, 100000);
                 if (this.deps.logLevel >= LogLevel.DEBUG) {
                     this.deps.log.debug(
                         `Sensor update ${sensor.ID}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
@@ -154,9 +157,8 @@ export class StatusUpdater {
                 if (tempDevice && tempDevice.type === 'sensor') {
                     matchedDevice = true;
                     const tempStatus = tempDevice.status as SensorStatus;
-                    const newTemp = parseFloatInRange(sensor.DOMUS.TEM, -50, 100);
-                    if (newTemp !== undefined) {
-                        tempStatus.value = newTemp;
+                    if (parsedTemp !== undefined) {
+                        tempStatus.value = parsedTemp;
                     }
                     this.deps.emitDeviceStatusUpdate(tempDevice);
                 }
@@ -165,9 +167,8 @@ export class StatusUpdater {
                 if (humDevice && humDevice.type === 'sensor') {
                     matchedDevice = true;
                     const humStatus = humDevice.status as SensorStatus;
-                    const newHum = parseIntegerInRange(sensor.DOMUS.HUM, 0, 100);
-                    if (newHum !== undefined) {
-                        humStatus.value = newHum;
+                    if (parsedHum !== undefined) {
+                        humStatus.value = parsedHum;
                     }
                     this.deps.emitDeviceStatusUpdate(humDevice);
                 }
@@ -176,11 +177,40 @@ export class StatusUpdater {
                 if (lightSensorDevice && lightSensorDevice.type === 'sensor') {
                     matchedDevice = true;
                     const lightStatus = lightSensorDevice.status as SensorStatus;
-                    const newLight = parseIntegerInRange(sensor.DOMUS.LHT, 0, 100000);
-                    if (newLight !== undefined) {
-                        lightStatus.value = newLight;
+                    if (parsedLight !== undefined) {
+                        lightStatus.value = parsedLight;
                     }
                     this.deps.emitDeviceStatusUpdate(lightSensorDevice);
+                }
+
+                if (parsedTemp !== undefined || parsedHum !== undefined) {
+                    this.deps.state.domusLatest.set(sensor.ID, {
+                        temp: parsedTemp,
+                        hum: parsedHum,
+                        ts: Date.now(),
+                    });
+                }
+
+                if (this.deps.state.domusThermostatConfig.enabled) {
+                    for (const [thermostatOutputId, mappedSensorId] of this.deps.state.thermostatToDomus.entries()) {
+                        if (mappedSensorId !== sensor.ID) {
+                            continue;
+                        }
+
+                        const thermostatDevice = this.deps.state.devices.get(`thermostat_${thermostatOutputId}`);
+                        if (!thermostatDevice || thermostatDevice.type !== 'thermostat') {
+                            continue;
+                        }
+
+                        const changed = updateThermostatStatus(thermostatDevice, {
+                            currentTemperature: parsedTemp,
+                            humidity: parsedHum,
+                        });
+
+                        if (changed) {
+                            this.deps.emitDeviceStatusUpdate(thermostatDevice);
+                        }
+                    }
                 }
 
                 if (!matchedDevice) {

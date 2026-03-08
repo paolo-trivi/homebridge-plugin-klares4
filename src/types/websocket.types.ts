@@ -81,6 +81,17 @@ export interface KseniaOutputCommand {
     STA: string;
 }
 
+export interface DomusThermostatManualPair {
+    thermostatOutputId: string;
+    domusSensorId: string;
+}
+
+export interface DomusThermostatConfig {
+    enabled?: boolean;
+    manualPairs?: DomusThermostatManualPair[];
+    sensorFreshnessMs?: number;
+}
+
 export interface KseniaMessagePayload {
     PIN?: string;
     ID_LOGIN?: string;
@@ -119,4 +130,5 @@ export interface KseniaWebSocketOptions {
     commandTimeoutMs?: number;
     allowInsecureTls?: boolean;
     loginTimeoutMs?: number;
+    domusThermostat?: DomusThermostatConfig;
 }

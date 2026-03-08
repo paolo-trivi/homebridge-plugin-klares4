@@ -7,7 +7,7 @@ import type { ScenarioAccessory } from '../accessories/scenario-accessory';
 import type { SensorAccessory } from '../accessories/sensor-accessory';
 import type { ThermostatAccessory } from '../accessories/thermostat-accessory';
 import type { ZoneAccessory } from '../accessories/zone-accessory';
-import type { MqttConfig, RoomMappingConfig } from '../types';
+import type { DomusThermostatConfig, MqttConfig, RoomMappingConfig } from '../types';
 
 export type AccessoryHandler =
     | LightAccessory
@@ -52,6 +52,7 @@ export interface Lares4Config extends PlatformConfig {
     devicesSummaryDelay?: number;
     mqtt?: MqttConfig;
     roomMapping?: RoomMappingConfig;
+    domusThermostat?: DomusThermostatConfig;
     generateDebugFile?: boolean;
 }
 
