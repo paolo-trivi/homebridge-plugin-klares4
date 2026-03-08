@@ -41,6 +41,7 @@ test('numeric parsing and cover mapping clamp values safely', () => {
   assert.equal(parseIntegerInRange('abc', 0, 100), undefined);
 
   assert.equal(parseFloatInRange('+21.4', 5, 40), 21.4);
+  assert.equal(parseFloatInRange('21,5', 5, 40), 21.5);
   assert.equal(parseFloatInRange('99', 5, 40), 40);
 
   assert.equal(mapCoverPosition('UP', undefined), 100);

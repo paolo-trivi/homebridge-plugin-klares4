@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 
 const {
   buildDomusThermostatMapping,
+  normalizeDomusSensorId,
+  normalizeThermostatOutputId,
 } = require('../dist/websocket-client/domus-thermostat-mapper.js');
 
 function createThermostats() {
@@ -66,4 +68,11 @@ test('ambiguous best score leaves thermostat unmapped for fallback', () => {
   assert.equal(result.mapping.has('1'), false);
   assert.deepEqual(result.unmatched, ['1']);
   assert.equal(result.sources.get('1'), 'fallback');
+});
+
+test('normalizers accept prefixed ids and trim leading zeros', () => {
+  assert.equal(normalizeThermostatOutputId('thermostat_019'), '19');
+  assert.equal(normalizeThermostatOutputId('00034'), '34');
+  assert.equal(normalizeDomusSensorId('sensor_01'), '1');
+  assert.equal(normalizeDomusSensorId('001'), '1');
 });

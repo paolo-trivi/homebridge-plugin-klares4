@@ -1,23 +1,13 @@
 import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 import { LogLevel } from '../log-levels';
-import type {
-    KseniaBusHaData,
-    KseniaMessage,
-    KseniaOutputStatusRaw,
-    KseniaScenarioData,
-    KseniaZoneData,
-} from '../types';
+import type { KseniaBusHaData, KseniaMessage, KseniaOutputStatusRaw, KseniaScenarioData, KseniaZoneData } from '../types';
 import type { CommandService } from './command-service';
 import { determineOutputType, isIgnoredScenarioCategory, parseOutputData, parseScenarioData, parseZoneData } from './device-parsers';
-import { buildDomusThermostatMapping, normalizeDomusIdsForConfig } from './domus-thermostat-mapper';
+import { buildDomusThermostatMapping, normalizeDomusIdsForConfig, normalizeDomusSensorId, normalizeThermostatOutputId } from './domus-thermostat-mapper';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
-import type {
-    CallbackRegistry,
-    RealtimeStatusData,
-    WebSocketClientState,
-} from './types';
+import type { CallbackRegistry, RealtimeStatusData, WebSocketClientState } from './types';
 interface MessageServiceDeps {
     state: WebSocketClientState;
     callbacks: CallbackRegistry;
@@ -34,19 +24,16 @@ interface MessageServiceDeps {
 
 export class MessageService {
     constructor(private readonly deps: MessageServiceDeps) {}
-
     public handleMessage(rawData: string): void {
         this.deps.emitRawMessage('in', rawData);
         try {
             const message = JSON.parse(rawData) as KseniaMessage;
-
             if (this.deps.logLevel >= LogLevel.DEBUG) {
                 const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
                 if (!isHeartbeat) {
                     this.deps.log.debug(`Message: ${message.CMD} / ${message.PAYLOAD_TYPE}`);
                 }
             }
-
             this.deps.routeMessage(message);
         } catch (error: unknown) {
             this.deps.log.error(
@@ -137,11 +124,15 @@ export class MessageService {
             if (payload.BUS_HAS) {
                 this.deps.log.info(`Found ${payload.BUS_HAS.length} sensors`);
                 payload.BUS_HAS.forEach((sensor: KseniaBusHaData): void => {
-                    this.deps.state.domusSensors.set(sensor.ID, sensor);
-                    const baseName = sensor.DES || `Sensor ${sensor.ID}`;
+                    const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
+                    this.deps.state.domusSensors.set(normalizedSensorId, {
+                        ...sensor,
+                        ID: normalizedSensorId,
+                    });
+                    const baseName = sensor.DES || `Sensor ${normalizedSensorId}`;
 
                     const tempDevice = {
-                        id: `sensor_temp_${sensor.ID}`,
+                        id: `sensor_temp_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Temperatura`,
                         description: `${baseName} - Temperatura`,
@@ -151,7 +142,7 @@ export class MessageService {
                     this.deps.callbacks.onDeviceDiscovered?.(tempDevice);
 
                     const humDevice = {
-                        id: `sensor_hum_${sensor.ID}`,
+                        id: `sensor_hum_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Umidita`,
                         description: `${baseName} - Umidita`,
@@ -161,7 +152,7 @@ export class MessageService {
                     this.deps.callbacks.onDeviceDiscovered?.(humDevice);
 
                     const lightDevice = {
-                        id: `sensor_light_${sensor.ID}`,
+                        id: `sensor_light_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Luminosita`,
                         description: `${baseName} - Luminosita`,
@@ -169,7 +160,7 @@ export class MessageService {
                     } as const;
                     this.deps.state.devices.set(lightDevice.id, lightDevice);
                     this.deps.callbacks.onDeviceDiscovered?.(lightDevice);
-                    this.deps.statusUpdater.applyPendingSensorStatus(sensor.ID);
+                    this.deps.statusUpdater.applyPendingSensorStatus(normalizedSensorId);
                 });
             }
 
@@ -261,16 +252,18 @@ export class MessageService {
 
         const thermostatOutputs = new Map<string, { id: string; name: string }>();
         for (const output of this.deps.state.thermostatOutputs.values()) {
-            thermostatOutputs.set(output.ID, {
-                id: output.ID,
+            const normalizedOutputId = normalizeThermostatOutputId(output.ID);
+            thermostatOutputs.set(normalizedOutputId, {
+                id: normalizedOutputId,
                 name: output.DES || `Thermostat ${output.ID}`,
             });
         }
 
         const domusSensors = new Map<string, { id: string; name: string }>();
         for (const sensor of this.deps.state.domusSensors.values()) {
-            domusSensors.set(sensor.ID, {
-                id: sensor.ID,
+            const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
+            domusSensors.set(normalizedSensorId, {
+                id: normalizedSensorId,
                 name: sensor.DES || `Sensor ${sensor.ID}`,
             });
         }

@@ -27,15 +27,23 @@ const STOP_WORDS = new Set([
     'temperatura',
 ]);
 
-function normalizeThermostatOutputId(id: string): string {
-    return stripDevicePrefix(String(id)).trim();
+function normalizeNumericId(id: string): string {
+    const raw = String(id).trim();
+    if (!/^[0-9]+$/.test(raw)) {
+        return raw;
+    }
+    return String(Number.parseInt(raw, 10));
 }
 
-function normalizeDomusSensorId(id: string): string {
+export function normalizeThermostatOutputId(id: string): string {
+    return normalizeNumericId(stripDevicePrefix(String(id)).trim());
+}
+
+export function normalizeDomusSensorId(id: string): string {
     const raw = stripDevicePrefix(String(id)).trim();
     const parts = raw.split('_');
     const last = parts[parts.length - 1];
-    return /^[0-9]+$/.test(last) ? last : raw;
+    return normalizeNumericId(/^[0-9]+$/.test(last) ? last : raw);
 }
 
 function normalizeName(value: string): string {

@@ -128,7 +128,8 @@ export function parseFloatInRange(
     if (value === undefined || value === '') {
         return undefined;
     }
-    const parsed = Number.parseFloat(value.replace('+', ''));
+    const normalized = value.trim().replace(',', '.').replace('+', '');
+    const parsed = Number.parseFloat(normalized);
     if (!Number.isFinite(parsed)) {
         return undefined;
     }

@@ -224,3 +224,62 @@ test('integration sequence MULTI_TYPES -> STATUS_BUS_HA_SENSORS -> STATUS_SYSTEM
   assert.equal(thermostat18.status.currentTemperature, 23);
   assert.equal(thermostat34.status.currentTemperature, 23);
 });
+
+test('integration normalizes DOMUS ids between BUS_HAS and STATUS_BUS_HA_SENSORS', () => {
+  const state = createInitialWebSocketClientState({
+    enabled: true,
+    manualPairs: [],
+    sensorFreshnessMs: 300000,
+  });
+
+  const statusUpdater = createStatusUpdater(state);
+  const systemTemperatureUpdater = createSystemTemperatureUpdater(state);
+  const messageService = new MessageService({
+    state,
+    callbacks: {},
+    log: createLogger(),
+    logLevel: 2,
+    debugEnabled: false,
+    statusUpdater,
+    systemTemperatureUpdater,
+    commandService: { requestSystemData: async () => undefined },
+    routeMessage: () => undefined,
+    emitRawMessage: () => undefined,
+    onLoginCompleted: () => undefined,
+  });
+
+  messageService.handleReadResponse({
+    CMD: 'READ_RES',
+    ID: '1',
+    SENDER: 'x',
+    RECEIVER: 'x',
+    TIMESTAMP: '0',
+    CRC_16: '0x0000',
+    PAYLOAD_TYPE: 'MULTI_TYPES',
+    PAYLOAD: {
+      OUTPUTS: [{ ID: '18', DES: 'Riscaldamento Sala', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' }],
+      BUS_HAS: [{ ID: '01', DES: 'Term. Sala', TYPE: 'DOMUS', ENABLED: 'YES' }],
+    },
+  });
+
+  assert.equal(state.thermostatToDomus.get('18'), '1');
+
+  messageService.handleStatusUpdate({
+    CMD: 'REALTIME',
+    ID: '2',
+    SENDER: 'x',
+    RECEIVER: 'x',
+    TIMESTAMP: '0',
+    CRC_16: '0x0000',
+    PAYLOAD_TYPE: 'CHANGES',
+    PAYLOAD: {
+      panel: {
+        STATUS_BUS_HA_SENSORS: [{ ID: '1', DOMUS: { TEM: '24,0', HUM: '45', LHT: '90' } }],
+      },
+    },
+  });
+
+  const thermostat18 = state.devices.get('thermostat_18');
+  assert.equal(thermostat18.status.currentTemperature, 24);
+  assert.equal(state.domusLatest.get('1').temp, 24);
+});

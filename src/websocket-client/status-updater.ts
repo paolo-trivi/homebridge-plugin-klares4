@@ -13,6 +13,7 @@ import type { Logger } from 'homebridge';
 import { LogLevel } from '../log-levels';
 import { kseniaModeToDomain } from '../thermostat-mode';
 import { updateThermostatStatus } from '../thermostat-state';
+import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import {
     mapCoverPosition,
     mapCoverState,
@@ -143,17 +144,18 @@ export class StatusUpdater {
     public updateSensorStatuses(sensors: KseniaSensorStatusRaw[]): void {
         sensors.forEach((sensor: KseniaSensorStatusRaw): void => {
             if (sensor.DOMUS) {
+                const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
                 let matchedDevice = false;
                 const parsedTemp = parseFloatInRange(sensor.DOMUS.TEM, -50, 100);
                 const parsedHum = parseIntegerInRange(sensor.DOMUS.HUM, 0, 100);
                 const parsedLight = parseIntegerInRange(sensor.DOMUS.LHT, 0, 100000);
                 if (this.deps.logLevel >= LogLevel.DEBUG) {
                     this.deps.log.debug(
-                        `Sensor update ${sensor.ID}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
+                        `Sensor update ${normalizedSensorId}: TEM=${sensor.DOMUS.TEM}C, HUM=${sensor.DOMUS.HUM}%, LHT=${sensor.DOMUS.LHT}lux`,
                     );
                 }
 
-                const tempDevice = this.deps.state.devices.get(`sensor_temp_${sensor.ID}`);
+                const tempDevice = this.deps.state.devices.get(`sensor_temp_${normalizedSensorId}`);
                 if (tempDevice && tempDevice.type === 'sensor') {
                     matchedDevice = true;
                     const tempStatus = tempDevice.status as SensorStatus;
@@ -163,7 +165,7 @@ export class StatusUpdater {
                     this.deps.emitDeviceStatusUpdate(tempDevice);
                 }
 
-                const humDevice = this.deps.state.devices.get(`sensor_hum_${sensor.ID}`);
+                const humDevice = this.deps.state.devices.get(`sensor_hum_${normalizedSensorId}`);
                 if (humDevice && humDevice.type === 'sensor') {
                     matchedDevice = true;
                     const humStatus = humDevice.status as SensorStatus;
@@ -173,7 +175,7 @@ export class StatusUpdater {
                     this.deps.emitDeviceStatusUpdate(humDevice);
                 }
 
-                const lightSensorDevice = this.deps.state.devices.get(`sensor_light_${sensor.ID}`);
+                const lightSensorDevice = this.deps.state.devices.get(`sensor_light_${normalizedSensorId}`);
                 if (lightSensorDevice && lightSensorDevice.type === 'sensor') {
                     matchedDevice = true;
                     const lightStatus = lightSensorDevice.status as SensorStatus;
@@ -184,7 +186,7 @@ export class StatusUpdater {
                 }
 
                 if (parsedTemp !== undefined || parsedHum !== undefined) {
-                    this.deps.state.domusLatest.set(sensor.ID, {
+                    this.deps.state.domusLatest.set(normalizedSensorId, {
                         temp: parsedTemp,
                         hum: parsedHum,
                         ts: Date.now(),
@@ -193,7 +195,7 @@ export class StatusUpdater {
 
                 if (this.deps.state.domusThermostatConfig.enabled) {
                     for (const [thermostatOutputId, mappedSensorId] of this.deps.state.thermostatToDomus.entries()) {
-                        if (mappedSensorId !== sensor.ID) {
+                        if (mappedSensorId !== normalizedSensorId) {
                             continue;
                         }
 
@@ -214,9 +216,12 @@ export class StatusUpdater {
                 }
 
                 if (!matchedDevice) {
-                    this.deps.state.pendingSensorStatuses.set(sensor.ID, sensor);
+                    this.deps.state.pendingSensorStatuses.set(normalizedSensorId, {
+                        ...sensor,
+                        ID: normalizedSensorId,
+                    });
                 } else {
-                    this.deps.state.pendingSensorStatuses.delete(sensor.ID);
+                    this.deps.state.pendingSensorStatuses.delete(normalizedSensorId);
                 }
             }
         });
