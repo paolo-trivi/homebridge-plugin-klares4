@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-03-13
+
+### Added
+
+- KSA import pipeline (`ksaImport`) with deterministic derivation for thermostat command routing, Domus sensor mapping, room mapping, and optional custom names.
+- Sanitized KSA runtime cache (`klares4-ksa-cache.json`) with whitelist-only structural metadata (no raw backup persistence).
+- Bilingual technical documentation under `docs/en` and `docs/it` covering architecture, websocket behavior, Domus routing, config, and troubleshooting.
+- CI/CD upgrade:
+  - Node 20/22 CI validation matrix with strict type-check + tests + build artifact
+  - npm publish workflow via GitHub Actions (tag/manual release path, provenance, and publish guards).
+
+### Fixed
+
+- Thermostat authoritative state alignment on Domus installations using `STATUS_TEMPERATURES` for realtime mode/setpoint/current state.
+- Thermostat routing mismatch on systems where output IDs, Domus sensor IDs, and `CFG_THERMOSTATS.ID` are not numerically aligned.
+- Startup synchronization robustness by preloading thermostat structural mapping from sanitized KSA cache when `PRG_THERMOSTATS` is not exposed by firmware.
+- Degraded routing behavior now evaluates mapped Domus sensor candidates before raw output fallback in non-PRG environments.
+
 ## [2.0.1-beta2] - 2026-03-13
 
 ### Added
