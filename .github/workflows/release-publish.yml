@@ -34,7 +34,6 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: npm-publish
 
     steps:
       - name: Checkout
