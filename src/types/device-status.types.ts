@@ -15,6 +15,7 @@ export interface ThermostatStatus {
     targetTemperature: number;
     mode: 'off' | 'heat' | 'cool' | 'auto';
     humidity?: number;
+    hvacOutputActive?: boolean;
 }
 
 export interface SensorStatus {

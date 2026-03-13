@@ -14,6 +14,7 @@ import { LogLevel } from '../log-levels';
 import { kseniaModeToDomain } from '../thermostat-mode';
 import { updateThermostatStatus } from '../thermostat-state';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
+import { hasFreshThermostatRealtimeState } from './thermostat-status-updater';
 import {
     mapCoverPosition,
     mapCoverState,
@@ -84,9 +85,10 @@ export class StatusUpdater {
             if (thermostatDevice && thermostatDevice.type === 'thermostat') {
                 matchedDevice = true;
                 const thermostatStatus = thermostatDevice.status as ThermostatStatus;
+                const hasFreshRealtime = hasFreshThermostatRealtimeState(this.deps.state, output.ID);
                 let updated = false;
 
-                if (output.TEMP_CURRENT !== undefined) {
+                if (!hasFreshRealtime && output.TEMP_CURRENT !== undefined) {
                     const oldCurrentTemp = thermostatStatus.currentTemperature;
                     const newCurrentTemp = parseFloatInRange(output.TEMP_CURRENT, -50, 100);
                     if (newCurrentTemp !== undefined) {
@@ -100,7 +102,7 @@ export class StatusUpdater {
                     }
                 }
 
-                if (output.TEMP_TARGET !== undefined) {
+                if (!hasFreshRealtime && output.TEMP_TARGET !== undefined) {
                     const oldTargetTemp = thermostatStatus.targetTemperature;
                     const newTargetTemp = parseFloatInRange(output.TEMP_TARGET, 5, 40);
                     if (newTargetTemp !== undefined) {
@@ -114,7 +116,7 @@ export class StatusUpdater {
                     }
                 }
 
-                if (output.MODE !== undefined) {
+                if (!hasFreshRealtime && output.MODE !== undefined) {
                     const oldMode = thermostatStatus.mode;
                     const newMode = kseniaModeToDomain(output.MODE);
                     updateThermostatStatus(thermostatDevice, {
@@ -122,14 +124,6 @@ export class StatusUpdater {
                     });
                     if (oldMode !== newMode) {
                         this.deps.log.info(`${thermostatDevice.name}: Mode ${newMode}`);
-                        updated = true;
-                    }
-                }
-                if (output.MODE === undefined && output.STA === 'ON' && thermostatStatus.mode === 'off') {
-                    const fallbackMode = this.inferThermostatModeFromName(thermostatDevice.name);
-                    if (fallbackMode !== 'off') {
-                        updateThermostatStatus(thermostatDevice, { mode: fallbackMode });
-                        this.deps.log.debug(`${thermostatDevice.name}: Fallback mode inferred from active output -> ${fallbackMode}`);
                         updated = true;
                     }
                 }
@@ -212,8 +206,12 @@ export class StatusUpdater {
                             continue;
                         }
 
+                        const hasFreshRealtime = hasFreshThermostatRealtimeState(
+                            this.deps.state,
+                            thermostatOutputId,
+                        );
                         const changed = updateThermostatStatus(thermostatDevice, {
-                            currentTemperature: parsedTemp,
+                            currentTemperature: hasFreshRealtime ? undefined : parsedTemp,
                             humidity: parsedHum,
                         });
 
@@ -272,11 +270,5 @@ export class StatusUpdater {
             this.deps.state.pendingZoneStatuses.delete(zoneId);
             this.updateZoneStatuses([pendingStatus]);
         }
-    }
-    private inferThermostatModeFromName(name: string): 'off' | 'heat' | 'cool' {
-        const normalized = name.toLowerCase();
-        if (normalized.includes('raffresc') || normalized.includes('cool')) return 'cool';
-        if (normalized.includes('riscald') || normalized.includes('heat')) return 'heat';
-        return 'off';
     }
 }

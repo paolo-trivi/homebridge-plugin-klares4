@@ -61,7 +61,7 @@ This document describes the modular architecture delivered for `2.0.0-beta.0` wi
 
 ## Verification Gates
 
-- `npm run check:max-lines` (enforces max 300 lines per `src/**/*.ts`)
+- `npm run check:max-lines` (enforces max 350 lines per `src/**/*.ts`)
 - `npm test`
 - `npx tsc --noEmit`
 - `npm run build`

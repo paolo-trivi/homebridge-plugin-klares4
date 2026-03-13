@@ -49,13 +49,27 @@ function resolveThermostatConfigId(
         (pair) => stripDevicePrefix(pair.thermostatOutputId) === outputThermostatId,
     );
     const manualId = manualPair ? stripDevicePrefix(manualPair.commandThermostatId) : undefined;
+    const programId = state.thermostatProgramIdByOutputId.get(outputThermostatId);
     const cachedId = state.thermostatCommandIdByOutputId.get(outputThermostatId);
     const mappedDomusSensorId = state.thermostatToDomus.get(outputThermostatId);
-    const candidates = [manualId, cachedId, mappedDomusSensorId, outputThermostatId].filter(
+    const candidates = [manualId, programId, cachedId].filter(
         (candidate, index, items): candidate is string =>
             Boolean(candidate) && items.indexOf(candidate) === index,
     );
-    return candidates.find((candidate) => state.thermostatCfgById.has(candidate));
+    const resolved = candidates.find((candidate) => state.thermostatCfgById.has(candidate));
+    if (resolved) {
+        return resolved;
+    }
+
+    if (state.thermostatProgramById.size > 0) {
+        return undefined;
+    }
+
+    if (mappedDomusSensorId && state.thermostatCfgById.has(mappedDomusSensorId)) {
+        return mappedDomusSensorId;
+    }
+
+    return state.thermostatCfgById.has(outputThermostatId) ? outputThermostatId : undefined;
 }
 
 function buildThermostatPatchFromConfig(cfg: Record<string, unknown>): Partial<{

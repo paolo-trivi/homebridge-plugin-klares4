@@ -47,3 +47,10 @@ test('deriveHomeKitCurrentState keeps existing behavior', () => {
   assert.equal(deriveHomeKitCurrentState('cool', 19, 21), 0);
   assert.equal(deriveHomeKitCurrentState('auto', 21, 21), 0);
 });
+
+test('deriveHomeKitCurrentState prefers realtime HVAC activity when available', () => {
+  assert.equal(deriveHomeKitCurrentState('heat', 24, 21, true), 1);
+  assert.equal(deriveHomeKitCurrentState('cool', 19, 21, true), 2);
+  assert.equal(deriveHomeKitCurrentState('heat', 19, 21, false), 0);
+  assert.equal(deriveHomeKitCurrentState('cool', 24, 21, false), 0);
+});

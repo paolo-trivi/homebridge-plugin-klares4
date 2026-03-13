@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { createInitialWebSocketClientState } = require('../dist/websocket-client/state.js');
 const { StatusUpdater } = require('../dist/websocket-client/status-updater.js');
 const { SystemTemperatureUpdater } = require('../dist/websocket-client/system-temperature-updater.js');
+const { ThermostatStatusUpdater } = require('../dist/websocket-client/thermostat-status-updater.js');
 const { MessageService } = require('../dist/websocket-client/message-service.js');
 
 function createLogger() {
@@ -49,6 +50,13 @@ function createSystemTemperatureUpdater(state, updates = []) {
     logLevel: 2,
     debugEnabled: true,
     emitDeviceDiscovered: () => undefined,
+    emitDeviceStatusUpdate: (device) => updates.push(device.id),
+  });
+}
+
+function createThermostatStatusUpdater(state, updates = []) {
+  return new ThermostatStatusUpdater({
+    state,
     emitDeviceStatusUpdate: (device) => updates.push(device.id),
   });
 }
@@ -155,6 +163,7 @@ test('integration sequence MULTI_TYPES -> STATUS_BUS_HA_SENSORS -> STATUS_SYSTEM
 
   const statusUpdater = createStatusUpdater(state);
   const systemTemperatureUpdater = createSystemTemperatureUpdater(state);
+  const thermostatStatusUpdater = createThermostatStatusUpdater(state);
   const messageService = new MessageService({
     state,
     callbacks: {},
@@ -163,6 +172,7 @@ test('integration sequence MULTI_TYPES -> STATUS_BUS_HA_SENSORS -> STATUS_SYSTEM
     debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
+    thermostatStatusUpdater,
     commandService: { requestSystemData: async () => undefined },
     routeMessage: () => undefined,
     emitRawMessage: () => undefined,
@@ -234,6 +244,7 @@ test('integration normalizes DOMUS ids between BUS_HAS and STATUS_BUS_HA_SENSORS
 
   const statusUpdater = createStatusUpdater(state);
   const systemTemperatureUpdater = createSystemTemperatureUpdater(state);
+  const thermostatStatusUpdater = createThermostatStatusUpdater(state);
   const messageService = new MessageService({
     state,
     callbacks: {},
@@ -242,6 +253,7 @@ test('integration normalizes DOMUS ids between BUS_HAS and STATUS_BUS_HA_SENSORS
     debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
+    thermostatStatusUpdater,
     commandService: { requestSystemData: async () => undefined },
     routeMessage: () => undefined,
     emitRawMessage: () => undefined,

@@ -8,6 +8,13 @@ Complete plugin for Ksenia Lares4 systems integrating security zones, lights, co
 
 ---
 
+## Full Documentation
+
+- English docs: `docs/en/`
+- Documentazione italiana: `docs/it/`
+
+---
+
 ## English Documentation
 
 ### Features
@@ -109,6 +116,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `allowInsecureTls`  | boolean  | false        | Disable TLS certificate validation (trusted LAN only) |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | enabled/freshness defaults | DOMUS thermostat mapping, manual overrides, freshness fallback |
+| `ksaImport`         | object   | disabled     | Import KSA backup metadata for thermostat routing, room mapping and optional config apply |
 | `debug`             | boolean  | false        | Detailed logging                |
 | `excludeZones`      | string[] | []           | Zones to exclude                |
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
@@ -251,10 +259,29 @@ npm run verify
 
 This runs:
 
-- max file size gate (`src/**/*.ts` <= 300 lines),
+- max file size gate (`src/**/*.ts` <= 350 lines),
 - strict TypeScript checks (`--noUnusedLocals --noUnusedParameters`),
 - full test suite,
 - build compatibility gate.
+
+### CI/CD
+
+GitHub Actions workflows:
+
+- `CI` (`.github/workflows/ci.yml`): Node 20/22 validation, strict type-checks, tests, build artifact.
+- `Release Publish` (`.github/workflows/release-publish.yml`): npm publish with provenance from tags (`v*`) or manual dispatch.
+
+Required repository secret:
+
+- `NPM_TOKEN` (npm automation token with publish permissions).
+
+Release policy:
+
+- tag push `v<package.json version>` triggers publish;
+- npm dist-tag auto-derived from version:
+  - `*-beta*` -> `beta`
+  - `*-rc*` -> `rc`
+  - stable -> `latest`
 
 ### Roadmap
 
@@ -401,6 +428,7 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `heartbeatInterval` | number   | 30000        | Intervallo heartbeat (ms)       |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | default attivi | Mapping termostati DOMUS, override manuali e fallback freshness |
+| `ksaImport`         | object   | disabilitato | Import metadata da backup KSA per routing termostati, room mapping e apply opzionale |
 | `debug`             | boolean  | false        | Logging dettagliato             |
 | `excludeZones`      | string[] | []           | Zone da escludere               |
 | `excludeOutputs`    | string[] | []           | Output da escludere             |

@@ -38,6 +38,7 @@ export function updateThermostatStatus(
         targetTemperature: number;
         mode: ThermostatMode;
         humidity: number | undefined;
+        hvacOutputActive: boolean;
     }>,
 ): boolean {
     let changed = false;
@@ -65,6 +66,14 @@ export function updateThermostatStatus(
 
     if (partial.humidity !== undefined && partial.humidity !== device.status.humidity) {
         device.status.humidity = partial.humidity;
+        changed = true;
+    }
+
+    if (
+        partial.hvacOutputActive !== undefined &&
+        partial.hvacOutputActive !== device.status.hvacOutputActive
+    ) {
+        device.status.hvacOutputActive = partial.hvacOutputActive;
         changed = true;
     }
 

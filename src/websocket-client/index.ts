@@ -16,6 +16,7 @@ import { ConnectionService } from './connection-service';
 import { MessageService } from './message-service';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
+import { ThermostatStatusUpdater } from './thermostat-status-updater';
 import type { RawMessageDirection, RawMessageListener } from './types';
 
 export type { RawMessageDirection, RawMessageListener } from './types';
@@ -30,6 +31,7 @@ export class KseniaWebSocketClient {
     private readonly connectionService: ConnectionService;
     private readonly statusUpdater: StatusUpdater;
     private readonly systemTemperatureUpdater: SystemTemperatureUpdater;
+    private readonly thermostatStatusUpdater: ThermostatStatusUpdater;
     private readonly messageService: MessageService;
     private readonly rawMessageListeners: Set<RawMessageListener> = new Set();
 
@@ -58,7 +60,7 @@ export class KseniaWebSocketClient {
             loginTimeoutMs: 10000,
             ...options,
         };
-        this.state = createInitialWebSocketClientState(this.options.domusThermostat);
+        this.state = createInitialWebSocketClientState(this.options.domusThermostat, this.options.ksaCache);
         this.logLevel = getEffectiveLogLevel(this.options.logLevel, this.options.debug);
         this.wsTransport = new WsTransport(this.log);
 
@@ -80,6 +82,13 @@ export class KseniaWebSocketClient {
             emitDeviceDiscovered: (device: KseniaDevice): void => {
                 this.onDeviceDiscovered?.(device);
             },
+            emitDeviceStatusUpdate: (device: KseniaDevice): void => {
+                this.onDeviceStatusUpdate?.(device);
+            },
+        });
+
+        this.thermostatStatusUpdater = new ThermostatStatusUpdater({
+            state: this.state,
             emitDeviceStatusUpdate: (device: KseniaDevice): void => {
                 this.onDeviceStatusUpdate?.(device);
             },
@@ -114,6 +123,7 @@ export class KseniaWebSocketClient {
             debugEnabled: this.options.debug ?? false,
             statusUpdater: this.statusUpdater,
             systemTemperatureUpdater: this.systemTemperatureUpdater,
+            thermostatStatusUpdater: this.thermostatStatusUpdater,
             commandService: this.commandService,
             routeMessage: (message: KseniaMessage): void => routeMessage(message),
             emitRawMessage: (_direction, rawMessage): void => {

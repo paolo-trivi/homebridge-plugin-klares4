@@ -37,6 +37,7 @@ export interface KseniaBusHaData {
     ID: string;
     DES: string;
     TYPE?: string;
+    TYP?: string;
     ENABLED?: string;
 }
 
@@ -57,6 +58,33 @@ export interface KseniaSensorStatusRaw {
         HUM?: string;
         LHT?: string;
     };
+}
+
+export interface KseniaTemperatureStatusRaw {
+    ID: string;
+    TEMP?: string;
+    THERM?: {
+        ACT_MODEL?: string;
+        ACT_SEA?: string;
+        ACT_TOF?: string;
+        OUT_STATUS?: string;
+        TEMP_THR?: {
+            T?: string;
+            VAL?: string;
+        };
+    };
+}
+
+export interface KseniaProgramThermostatRaw {
+    ID: string;
+    DES?: string;
+    PERIPH?: {
+        TYP?: string;
+        PID?: string;
+    };
+    HEATING_OUT?: string;
+    COOLING_OUT?: string;
+    [key: string]: unknown;
 }
 
 export interface KseniaZoneStatusRaw {
@@ -98,6 +126,43 @@ export interface DomusThermostatConfig {
     sensorFreshnessMs?: number;
 }
 
+export interface KsaImportConfig {
+    enabled?: boolean;
+    filePath?: string;
+    applyAtStartup?: boolean;
+    applyDomusMappings?: boolean;
+    applyRoomMapping?: boolean;
+    applyCustomNames?: boolean;
+    applyExclusionSuggestions?: boolean;
+}
+
+export interface KsaSanitizedThermostatProgram {
+    id: string;
+    description?: string;
+    heatingOutputId?: string;
+    coolingOutputId?: string;
+    domusSensorId?: string;
+}
+
+export interface KsaSanitizedCache {
+    sourceFilePath?: string;
+    sourceFileHash: string;
+    parsedAt: string;
+    thermostatPrograms: KsaSanitizedThermostatProgram[];
+    thermostatProgramIdByOutputId: Record<string, string>;
+    domusSensorIdByThermostatProgramId: Record<string, string>;
+    outputNamesById: Record<string, string>;
+    zoneNamesById: Record<string, string>;
+    scenarioNamesById: Record<string, string>;
+    domusSensorNamesById: Record<string, string>;
+    roomNameById: Record<string, string>;
+    roomDeviceRefs: Array<{
+        roomId: string;
+        objectType: string;
+        objectId: string;
+    }>;
+}
+
 export interface KseniaMessagePayload {
     PIN?: string;
     ID_LOGIN?: string;
@@ -109,8 +174,10 @@ export interface KseniaMessagePayload {
     BUS_HAS?: KseniaBusHaData[];
     STATUS_OUTPUTS?: KseniaOutputStatusRaw[];
     STATUS_BUS_HA_SENSORS?: KseniaSensorStatusRaw[];
+    STATUS_TEMPERATURES?: KseniaTemperatureStatusRaw[];
+    PRG_THERMOSTATS?: KseniaProgramThermostatRaw[];
     STATUS_ZONES?: KseniaZoneStatusRaw[];
-    STATUS_SYSTEM?: KseniaSystemStatus;
+    STATUS_SYSTEM?: KseniaSystemStatus[];
     ID_ITEMS_RANGE?: string[];
     TYPES?: string[];
     OUTPUT?: KseniaOutputCommand;
@@ -137,4 +204,5 @@ export interface KseniaWebSocketOptions {
     allowInsecureTls?: boolean;
     loginTimeoutMs?: number;
     domusThermostat?: DomusThermostatConfig;
+    ksaCache?: KsaSanitizedCache;
 }

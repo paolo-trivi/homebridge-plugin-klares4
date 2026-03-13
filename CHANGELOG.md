@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-03-13
+
+### Added
+
+- KSA import pipeline (`ksaImport`) with deterministic derivation for thermostat command routing, Domus sensor mapping, room mapping, and optional custom names.
+- Sanitized KSA runtime cache (`klares4-ksa-cache.json`) with whitelist-only structural metadata (no raw backup persistence).
+- Bilingual technical documentation under `docs/en` and `docs/it` covering architecture, websocket behavior, Domus routing, config, and troubleshooting.
+- CI/CD upgrade:
+  - Node 20/22 CI validation matrix with strict type-check + tests + build artifact
+  - npm publish workflow via GitHub Actions (tag/manual release path, provenance, and publish guards).
+
+### Fixed
+
+- Thermostat authoritative state alignment on Domus installations using `STATUS_TEMPERATURES` for realtime mode/setpoint/current state.
+- Thermostat routing mismatch on systems where output IDs, Domus sensor IDs, and `CFG_THERMOSTATS.ID` are not numerically aligned.
+- Startup synchronization robustness by preloading thermostat structural mapping from sanitized KSA cache when `PRG_THERMOSTATS` is not exposed by firmware.
+- Degraded routing behavior now evaluates mapped Domus sensor candidates before raw output fallback in non-PRG environments.
+
+## [2.0.1-beta2] - 2026-03-13
+
+### Added
+
+- New KSA import workflow in plugin config (`ksaImport`) to parse central backup metadata and derive deterministic routing data.
+- Sanitized KSA cache persisted in Homebridge storage (`klares4-ksa-cache.json`) with thermostat/output/sensor/room mappings only (no raw backup persistence).
+- Automatic derivation from KSA for:
+  - `domusThermostat.manualCommandPairs` (`output -> CFG/STATUS thermostat ID`)
+  - `domusThermostat.manualPairs` (`output -> Domus sensor`)
+  - optional `roomMapping` and optional `customNames`.
+
+### Fixed
+
+- Runtime thermostat routing now preloads program mappings from KSA cache when realtime `PRG_THERMOSTATS` is unavailable on panel firmware.
+- Degraded command resolver now evaluates mapped Domus sensor IDs before raw output fallback, improving compatibility in non-PRG environments.
+- Initial websocket state can bootstrap thermostat program maps from cached KSA data to avoid startup desynchronization.
+
+## [2.0.1-beta1] - 2026-03-13
+
+### Fixed
+
+- DOMUS thermostats now use `STATUS_TEMPERATURES` as the authoritative source for realtime mode, setpoint, current temperature and HVAC activity.
+- DOMUS thermostat routing now uses `PRG_THERMOSTATS` over WSS to resolve the real relation between output, thermostat config ID and Domus sensor.
+- Fixed swapped command routing on installations where `CFG_THERMOSTATS.ID` does not match the Domus sensor ID, including the real-world `Matrimoniale`/`Bagno` inversion.
+- Removed the automatic legacy `WRITE/THERMOSTAT` fallback: thermostat writes now use only the observed `WRITE_CFG/CFG_THERMOSTATS` protocol.
+- `STATUS_SYSTEM` fallback no longer overwrites mapped Domus/realtime thermostat data while fresher room or thermostat telemetry is available.
+
+### Beta Focus
+
+- Intended validation target: installations with Domus room sensors and mapped thermostats.
+
 ## [2.0.0] - 2026-03-08
 
 ### Added

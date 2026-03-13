@@ -2,7 +2,7 @@ import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 import { LogLevel, maskSensitiveData } from '../log-levels';
 import { stripDevicePrefix } from '../device-id';
-import { domainModeToKsenia, type ThermostatMode } from '../thermostat-mode';
+import type { ThermostatMode } from '../thermostat-mode';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { clampValue } from '../websocket/device-state-projector';
 import { WsTransport } from '../websocket/ws-transport';
@@ -55,8 +55,19 @@ interface CommandServiceDeps {
         await this.sendKseniaCommand('READ', 'STATUS_OUTPUTS', { ID_LOGIN: this.deps.state.idLogin });
         await this.sendKseniaCommand('READ', 'STATUS_BUS_HA_SENSORS', { ID_LOGIN: this.deps.state.idLogin });
         await this.sendKseniaCommand('READ', 'STATUS_SYSTEM', { ID_LOGIN: this.deps.state.idLogin });
+        await this.sendKseniaCommand('READ', 'PRG_THERMOSTATS', { ID_LOGIN: this.deps.state.idLogin, ID_READ: 'ALL', ID_ITEMS_RANGE: ['ALL', 'ALL'] });
         await this.sendKseniaCommand('READ', 'CFG_THERMOSTATS', { ID_LOGIN: this.deps.state.idLogin, ID_READ: 'ALL', ID_ITEMS_RANGE: ['ALL', 'ALL'] });
-        await this.sendKseniaCommand('REALTIME', 'REGISTER', { ID_LOGIN: this.deps.state.idLogin, TYPES: ['STATUS_ZONES', 'STATUS_OUTPUTS', 'STATUS_BUS_HA_SENSORS', 'STATUS_SYSTEM', 'SCENARIOS'] });
+        await this.sendKseniaCommand('REALTIME', 'REGISTER', {
+            ID_LOGIN: this.deps.state.idLogin,
+            TYPES: [
+                'STATUS_ZONES',
+                'STATUS_OUTPUTS',
+                'STATUS_BUS_HA_SENSORS',
+                'STATUS_SYSTEM',
+                'STATUS_TEMPERATURES',
+                'SCENARIOS',
+            ],
+        });
     }
     public async switchLight(lightId: string, on: boolean): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
@@ -127,31 +138,20 @@ interface CommandServiceDeps {
         const commandThermostatId = await this.resolveThermostatCommandId(outputThermostatId);
         updateThermostatSeasonHint(this.thermostatWriteSeasonById, commandThermostatId, mode);
         await this.deps.commandDispatcher.enqueueDeviceCommand(thermostatId, async (): Promise<void> => {
-            try {
-                const cfgEntry = buildThermostatModeCommandPayload(
-                    commandThermostatId,
-                    mode,
-                    this.deps.state.thermostatCfgById.get(commandThermostatId),
-                );
-                await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
-                    ID_LOGIN: 'true',
-                    CFG_THERMOSTATS: [cfgEntry],
-                }, {
-                    awaitResponse: true,
-                    responseCmds: ['WRITE_CFG_RES'],
-                    timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
-                });
-                this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
-            } catch (error: unknown) {
-                await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
-                    ID_LOGIN: this.deps.state.idLogin,
-                    ID_THERMOSTAT: commandThermostatId,
-                    MODE: domainModeToKsenia(mode),
-                }, {
-                    awaitResponse: false,
-                });
-                this.deps.log.warn(`Thermostat mode fallback to legacy WRITE/THERMOSTAT for ${commandThermostatId}: ${error instanceof Error ? error.message : String(error)}`);
-            }
+            const cfgEntry = buildThermostatModeCommandPayload(
+                commandThermostatId,
+                mode,
+                this.deps.state.thermostatCfgById.get(commandThermostatId),
+            );
+            await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
+                ID_LOGIN: 'true',
+                CFG_THERMOSTATS: [cfgEntry],
+            }, {
+                awaitResponse: true,
+                responseCmds: ['WRITE_CFG_RES'],
+                timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
+            });
+            this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
         });
     }
     public async setThermostatTemperature(thermostatId: string, temperature: number): Promise<void> {
@@ -160,45 +160,59 @@ interface CommandServiceDeps {
         const outputThermostatId = stripDevicePrefix(thermostatId);
         const commandThermostatId = await this.resolveThermostatCommandId(outputThermostatId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(thermostatId, async (): Promise<void> => {
-            try {
-                await this.primeThermostatConfigCache(commandThermostatId);
-                const cfgEntry = buildThermostatSetpointCommandPayload({
-                    systemThermostatId: commandThermostatId,
-                    temperature: safeTemperature,
-                    seasonById: this.thermostatWriteSeasonById,
-                    existingCfg: this.deps.state.thermostatCfgById.get(commandThermostatId),
-                });
-                await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
-                    ID_LOGIN: 'true',
-                    CFG_THERMOSTATS: [cfgEntry],
-                }, {
-                    awaitResponse: true,
-                    responseCmds: ['WRITE_CFG_RES'],
-                    timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
-                });
-                this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
-            } catch (error: unknown) {
-                await this.sendKseniaCommand('WRITE', 'THERMOSTAT', {
-                    ID_LOGIN: this.deps.state.idLogin,
-                    ID_THERMOSTAT: commandThermostatId,
-                    TARGET_TEMP: safeTemperature.toString(),
-                }, {
-                    awaitResponse: false,
-                });
-                this.deps.log.warn(`Thermostat temperature fallback to legacy WRITE/THERMOSTAT for ${commandThermostatId}: ${error instanceof Error ? error.message : String(error)}`);
-            }
+            await this.primeThermostatConfigCache(commandThermostatId);
+            const cfgEntry = buildThermostatSetpointCommandPayload({
+                systemThermostatId: commandThermostatId,
+                temperature: safeTemperature,
+                seasonById: this.thermostatWriteSeasonById,
+                existingCfg: this.deps.state.thermostatCfgById.get(commandThermostatId),
+            });
+            await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
+                ID_LOGIN: 'true',
+                CFG_THERMOSTATS: [cfgEntry],
+            }, {
+                awaitResponse: true,
+                responseCmds: ['WRITE_CFG_RES'],
+                timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
+            });
+            this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
         });
     }
     private async resolveThermostatCommandId(outputThermostatId: string): Promise<string> {
-        return resolveThermostatCommandId({
+        if (
+            this.deps.state.thermostatProgramById.size === 0
+            && !this.deps.state.missingThermostatProgramWarningOutputIds.has(outputThermostatId)
+        ) {
+            this.deps.log.warn(
+                `PRG_THERMOSTATS unavailable for thermostat_${outputThermostatId}, using degraded command fallback`,
+            );
+            this.deps.state.missingThermostatProgramWarningOutputIds.add(outputThermostatId);
+        }
+
+        const resolvedCommandId = await resolveThermostatCommandId({
             outputThermostatId,
+            hasProgramMapping: this.deps.state.thermostatProgramById.size > 0,
             cachedCommandId: this.deps.state.thermostatCommandIdByOutputId.get(outputThermostatId),
             manualCommandId: this.getManualThermostatCommandId(outputThermostatId),
+            programCommandId: this.deps.state.thermostatProgramIdByOutputId.get(outputThermostatId),
             mappedDomusSensorId: this.deps.state.thermostatToDomus.get(outputThermostatId),
             primeConfig: (candidateId): Promise<boolean> => this.primeThermostatConfigCache(candidateId),
             rememberCommandId: (resolvedCommandId): void => { this.deps.state.thermostatCommandIdByOutputId.set(outputThermostatId, resolvedCommandId); },
             onResolvedAlias: (resolvedCommandId): void => this.deps.log.info(`Thermostat command ID resolved thermostat_${outputThermostatId} -> ${resolvedCommandId}`),
         });
+        this.logThermostatRouting(outputThermostatId);
+        return resolvedCommandId;
+    }
+    private logThermostatRouting(outputThermostatId: string): void {
+        if (this.deps.logLevel < LogLevel.DEBUG) {
+            return;
+        }
+        const configId = this.deps.state.thermostatProgramIdByOutputId.get(outputThermostatId)
+            ?? this.deps.state.thermostatCommandIdByOutputId.get(outputThermostatId)
+            ?? outputThermostatId;
+        const domusSensorId = this.deps.state.thermostatToDomus.get(outputThermostatId) ?? 'NA';
+        const source = this.deps.state.thermostatProgramIdByOutputId.has(outputThermostatId) ? 'prg_thermostats' : 'fallback';
+        this.deps.log.debug(`thermostat_${outputThermostatId} => cfg:${configId} domus:${domusSensorId} source:${source}`);
     }
     private getManualThermostatCommandId(outputThermostatId: string): string | undefined { const pair = this.deps.state.domusThermostatConfig.manualCommandPairs.find((item) => stripDevicePrefix(item.thermostatOutputId) === outputThermostatId); return pair ? stripDevicePrefix(pair.commandThermostatId) : undefined; }
     private async primeThermostatConfigCache(systemThermostatId: string): Promise<boolean> {
