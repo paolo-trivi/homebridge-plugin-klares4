@@ -4,22 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      npm_tag:
-        description: 'Override npm dist-tag (beta, rc, latest). Leave empty for auto.'
-        required: false
-        type: choice
-        options:
-          - ''
-          - beta
-          - rc
-          - latest
-      skip_version_tag_check:
-        description: 'Skip vX.Y.Z tag to package.json version check'
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -34,7 +18,6 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: npm-publish
 
     steps:
       - name: Checkout
@@ -43,9 +26,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: npm
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -75,21 +58,11 @@ jobs:
             AUTO_TAG="latest"
           fi
 
-          INPUT_TAG="${{ github.event.inputs.npm_tag }}"
-          if [[ -n "${INPUT_TAG:-}" ]]; then
-            TAG="$INPUT_TAG"
-          else
-            TAG="$AUTO_TAG"
-          fi
-
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            GIT_TAG="${GITHUB_REF#refs/tags/}"
-            if [[ "${{ github.event.inputs.skip_version_tag_check || 'false' }}" != "true" ]]; then
-              if [[ "$GIT_TAG" != "v$VERSION" ]]; then
-                echo "Tag/version mismatch: git tag=$GIT_TAG package.json=$VERSION"
-                exit 1
-              fi
-            fi
+          TAG="$AUTO_TAG"
+          GIT_TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$GIT_TAG" != "v$VERSION" ]]; then
+            echo "Tag/version mismatch: git tag=$GIT_TAG package.json=$VERSION"
+            exit 1
           fi
 
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
@@ -105,8 +78,18 @@ jobs:
             exit 1
           fi
 
+      - name: Publish diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "workflow_ref=$GITHUB_WORKFLOW_REF"
+          echo "workflow=$GITHUB_WORKFLOW"
+          echo "ref=$GITHUB_REF"
+          node -v
+          npm -v
+
       - name: Publish package
-        run: npm publish --tag "${{ steps.meta.outputs.tag }}" --provenance
+        run: npm publish --tag "${{ steps.meta.outputs.tag }}" --access public --provenance
 
       - name: Summary
         run: |
