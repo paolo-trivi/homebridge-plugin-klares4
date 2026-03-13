@@ -4,7 +4,6 @@ import { updateThermostatStatus } from '../thermostat-state';
 import type {
     KseniaDevice,
     KseniaTemperatureStatusRaw,
-    KseniaThermostat,
 } from '../types';
 import { parseFloatInRange } from '../websocket/device-state-projector';
 import type { WebSocketClientState } from './types';
