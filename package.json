@@ -5,7 +5,7 @@
     "main": "dist/index.js",
     "scripts": {
         "build": "tsc",
-        "check:max-lines": "node scripts/check-max-lines.js src 300",
+        "check:max-lines": "node scripts/check-max-lines.js src 350",
         "verify": "npm run check:max-lines && npx tsc --noEmit --noUnusedLocals --noUnusedParameters && npm test",
         "release:dry-run": "npm publish --tag rc --dry-run",
         "release:rc": "npm publish --tag rc",

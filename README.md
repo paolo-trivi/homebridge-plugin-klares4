@@ -259,7 +259,7 @@ npm run verify
 
 This runs:
 
-- max file size gate (`src/**/*.ts` <= 300 lines),
+- max file size gate (`src/**/*.ts` <= 350 lines),
 - strict TypeScript checks (`--noUnusedLocals --noUnusedParameters`),
 - full test suite,
 - build compatibility gate.

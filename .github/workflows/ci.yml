@@ -36,8 +36,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Source size advisory
-        continue-on-error: true
+      - name: Source size gate
         run: npm run check:max-lines
 
       - name: TypeScript strict checks
