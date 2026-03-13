@@ -271,9 +271,10 @@ GitHub Actions workflows:
 - `CI` (`.github/workflows/ci.yml`): Node 20/22 validation, strict type-checks, tests, build artifact.
 - `Release Publish` (`.github/workflows/release-publish.yml`): npm publish with provenance from tags (`v*`) or manual dispatch.
 
-Required repository secret:
+Trusted publishing:
 
-- `NPM_TOKEN` (npm automation token with publish permissions).
+- `Release Publish` uses GitHub OIDC trusted publishing (`id-token: write`).
+- No `NPM_TOKEN` secret is required.
 
 Release policy:
 

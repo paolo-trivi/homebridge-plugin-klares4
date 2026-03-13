@@ -106,8 +106,6 @@ jobs:
           fi
 
       - name: Publish package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --tag "${{ steps.meta.outputs.tag }}" --provenance
 
       - name: Summary
