@@ -8,6 +8,13 @@ Complete plugin for Ksenia Lares4 systems integrating security zones, lights, co
 
 ---
 
+## Full Documentation
+
+- English docs: `docs/en/`
+- Documentazione italiana: `docs/it/`
+
+---
+
 ## English Documentation
 
 ### Features
