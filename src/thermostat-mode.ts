@@ -68,9 +68,19 @@ export function deriveHomeKitCurrentState(
     mode: ThermostatMode,
     currentTemperature: number,
     targetTemperature: number,
+    outputActive?: boolean,
 ): 0 | 1 | 2 {
     if (mode === 'off') {
         return 0;
+    }
+
+    if (outputActive === false) {
+        return 0;
+    }
+
+    if (outputActive === true) {
+        if (mode === 'heat') return 1;
+        if (mode === 'cool') return 2;
     }
 
     if (mode === 'heat') return currentTemperature < targetTemperature ? 1 : 0;

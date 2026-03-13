@@ -1,8 +1,9 @@
 interface ResolveThermostatCommandIdInput {
     outputThermostatId: string;
+    hasProgramMapping: boolean;
     cachedCommandId?: string;
     manualCommandId?: string;
-    mappedDomusSensorId?: string;
+    programCommandId?: string;
     primeConfig: (candidateId: string) => Promise<boolean>;
     rememberCommandId: (resolvedCommandId: string) => void;
     onResolvedAlias?: (resolvedCommandId: string) => void;
@@ -10,22 +11,35 @@ interface ResolveThermostatCommandIdInput {
 
 export async function resolveThermostatCommandId({
     outputThermostatId,
+    hasProgramMapping,
     cachedCommandId,
     manualCommandId,
-    mappedDomusSensorId,
+    programCommandId,
     primeConfig,
     rememberCommandId,
     onResolvedAlias,
 }: ResolveThermostatCommandIdInput): Promise<string> {
-    if (cachedCommandId) {
-        return cachedCommandId;
-    }
     if (manualCommandId && await primeConfig(manualCommandId)) {
         rememberCommandId(manualCommandId);
         if (manualCommandId !== outputThermostatId) onResolvedAlias?.(manualCommandId);
         return manualCommandId;
     }
-    const candidates = [outputThermostatId, mappedDomusSensorId].filter(
+
+    if (programCommandId && await primeConfig(programCommandId)) {
+        rememberCommandId(programCommandId);
+        if (programCommandId !== outputThermostatId) onResolvedAlias?.(programCommandId);
+        return programCommandId;
+    }
+
+    if (cachedCommandId) {
+        return cachedCommandId;
+    }
+
+    if (hasProgramMapping) {
+        return outputThermostatId;
+    }
+
+    const candidates = [outputThermostatId].filter(
         (id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index,
     );
     for (const candidateId of candidates) {

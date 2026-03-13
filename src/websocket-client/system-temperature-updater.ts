@@ -4,6 +4,7 @@ import { stripDevicePrefix } from '../device-id';
 import { LogLevel } from '../log-levels';
 import { updateThermostatStatus } from '../thermostat-state';
 import { parseFloatInRange } from '../websocket/device-state-projector';
+import { hasFreshThermostatRealtimeState } from './thermostat-status-updater';
 import type { SystemTemperatureData, WebSocketClientState } from './types';
 
 interface SystemTemperatureUpdaterDeps {
@@ -69,6 +70,10 @@ export class SystemTemperatureUpdater {
                     }
 
                     const thermostatOutputId = stripDevicePrefix(device.id);
+                    if (hasFreshThermostatRealtimeState(this.deps.state, thermostatOutputId)) {
+                        return;
+                    }
+
                     const mappedSensorId = this.deps.state.thermostatToDomus.get(thermostatOutputId);
                     const freshnessMs = this.deps.state.domusThermostatConfig.sensorFreshnessMs;
                     const latestDomus = mappedSensorId

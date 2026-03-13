@@ -51,3 +51,22 @@ test('updateThermostatStatus updates status and top-level in a single operation'
   assert.equal(device.status.mode, 'cool');
   assert.equal(device.mode, 'cool');
 });
+
+test('updateThermostatStatus stores realtime HVAC activity without touching top-level compatibility fields', () => {
+  const device = {
+    status: { currentTemperature: 20, targetTemperature: 21, mode: 'heat' },
+    currentTemperature: 20,
+    targetTemperature: 21,
+    mode: 'heat',
+  };
+
+  const changed = updateThermostatStatus(device, {
+    hvacOutputActive: true,
+  });
+
+  assert.equal(changed, true);
+  assert.equal(device.status.hvacOutputActive, true);
+  assert.equal(device.currentTemperature, 20);
+  assert.equal(device.targetTemperature, 21);
+  assert.equal(device.mode, 'heat');
+});

@@ -21,7 +21,7 @@ function createThermostat(id, name) {
   };
 }
 
-test('applies thermostat config from mapped DOMUS sensor id', () => {
+test('applies thermostat config from PRG_THERMOSTATS program id', () => {
   const state = createInitialWebSocketClientState({
     enabled: true,
     manualPairs: [],
@@ -32,7 +32,9 @@ test('applies thermostat config from mapped DOMUS sensor id', () => {
 
   const thermostat = createThermostat('19', 'Riscaldamento Studio');
   state.devices.set(thermostat.id, thermostat);
-  state.thermostatToDomus.set('19', '5');
+  state.thermostatProgramById.set('5', { ID: '5', PERIPH: { PID: '5' }, HEATING_OUT: '19' });
+  state.thermostatProgramIdByOutputId.set('19', '5');
+  state.domusSensorIdByThermostatProgramId.set('5', '5');
   state.thermostatCfgById.set('5', {
     ID: '5',
     ACT_MODE: 'MAN',
@@ -62,6 +64,9 @@ test('manual command id override has precedence in config sync', () => {
 
   const thermostat = createThermostat('21', 'Riscaldamento Matrimoniale');
   state.devices.set(thermostat.id, thermostat);
+  state.thermostatProgramById.set('3', { ID: '3', PERIPH: { PID: '4' }, HEATING_OUT: '21' });
+  state.thermostatProgramIdByOutputId.set('21', '3');
+  state.domusSensorIdByThermostatProgramId.set('3', '4');
   state.thermostatCfgById.set('3', {
     ID: '3',
     ACT_MODE: 'MAN',
@@ -74,8 +79,6 @@ test('manual command id override has precedence in config sync', () => {
     ACT_SEA: 'WIN',
     WIN: { TM: '19.0' },
   });
-  state.thermostatToDomus.set('21', '4');
-
   applyThermostatConfigSnapshot({
     state,
     emitDeviceStatusUpdate: () => undefined,

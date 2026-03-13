@@ -5,6 +5,7 @@ import type {
     KseniaBusHaData,
     KseniaMessage,
     KseniaOutputStatusRaw,
+    KseniaProgramThermostatRaw,
     KseniaScenarioData,
     KseniaZoneData,
 } from '../types';
@@ -12,6 +13,7 @@ import type { CommandService } from './command-service';
 import { determineOutputType, isIgnoredScenarioCategory, parseOutputData, parseScenarioData, parseZoneData } from './device-parsers';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
+import { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { applyThermostatConfigSnapshot } from './thermostat-config-sync';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
@@ -28,6 +30,7 @@ interface MessageServiceDeps {
     debugEnabled: boolean;
     statusUpdater: StatusUpdater;
     systemTemperatureUpdater: SystemTemperatureUpdater;
+    thermostatStatusUpdater: ThermostatStatusUpdater;
     commandService: CommandService;
     routeMessage: (message: KseniaMessage) => void;
     emitRawMessage: (direction: 'in', rawMessage: string) => void;
@@ -178,6 +181,7 @@ export class MessageService {
 
             this.refreshDomusThermostatMapping();
             this.applyThermostatConfigSnapshot();
+            this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
         }
 
         if (message.PAYLOAD_TYPE === 'CFG_THERMOSTATS' && Array.isArray(payload.CFG_THERMOSTATS)) {
@@ -197,6 +201,14 @@ export class MessageService {
                 );
             }
             this.applyThermostatConfigSnapshot();
+            this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
+        }
+
+        if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS' && Array.isArray(payload.PRG_THERMOSTATS)) {
+            this.cacheProgramThermostats(payload.PRG_THERMOSTATS);
+            this.refreshDomusThermostatMapping();
+            this.applyThermostatConfigSnapshot();
+            this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
         }
 
         if (message.PAYLOAD_TYPE === 'STATUS_OUTPUTS' && payload.STATUS_OUTPUTS) {
@@ -217,6 +229,10 @@ export class MessageService {
             this.deps.statusUpdater.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
         }
 
+        if (message.PAYLOAD_TYPE === 'STATUS_TEMPERATURES' && payload.STATUS_TEMPERATURES) {
+            this.deps.thermostatStatusUpdater.updateTemperatureStatuses(payload.STATUS_TEMPERATURES);
+        }
+
         if (message.PAYLOAD_TYPE === 'STATUS_SYSTEM' && payload.STATUS_SYSTEM) {
             this.deps.log.info('Initial system temperatures');
             this.deps.systemTemperatureUpdater.updateSystemTemperatures(
@@ -232,6 +248,9 @@ export class MessageService {
         }
         if (payload.STATUS_BUS_HA_SENSORS) {
             this.deps.statusUpdater.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
+        }
+        if (payload.STATUS_TEMPERATURES) {
+            this.deps.thermostatStatusUpdater.updateTemperatureStatuses(payload.STATUS_TEMPERATURES);
         }
         if (payload.STATUS_ZONES) {
             this.deps.statusUpdater.updateZoneStatuses(payload.STATUS_ZONES);
@@ -260,6 +279,9 @@ export class MessageService {
                 if (statusData.STATUS_BUS_HA_SENSORS) {
                     this.deps.statusUpdater.updateSensorStatuses(statusData.STATUS_BUS_HA_SENSORS);
                 }
+                if (statusData.STATUS_TEMPERATURES) {
+                    this.deps.thermostatStatusUpdater.updateTemperatureStatuses(statusData.STATUS_TEMPERATURES);
+                }
                 if (statusData.STATUS_ZONES) {
                     this.deps.statusUpdater.updateZoneStatuses(statusData.STATUS_ZONES);
                 }
@@ -272,6 +294,40 @@ export class MessageService {
 
     private refreshDomusThermostatMapping(): void {
         refreshDomusThermostatMapping(this.deps.state, this.deps.log);
+    }
+
+    private cacheProgramThermostats(entries: KseniaProgramThermostatRaw[]): void {
+        this.deps.state.thermostatProgramById.clear();
+        this.deps.state.thermostatProgramIdByOutputId.clear();
+        this.deps.state.domusSensorIdByThermostatProgramId.clear();
+
+        for (const entry of entries) {
+            const thermostatProgramId = String(entry.ID ?? '');
+            if (!thermostatProgramId) {
+                continue;
+            }
+
+            this.deps.state.thermostatProgramById.set(thermostatProgramId, entry);
+            const rawSensorId = entry.PERIPH?.PID;
+            const sensorId = rawSensorId ? normalizeDomusSensorId(rawSensorId) : undefined;
+            if (sensorId) {
+                this.deps.state.domusSensorIdByThermostatProgramId.set(thermostatProgramId, sensorId);
+            }
+
+            for (const outputId of [entry.HEATING_OUT, entry.COOLING_OUT]) {
+                if (!outputId || outputId === 'NU') {
+                    continue;
+                }
+                this.deps.state.thermostatProgramIdByOutputId.set(String(outputId), thermostatProgramId);
+            }
+        }
+
+        if (this.deps.logLevel >= LogLevel.DEBUG) {
+            for (const [outputId, thermostatProgramId] of this.deps.state.thermostatProgramIdByOutputId.entries()) {
+                const sensorId = this.deps.state.domusSensorIdByThermostatProgramId.get(thermostatProgramId) ?? 'NA';
+                this.deps.log.debug(`thermostat_${outputId} => cfg:${thermostatProgramId} domus:${sensorId} source:prg_thermostats`);
+            }
+        }
     }
 
     private applyThermostatConfigSnapshot(): void {

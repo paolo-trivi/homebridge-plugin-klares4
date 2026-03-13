@@ -9,6 +9,7 @@ test('returns cached command id without probing candidates', async () => {
 
   const resolved = await resolveThermostatCommandId({
     outputThermostatId: '21',
+    hasProgramMapping: false,
     cachedCommandId: '4',
     primeConfig: async () => {
       primeCalls += 1;
@@ -28,8 +29,9 @@ test('manual command id override has precedence when valid', async () => {
 
   const resolved = await resolveThermostatCommandId({
     outputThermostatId: '21',
+    hasProgramMapping: true,
     manualCommandId: '3',
-    mappedDomusSensorId: '4',
+    programCommandId: '4',
     primeConfig: async (candidateId) => candidateId === '3',
     rememberCommandId: (id) => remembered.push(id),
     onResolvedAlias: (id) => aliases.push(id),
@@ -40,19 +42,35 @@ test('manual command id override has precedence when valid', async () => {
   assert.deepEqual(aliases, ['3']);
 });
 
-test('falls back to mapped sensor id when output id is not a valid command id', async () => {
+test('uses PRG_THERMOSTATS command id before cached or output id', async () => {
   const remembered = [];
   const aliases = [];
 
   const resolved = await resolveThermostatCommandId({
-    outputThermostatId: '19',
-    mappedDomusSensorId: '5',
-    primeConfig: async (candidateId) => candidateId === '5',
+    outputThermostatId: '21',
+    hasProgramMapping: true,
+    cachedCommandId: '4',
+    programCommandId: '3',
+    primeConfig: async (candidateId) => candidateId === '3',
     rememberCommandId: (id) => remembered.push(id),
     onResolvedAlias: (id) => aliases.push(id),
   });
 
-  assert.equal(resolved, '5');
-  assert.deepEqual(remembered, ['5']);
-  assert.deepEqual(aliases, ['5']);
+  assert.equal(resolved, '3');
+  assert.deepEqual(remembered, ['3']);
+  assert.deepEqual(aliases, ['3']);
+});
+
+test('falls back to output id only when PRG_THERMOSTATS is unavailable', async () => {
+  const remembered = [];
+
+  const resolved = await resolveThermostatCommandId({
+    outputThermostatId: '19',
+    hasProgramMapping: false,
+    primeConfig: async (candidateId) => candidateId === '19',
+    rememberCommandId: (id) => remembered.push(id),
+  });
+
+  assert.equal(resolved, '19');
+  assert.deepEqual(remembered, ['19']);
 });

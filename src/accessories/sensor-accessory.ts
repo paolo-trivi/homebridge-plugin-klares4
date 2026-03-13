@@ -27,7 +27,7 @@ export class SensorAccessory {
                     `Lares4 ${this.getSensorTypeLabel()}`,
                 )
                 .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.0');
+                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.1-beta0');
         }
 
         this.service = this.createSensorService();

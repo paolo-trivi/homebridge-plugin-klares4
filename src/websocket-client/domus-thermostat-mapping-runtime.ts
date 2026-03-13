@@ -34,8 +34,28 @@ export function refreshDomusThermostatMapping(state: WebSocketClientState, log: 
         domusSensors,
         manualPairs: normalizeDomusIdsForConfig(config.manualPairs),
     });
-    state.thermostatToDomus = result.mapping;
-    state.thermostatMappingSource = result.sources;
+    const finalMapping = new Map<string, string>();
+    const finalSources = new Map<string, 'manual' | 'auto' | 'fallback' | 'program'>();
+
+    for (const [thermostatId, sensorId] of result.mapping.entries()) {
+        finalMapping.set(thermostatId, sensorId);
+        finalSources.set(thermostatId, result.sources.get(thermostatId) ?? 'fallback');
+    }
+
+    for (const [outputId, thermostatProgramId] of state.thermostatProgramIdByOutputId.entries()) {
+        if (finalSources.get(outputId) === 'manual') {
+            continue;
+        }
+        const sensorId = state.domusSensorIdByThermostatProgramId.get(thermostatProgramId);
+        if (!sensorId) {
+            continue;
+        }
+        finalMapping.set(outputId, sensorId);
+        finalSources.set(outputId, 'program');
+    }
+
+    state.thermostatToDomus = finalMapping;
+    state.thermostatMappingSource = finalSources;
 
     log.info('DOMUS thermostat mapping initialized');
     for (const [thermostatId, sensorId] of result.mapping.entries()) {
@@ -43,6 +63,9 @@ export function refreshDomusThermostatMapping(state: WebSocketClientState, log: 
         log.info(`DOMUS mapping thermostat_${thermostatId} -> sensor_${sensorId} (${source})`);
     }
     for (const thermostatId of result.unmatched) {
+        if (state.thermostatProgramIdByOutputId.has(thermostatId)) {
+            continue;
+        }
         log.warn(
             `DOMUS mapping missing for thermostat_${thermostatId}, using STATUS_SYSTEM fallback`,
         );

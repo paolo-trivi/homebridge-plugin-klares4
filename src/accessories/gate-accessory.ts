@@ -26,7 +26,7 @@ export class GateAccessory {
                 .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Ksenia')
                 .setCharacteristic(this.platform.Characteristic.Model, 'Lares4 Gate')
                 .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.0');
+                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.1-beta0');
         }
 
         this.service =

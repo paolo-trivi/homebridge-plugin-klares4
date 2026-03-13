@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1-beta1] - 2026-03-13
+
+### Fixed
+
+- DOMUS thermostats now use `STATUS_TEMPERATURES` as the authoritative source for realtime mode, setpoint, current temperature and HVAC activity.
+- DOMUS thermostat routing now uses `PRG_THERMOSTATS` over WSS to resolve the real relation between output, thermostat config ID and Domus sensor.
+- Fixed swapped command routing on installations where `CFG_THERMOSTATS.ID` does not match the Domus sensor ID, including the real-world `Matrimoniale`/`Bagno` inversion.
+- Removed the automatic legacy `WRITE/THERMOSTAT` fallback: thermostat writes now use only the observed `WRITE_CFG/CFG_THERMOSTATS` protocol.
+- `STATUS_SYSTEM` fallback no longer overwrites mapped Domus/realtime thermostat data while fresher room or thermostat telemetry is available.
+
+### Beta Focus
+
+- Intended validation target: installations with Domus room sensors and mapped thermostats.
+
 ## [2.0.0] - 2026-03-08
 
 ### Added
