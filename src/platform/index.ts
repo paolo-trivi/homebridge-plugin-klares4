@@ -18,6 +18,7 @@ import { AccessoryHandlerService } from './accessory-handler-service';
 import { PlatformConfigFileService } from './config-file-service';
 import { DeviceListService } from './device-list-service';
 import { DiscoveryService } from './discovery-service';
+import { KsaImportService } from './ksa-import-service';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
 import type { AccessoryHandler, Lares4Config } from './types';
 
@@ -40,6 +41,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly deviceListService: DeviceListService;
     private readonly handlerService: AccessoryHandlerService;
     private readonly configFileService: PlatformConfigFileService;
+    private readonly ksaImportService: KsaImportService;
 
     constructor(
         public readonly log: Logger,
@@ -59,6 +61,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         });
         this.handlerService = new AccessoryHandlerService(this, this.log);
         this.configFileService = new PlatformConfigFileService(this.log, this.api.user.storagePath());
+        this.ksaImportService = new KsaImportService(this.log, this.api.user.storagePath(), this.configFileService);
         this.accessoryRegistry = new AccessoryRegistry({
             api: this.api,
             log: this.log,
@@ -114,6 +117,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 return;
             }
 
+            const ksaCache = await this.ksaImportService.prepare(this.config, PLATFORM_NAME);
+
             this.wsClient = new KseniaWebSocketClient(
                 this.config.ip,
                 port,
@@ -129,6 +134,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                     commandTimeoutMs: this.config.commandTimeoutMs ?? 8000,
                     allowInsecureTls: this.config.allowInsecureTls ?? false,
                     domusThermostat: this.config.domusThermostat,
+                    ksaCache,
                 },
             );
 

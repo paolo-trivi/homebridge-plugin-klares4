@@ -126,6 +126,43 @@ export interface DomusThermostatConfig {
     sensorFreshnessMs?: number;
 }
 
+export interface KsaImportConfig {
+    enabled?: boolean;
+    filePath?: string;
+    applyAtStartup?: boolean;
+    applyDomusMappings?: boolean;
+    applyRoomMapping?: boolean;
+    applyCustomNames?: boolean;
+    applyExclusionSuggestions?: boolean;
+}
+
+export interface KsaSanitizedThermostatProgram {
+    id: string;
+    description?: string;
+    heatingOutputId?: string;
+    coolingOutputId?: string;
+    domusSensorId?: string;
+}
+
+export interface KsaSanitizedCache {
+    sourceFilePath?: string;
+    sourceFileHash: string;
+    parsedAt: string;
+    thermostatPrograms: KsaSanitizedThermostatProgram[];
+    thermostatProgramIdByOutputId: Record<string, string>;
+    domusSensorIdByThermostatProgramId: Record<string, string>;
+    outputNamesById: Record<string, string>;
+    zoneNamesById: Record<string, string>;
+    scenarioNamesById: Record<string, string>;
+    domusSensorNamesById: Record<string, string>;
+    roomNameById: Record<string, string>;
+    roomDeviceRefs: Array<{
+        roomId: string;
+        objectType: string;
+        objectId: string;
+    }>;
+}
+
 export interface KseniaMessagePayload {
     PIN?: string;
     ID_LOGIN?: string;
@@ -167,4 +204,5 @@ export interface KseniaWebSocketOptions {
     allowInsecureTls?: boolean;
     loginTimeoutMs?: number;
     domusThermostat?: DomusThermostatConfig;
+    ksaCache?: KsaSanitizedCache;
 }

@@ -60,7 +60,7 @@ export class KseniaWebSocketClient {
             loginTimeoutMs: 10000,
             ...options,
         };
-        this.state = createInitialWebSocketClientState(this.options.domusThermostat);
+        this.state = createInitialWebSocketClientState(this.options.domusThermostat, this.options.ksaCache);
         this.logLevel = getEffectiveLogLevel(this.options.logLevel, this.options.debug);
         this.wsTransport = new WsTransport(this.log);
 

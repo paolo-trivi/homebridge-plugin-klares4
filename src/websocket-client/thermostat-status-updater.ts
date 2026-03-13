@@ -19,6 +19,7 @@ export class ThermostatStatusUpdater {
 
     public updateTemperatureStatuses(entries: KseniaTemperatureStatusRaw[]): void {
         for (const entry of entries) {
+            this.recordRealtimeSnapshot(entry);
             const thermostatOutputIds = this.resolveThermostatOutputIds(entry.ID);
             if (thermostatOutputIds.length === 0) {
                 this.deps.state.pendingTemperatureStatuses.set(entry.ID, entry);
@@ -67,6 +68,7 @@ export class ThermostatStatusUpdater {
                 this.deps.state.thermostatCommandIdByOutputId.get(outputThermostatId),
             ];
             if (this.deps.state.thermostatProgramById.size === 0) {
+                candidates.push(this.deps.state.thermostatToDomus.get(outputThermostatId));
                 candidates.push(outputThermostatId);
             }
             if (candidates.includes(statusId)) {
@@ -81,6 +83,25 @@ export class ThermostatStatusUpdater {
             (item) => stripDevicePrefix(item.thermostatOutputId) === outputThermostatId,
         );
         return pair ? stripDevicePrefix(pair.commandThermostatId) : undefined;
+    }
+
+    private recordRealtimeSnapshot(entry: KseniaTemperatureStatusRaw): void {
+        const previous = this.deps.state.thermostatRealtimeSnapshotById.get(entry.ID);
+        const next = {
+            mode: parseThermostatMode(entry),
+            targetTemperature: parseFloatInRange(entry.THERM?.TEMP_THR?.VAL, 5, 40),
+            hvacOutputActive: parseThermostatOutputActive(entry.THERM?.OUT_STATUS),
+            updatedAt: Date.now(),
+        };
+        if (
+            previous
+            && previous.mode === next.mode
+            && previous.targetTemperature === next.targetTemperature
+            && previous.hvacOutputActive === next.hvacOutputActive
+        ) {
+            return;
+        }
+        this.deps.state.thermostatRealtimeSnapshotById.set(entry.ID, next);
     }
 }
 

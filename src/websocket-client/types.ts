@@ -104,6 +104,12 @@ export interface WebSocketClientState {
     thermostatMappingSource: Map<string, 'manual' | 'auto' | 'fallback' | 'program'>;
     domusLatest: Map<string, { temp?: number; hum?: number; ts: number }>;
     thermostatRealtimeByOutputId: Map<string, number>;
+    thermostatRealtimeSnapshotById: Map<string, {
+        mode?: string;
+        targetTemperature?: number;
+        hvacOutputActive?: boolean;
+        updatedAt: number;
+    }>;
     missingThermostatProgramWarningOutputIds: Set<string>;
 }
 

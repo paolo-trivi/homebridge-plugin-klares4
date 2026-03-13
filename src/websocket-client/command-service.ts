@@ -195,6 +195,7 @@ interface CommandServiceDeps {
             cachedCommandId: this.deps.state.thermostatCommandIdByOutputId.get(outputThermostatId),
             manualCommandId: this.getManualThermostatCommandId(outputThermostatId),
             programCommandId: this.deps.state.thermostatProgramIdByOutputId.get(outputThermostatId),
+            mappedDomusSensorId: this.deps.state.thermostatToDomus.get(outputThermostatId),
             primeConfig: (candidateId): Promise<boolean> => this.primeThermostatConfigCache(candidateId),
             rememberCommandId: (resolvedCommandId): void => { this.deps.state.thermostatCommandIdByOutputId.set(outputThermostatId, resolvedCommandId); },
             onResolvedAlias: (resolvedCommandId): void => this.deps.log.info(`Thermostat command ID resolved thermostat_${outputThermostatId} -> ${resolvedCommandId}`),

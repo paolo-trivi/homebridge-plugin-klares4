@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1-beta2] - 2026-03-13
+
+### Added
+
+- New KSA import workflow in plugin config (`ksaImport`) to parse central backup metadata and derive deterministic routing data.
+- Sanitized KSA cache persisted in Homebridge storage (`klares4-ksa-cache.json`) with thermostat/output/sensor/room mappings only (no raw backup persistence).
+- Automatic derivation from KSA for:
+  - `domusThermostat.manualCommandPairs` (`output -> CFG/STATUS thermostat ID`)
+  - `domusThermostat.manualPairs` (`output -> Domus sensor`)
+  - optional `roomMapping` and optional `customNames`.
+
+### Fixed
+
+- Runtime thermostat routing now preloads program mappings from KSA cache when realtime `PRG_THERMOSTATS` is unavailable on panel firmware.
+- Degraded command resolver now evaluates mapped Domus sensor IDs before raw output fallback, improving compatibility in non-PRG environments.
+- Initial websocket state can bootstrap thermostat program maps from cached KSA data to avoid startup desynchronization.
+
 ## [2.0.1-beta1] - 2026-03-13
 
 ### Fixed

@@ -51,6 +51,7 @@ function resolveThermostatConfigId(
     const manualId = manualPair ? stripDevicePrefix(manualPair.commandThermostatId) : undefined;
     const programId = state.thermostatProgramIdByOutputId.get(outputThermostatId);
     const cachedId = state.thermostatCommandIdByOutputId.get(outputThermostatId);
+    const mappedDomusSensorId = state.thermostatToDomus.get(outputThermostatId);
     const candidates = [manualId, programId, cachedId].filter(
         (candidate, index, items): candidate is string =>
             Boolean(candidate) && items.indexOf(candidate) === index,
@@ -62,6 +63,10 @@ function resolveThermostatConfigId(
 
     if (state.thermostatProgramById.size > 0) {
         return undefined;
+    }
+
+    if (mappedDomusSensorId && state.thermostatCfgById.has(mappedDomusSensorId)) {
+        return mappedDomusSensorId;
     }
 
     return state.thermostatCfgById.has(outputThermostatId) ? outputThermostatId : undefined;

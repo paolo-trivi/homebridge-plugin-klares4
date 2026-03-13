@@ -4,6 +4,7 @@ interface ResolveThermostatCommandIdInput {
     cachedCommandId?: string;
     manualCommandId?: string;
     programCommandId?: string;
+    mappedDomusSensorId?: string;
     primeConfig: (candidateId: string) => Promise<boolean>;
     rememberCommandId: (resolvedCommandId: string) => void;
     onResolvedAlias?: (resolvedCommandId: string) => void;
@@ -15,6 +16,7 @@ export async function resolveThermostatCommandId({
     cachedCommandId,
     manualCommandId,
     programCommandId,
+    mappedDomusSensorId,
     primeConfig,
     rememberCommandId,
     onResolvedAlias,
@@ -39,7 +41,7 @@ export async function resolveThermostatCommandId({
         return outputThermostatId;
     }
 
-    const candidates = [outputThermostatId].filter(
+    const candidates = [mappedDomusSensorId, outputThermostatId].filter(
         (id, index, arr): id is string => Boolean(id) && arr.indexOf(id) === index,
     );
     for (const candidateId of candidates) {

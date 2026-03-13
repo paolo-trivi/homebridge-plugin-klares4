@@ -4,7 +4,7 @@
     "singular": true,
     "customUi": false,
     "headerDisplay": "<div style='margin-bottom:12px;'><h3 style='margin:0 0 6px 0;'>Klares4 - Ksenia Lares4 per Homebridge</h3><p style='margin:0 0 12px 0;'>Plugin Homebridge per controllo locale della centrale Ksenia Lares4.</p><div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Prerequisiti:</strong><ul style='margin:8px 0 0 18px;padding:0;'><li>Centrale raggiungibile in rete locale</li><li>Interfaccia WebSocket abilitata</li><li>PIN utente valido (4-8 cifre)</li></ul></div></div>",
-    "footerDisplay": "<div style='margin-top:16px;padding-top:12px;border-top:1px solid currentColor;'><p style='margin:0 0 8px 0;'>Versione 2.0.1-beta1 • Sviluppato da Paolo Trivisonno</p><p style='margin:0;'><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' rel='noopener noreferrer'>Documentazione</a> | <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' rel='noopener noreferrer'>Segnala Bug</a> | <a href='https://github.com/sponsors/paolo-trivi' target='_blank' rel='noopener noreferrer'>Supporta</a></p></div>",
+    "footerDisplay": "<div style='margin-top:16px;padding-top:12px;border-top:1px solid currentColor;'><p style='margin:0 0 8px 0;'>Versione 2.0.1-beta2 • Sviluppato da Paolo Trivisonno</p><p style='margin:0;'><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' rel='noopener noreferrer'>Documentazione</a> | <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' rel='noopener noreferrer'>Segnala Bug</a> | <a href='https://github.com/sponsors/paolo-trivi' target='_blank' rel='noopener noreferrer'>Supporta</a></p></div>",
     "schema": {
         "type": "object",
         "properties": {
@@ -297,6 +297,58 @@
                                 "domusSensorId"
                             ]
                         }
+                    }
+                }
+            },
+            "ksaImport": {
+                "type": "object",
+                "default": {
+                    "enabled": false,
+                    "applyAtStartup": false,
+                    "applyDomusMappings": true,
+                    "applyRoomMapping": true,
+                    "applyCustomNames": false,
+                    "applyExclusionSuggestions": false
+                },
+                "properties": {
+                    "enabled": {
+                        "title": "Abilita Import KSA",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Carica il file backup .ksa per generare mapping e metadata strutturali"
+                    },
+                    "filePath": {
+                        "title": "Percorso File .ksa",
+                        "type": "string",
+                        "placeholder": "/var/lib/homebridge/prg-xxxx.ksa",
+                        "description": "Percorso assoluto del file backup .ksa esportato dalla centrale"
+                    },
+                    "applyAtStartup": {
+                        "title": "Applica su config al riavvio",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Preview + apply: se attivo, applica su config.json e poi si resetta a false"
+                    },
+                    "applyDomusMappings": {
+                        "title": "Applica mapping Domus termostati",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "applyRoomMapping": {
+                        "title": "Applica room mapping",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "applyCustomNames": {
+                        "title": "Applica nomi personalizzati",
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "applyExclusionSuggestions": {
+                        "title": "Applica suggerimenti esclusioni",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Non consigliato di default: applica liste esclusione suggerite dal parser"
                     }
                 }
             },
@@ -614,6 +666,61 @@
                                             "placeholder": "1 o sensor_temp_1"
                                         }
                                     ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Import KSA",
+                    "expandable": false,
+                    "items": [
+                        {
+                            "key": "ksaImport.enabled",
+                            "title": "Import KSA Attivo"
+                        },
+                        {
+                            "key": "ksaImport.filePath",
+                            "title": "Percorso File .ksa",
+                            "condition": {
+                                "functionBody": "return model.ksaImport && model.ksaImport.enabled === true;"
+                            }
+                        },
+                        {
+                            "key": "ksaImport.applyAtStartup",
+                            "title": "Apply alla Config al Prossimo Avvio",
+                            "description": "Esegue preview nei log e applica i blocchi selezionati, poi torna automaticamente OFF",
+                            "condition": {
+                                "functionBody": "return model.ksaImport && model.ksaImport.enabled === true;"
+                            }
+                        },
+                        {
+                            "type": "flex",
+                            "flex-flow": "row wrap",
+                            "condition": {
+                                "functionBody": "return model.ksaImport && model.ksaImport.enabled === true;"
+                            },
+                            "items": [
+                                {
+                                    "key": "ksaImport.applyDomusMappings",
+                                    "title": "Domus Mapping",
+                                    "flex": "1 1 200px"
+                                },
+                                {
+                                    "key": "ksaImport.applyRoomMapping",
+                                    "title": "Room Mapping",
+                                    "flex": "1 1 200px"
+                                },
+                                {
+                                    "key": "ksaImport.applyCustomNames",
+                                    "title": "Custom Names",
+                                    "flex": "1 1 200px"
+                                },
+                                {
+                                    "key": "ksaImport.applyExclusionSuggestions",
+                                    "title": "Exclusions",
+                                    "flex": "1 1 200px"
                                 }
                             ]
                         }

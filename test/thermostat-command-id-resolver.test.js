@@ -74,3 +74,21 @@ test('falls back to output id only when PRG_THERMOSTATS is unavailable', async (
   assert.equal(resolved, '19');
   assert.deepEqual(remembered, ['19']);
 });
+
+test('uses mapped domus sensor id as degraded fallback candidate before output id', async () => {
+  const remembered = [];
+  const aliases = [];
+
+  const resolved = await resolveThermostatCommandId({
+    outputThermostatId: '21',
+    hasProgramMapping: false,
+    mappedDomusSensorId: '3',
+    primeConfig: async (candidateId) => candidateId === '3',
+    rememberCommandId: (id) => remembered.push(id),
+    onResolvedAlias: (id) => aliases.push(id),
+  });
+
+  assert.equal(resolved, '3');
+  assert.deepEqual(remembered, ['3']);
+  assert.deepEqual(aliases, ['3']);
+});

@@ -109,6 +109,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `allowInsecureTls`  | boolean  | false        | Disable TLS certificate validation (trusted LAN only) |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | enabled/freshness defaults | DOMUS thermostat mapping, manual overrides, freshness fallback |
+| `ksaImport`         | object   | disabled     | Import KSA backup metadata for thermostat routing, room mapping and optional config apply |
 | `debug`             | boolean  | false        | Detailed logging                |
 | `excludeZones`      | string[] | []           | Zones to exclude                |
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
@@ -401,6 +402,7 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `heartbeatInterval` | number   | 30000        | Intervallo heartbeat (ms)       |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | default attivi | Mapping termostati DOMUS, override manuali e fallback freshness |
+| `ksaImport`         | object   | disabilitato | Import metadata da backup KSA per routing termostati, room mapping e apply opzionale |
 | `debug`             | boolean  | false        | Logging dettagliato             |
 | `excludeZones`      | string[] | []           | Zone da escludere               |
 | `excludeOutputs`    | string[] | []           | Output da escludere             |
