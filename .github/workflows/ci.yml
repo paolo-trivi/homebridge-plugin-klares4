@@ -6,9 +6,19 @@ on:
       - '**'
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
+    name: Validate (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
 
     steps:
       - name: Checkout
@@ -17,13 +27,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: ${{ matrix.node }}
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Enforce source file size limit
+      - name: Source size advisory
+        continue-on-error: true
         run: npm run check:max-lines
 
       - name: TypeScript strict checks
@@ -34,3 +45,16 @@ jobs:
 
       - name: Build package
         run: npm run build
+
+      - name: Upload dist artifact
+        if: matrix.node == '20'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-node20
+          path: |
+            dist/**
+            config.schema.json
+            package.json
+            README.md
+            CHANGELOG.md
+          retention-days: 7

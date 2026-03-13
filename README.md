@@ -264,6 +264,25 @@ This runs:
 - full test suite,
 - build compatibility gate.
 
+### CI/CD
+
+GitHub Actions workflows:
+
+- `CI` (`.github/workflows/ci.yml`): Node 20/22 validation, strict type-checks, tests, build artifact.
+- `Release Publish` (`.github/workflows/release-publish.yml`): npm publish with provenance from tags (`v*`) or manual dispatch.
+
+Required repository secret:
+
+- `NPM_TOKEN` (npm automation token with publish permissions).
+
+Release policy:
+
+- tag push `v<package.json version>` triggers publish;
+- npm dist-tag auto-derived from version:
+  - `*-beta*` -> `beta`
+  - `*-rc*` -> `rc`
+  - stable -> `latest`
+
 ### Roadmap
 
 #### Planned for v1.2.0

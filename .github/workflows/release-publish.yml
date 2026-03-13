@@ -1,0 +1,117 @@
+name: Release Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: 'Override npm dist-tag (beta, rc, latest). Leave empty for auto.'
+        required: false
+        type: choice
+        options:
+          - ''
+          - beta
+          - rc
+          - latest
+      skip_version_tag_check:
+        description: 'Skip vX.Y.Z tag to package.json version check'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Source size advisory
+        continue-on-error: true
+        run: npm run check:max-lines
+
+      - name: TypeScript strict checks
+        run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+
+      - name: Test suite
+        run: npm test
+
+      - name: Resolve publish metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          NAME="$(node -p "require('./package.json').name")"
+
+          if [[ "$VERSION" == *"-beta"* ]]; then
+            AUTO_TAG="beta"
+          elif [[ "$VERSION" == *"-rc"* ]]; then
+            AUTO_TAG="rc"
+          else
+            AUTO_TAG="latest"
+          fi
+
+          INPUT_TAG="${{ github.event.inputs.npm_tag }}"
+          if [[ -n "${INPUT_TAG:-}" ]]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$AUTO_TAG"
+          fi
+
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            GIT_TAG="${GITHUB_REF#refs/tags/}"
+            if [[ "${{ github.event.inputs.skip_version_tag_check || 'false' }}" != "true" ]]; then
+              if [[ "$GIT_TAG" != "v$VERSION" ]]; then
+                echo "Tag/version mismatch: git tag=$GIT_TAG package.json=$VERSION"
+                exit 1
+              fi
+            fi
+          fi
+
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Prevent duplicate publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm view "${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" version >/dev/null 2>&1; then
+            echo "Version already published: ${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Publish package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --tag "${{ steps.meta.outputs.tag }}" --provenance
+
+      - name: Summary
+        run: |
+          echo "Published: ${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "npm tag: ${{ steps.meta.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
