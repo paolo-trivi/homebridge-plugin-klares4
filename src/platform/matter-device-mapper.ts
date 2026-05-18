@@ -13,40 +13,30 @@ import type {
 import { PLUGIN_VERSION } from '../plugin-version';
 import type { KseniaWebSocketClient } from '../websocket-client';
 
-// Matter Thermostat systemMode values (Matter spec 1.3 §4.3.7.22)
-const THERMOSTAT_MODE_OFF = 0;
-const THERMOSTAT_MODE_AUTO = 1;
-const THERMOSTAT_MODE_COOL = 3;
-const THERMOSTAT_MODE_HEAT = 4;
-
-// Matter Thermostat controlSequenceOfOperation: 4 = Heating And Cooling
-const THERMOSTAT_CONTROL_SEQ_HEAT_COOL = 4;
-
-function domainModeToMatter(mode: 'off' | 'heat' | 'cool' | 'auto'): number {
-    switch (mode) {
-        case 'heat': return THERMOSTAT_MODE_HEAT;
-        case 'cool': return THERMOSTAT_MODE_COOL;
-        case 'auto': return THERMOSTAT_MODE_AUTO;
-        default: return THERMOSTAT_MODE_OFF;
-    }
-}
-
-function matterModeToDomain(systemMode: number): 'off' | 'heat' | 'cool' | 'auto' {
-    switch (systemMode) {
-        case THERMOSTAT_MODE_HEAT: return 'heat';
-        case THERMOSTAT_MODE_COOL: return 'cool';
-        case THERMOSTAT_MODE_AUTO: return 'auto';
-        default: return 'off';
-    }
-}
-
 // Matter temperatures are in centidegrees (°C * 100)
-function toCentidegrees(celsius: number): number {
+export function toCentidegrees(celsius: number): number {
     return Math.round(celsius * 100);
 }
 
-function clampCentidegrees(val: number): number {
+export function clampCentidegrees(val: number): number {
     return Math.max(-27000, Math.min(10000, val));
+}
+
+// Matter Thermostat systemMode values (Matter spec 1.3 §4.3.7.22)
+// 0=Off, 1=Auto, 3=Cool, 4=Heat
+export function domainModeToMatterMode(mode: 'off' | 'heat' | 'cool' | 'auto'): number {
+    switch (mode) {
+        case 'heat': return 4;
+        case 'cool': return 3;
+        case 'auto': return 1;
+        default:     return 0;
+    }
+}
+
+// Matter illuminance: measuredValue = 10000 * log10(lux) + 1  (spec §2.2.5.1)
+function luxToMatterIlluminance(lux: number): number {
+    if (lux <= 0) return 0;
+    return Math.max(1, Math.min(65534, Math.round(10000 * Math.log10(lux) + 1)));
 }
 
 interface MapperDeps {
@@ -71,23 +61,21 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
     const { api, getWsClient } = deps;
     const isDimmable = device.status?.dimmable ?? false;
     const onOff = device.status?.on ?? false;
-    const level = device.status?.brightness ?? (onOff ? 100 : 0);
+    const brightness = device.status?.brightness ?? (onOff ? 100 : 0);
+    // Matter LevelControl: range 1–254. Level 0 is forbidden even when off — OnOff cluster owns on/off state.
+    const currentLevel = Math.max(1, Math.round((brightness / 100) * 254));
 
     const clusters: MatterAccessory['clusters'] = isDimmable
         ? {
             onOff: { onOff },
-            levelControl: { currentLevel: Math.round((level / 100) * 254), minLevel: 1, maxLevel: 254 },
+            levelControl: { currentLevel, minLevel: 1, maxLevel: 254 },
         }
         : { onOff: { onOff } };
 
     const handlers: MatterAccessory['handlers'] = {
         onOff: {
-            on: async () => {
-                await getWsClient()?.switchLight(device.id, true);
-            },
-            off: async () => {
-                await getWsClient()?.switchLight(device.id, false);
-            },
+            on: async () => { await getWsClient()?.switchLight(device.id, true); },
+            off: async () => { await getWsClient()?.switchLight(device.id, false); },
         },
     };
 
@@ -117,8 +105,7 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
 function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
     const { api, getWsClient } = deps;
     const pos = device.status?.position ?? 0;
-    // Matter WindowCovering position is in percent * 100 (0–10000), and 0 = fully open, 10000 = fully closed
-    // Lares4 position: 0 = closed, 100 = open — invert for Matter
+    // Lares4: 0=closed, 100=open. Matter: 0=open (0%), 10000=closed (100%).
     const matterPos = Math.round((100 - pos) * 100);
 
     return {
@@ -147,23 +134,44 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
     const { api, getWsClient } = deps;
     const currentTemp = device.currentTemperature ?? 21;
     const targetTemp = device.targetTemperature ?? 21;
+    const mode = device.mode ?? 'heat';
+
+    // Matter Thermostat HEAT-feature-only profile (safe default for Lares4 heating zones).
+    // ControlSequenceOfOperationEnum.HeatingOnly = 0x02 (Matter spec §4.3.7.30, NOT 0 which is CoolingOnly).
+    // SystemModeEnum: Off=0x00, Heat=0x04 (Auto requires AUTO feature + minSetpointDeadBand → avoid here).
+    // HEAT range defaults: AbsMinHeatSetpointLimit=700 (7°C), AbsMaxHeatSetpointLimit=3000 (30°C).
+    const HEAT_MIN = 700;
+    const HEAT_MAX = 3000;
+    const TEMP_ABS_MIN = -27000;
+    const TEMP_ABS_MAX = 10000;
+    const CONTROL_SEQ_HEATING_ONLY = 2;
+
+    const heatingSetpoint = Math.max(HEAT_MIN, Math.min(HEAT_MAX, toCentidegrees(targetTemp)));
+    const localTemp = Math.max(TEMP_ABS_MIN, Math.min(TEMP_ABS_MAX, toCentidegrees(currentTemp)));
+    // For HeatingOnly profile, valid SystemMode values are Off (0) or Heat (4) — collapse cool/auto to Heat
+    // so a stale Lares4 mode doesn't violate the cluster's mode/control coherence.
+    const safeMode = (mode === 'off') ? 'off' : 'heat';
 
     return {
         ...baseFields(device),
         deviceType: api.matter!.deviceTypes.Thermostat,
         clusters: {
             thermostat: {
-                localTemperature: clampCentidegrees(toCentidegrees(currentTemp)),
-                occupiedHeatingSetpoint: toCentidegrees(targetTemp),
-                occupiedCoolingSetpoint: toCentidegrees(targetTemp),
-                systemMode: domainModeToMatter(device.mode),
-                controlSequenceOfOperation: THERMOSTAT_CONTROL_SEQ_HEAT_COOL,
+                localTemperature: localTemp,
+                occupiedHeatingSetpoint: heatingSetpoint,
+                absMinHeatSetpointLimit: HEAT_MIN,
+                absMaxHeatSetpointLimit: HEAT_MAX,
+                minHeatSetpointLimit: HEAT_MIN,
+                maxHeatSetpointLimit: HEAT_MAX,
+                controlSequenceOfOperation: CONTROL_SEQ_HEATING_ONLY,
+                systemMode: domainModeToMatterMode(safeMode),
             },
         },
         handlers: {
             thermostat: {
                 setpointRaiseLower: async (args: { mode: number; amount: number }) => {
-                    const newTarget = targetTemp + args.amount / 10;
+                    const delta = args.amount / 10;
+                    const newTarget = (device.targetTemperature ?? 21) + delta;
                     await getWsClient()?.setThermostatTemperature(device.id, newTarget);
                 },
             },
@@ -196,6 +204,17 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
                     },
                 },
             };
+        case 'light': {
+            return {
+                ...baseFields(device),
+                deviceType: api.matter!.deviceTypes.LightSensor,
+                clusters: {
+                    illuminanceMeasurement: {
+                        measuredValue: luxToMatterIlluminance(val),
+                    },
+                },
+            };
+        }
         case 'motion':
             return {
                 ...baseFields(device),
@@ -221,13 +240,11 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
 
 function mapZone(device: KseniaZone, deps: MapperDeps): MatterAccessory {
     const { api } = deps;
-    // Zone: open = intrusione rilevata (stateValue false = alarm)
-    const contactClosed = !device.status.open;
     return {
         ...baseFields(device),
         deviceType: api.matter!.deviceTypes.ContactSensor,
         clusters: {
-            booleanState: { stateValue: contactClosed },
+            booleanState: { stateValue: !device.status.open }, // open=true → alarm → stateValue=false
         },
     };
 }
@@ -242,12 +259,8 @@ function mapScenario(device: KseniaScenario, deps: MapperDeps): MatterAccessory 
         },
         handlers: {
             onOff: {
-                on: async () => {
-                    await getWsClient()?.triggerScenario(device.id);
-                },
-                off: async () => {
-                    // Scenarios are stateless triggers; no deactivation command
-                },
+                on: async () => { await getWsClient()?.triggerScenario(device.id); },
+                off: async () => { /* stateless trigger — no deactivation */ },
             },
         },
     };
@@ -263,12 +276,8 @@ function mapGate(device: KseniaGate, deps: MapperDeps): MatterAccessory {
         },
         handlers: {
             onOff: {
-                on: async () => {
-                    await getWsClient()?.toggleGate(device.id);
-                },
-                off: async () => {
-                    await getWsClient()?.toggleGate(device.id);
-                },
+                on: async () => { await getWsClient()?.toggleGate(device.id); },
+                off: async () => { await getWsClient()?.toggleGate(device.id); },
             },
         },
     };
@@ -280,23 +289,17 @@ export function deviceToMatterAccessory(device: KseniaDevice, deps: MapperDeps):
     }
     try {
         switch (device.type) {
-            case 'light': return mapLight(device, deps);
-            case 'cover': return mapCover(device, deps);
+            case 'light':      return mapLight(device, deps);
+            case 'cover':      return mapCover(device, deps);
             case 'thermostat': return mapThermostat(device, deps);
-            case 'sensor': return mapSensor(device, deps);
-            case 'zone': return mapZone(device, deps);
-            case 'scenario': return mapScenario(device, deps);
-            case 'gate': return mapGate(device, deps);
-            default: return undefined;
+            case 'sensor':     return mapSensor(device, deps);
+            case 'zone':       return mapZone(device, deps);
+            case 'scenario':   return mapScenario(device, deps);
+            case 'gate':       return mapGate(device, deps);
+            default:           return undefined;
         }
     } catch (err) {
-        deps.log.warn(`Matter mapper error for ${(device as KseniaDevice).name}: ${err instanceof Error ? err.message : String(err)}`);
+        deps.log.warn(`[Matter] Mapper error for ${(device as KseniaDevice).name}: ${err instanceof Error ? err.message : String(err)}`);
         return undefined;
     }
 }
-
-export function matterSystemModeToDomain(systemMode: number): 'off' | 'heat' | 'cool' | 'auto' {
-    return matterModeToDomain(systemMode);
-}
-
-export { toCentidegrees, clampCentidegrees };

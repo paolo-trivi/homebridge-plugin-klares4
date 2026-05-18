@@ -3,7 +3,7 @@ import type { MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaWebSocketClient } from '../websocket-client';
-import { deviceToMatterAccessory, toCentidegrees, clampCentidegrees } from './matter-device-mapper';
+import { deviceToMatterAccessory, toCentidegrees, clampCentidegrees, domainModeToMatterMode } from './matter-device-mapper';
 
 export class MatterAccessoryRegistry {
     private readonly cachedUUIDs: Set<string> = new Set();
@@ -118,11 +118,16 @@ export class MatterAccessoryRegistry {
                 case 'thermostat': {
                     const current = device.currentTemperature ?? 21;
                     const target = device.targetTemperature ?? 21;
+                    const mode = device.mode ?? 'heat';
+                    const HEAT_MIN = 700;
+                    const HEAT_MAX = 3000;
+                    // HeatingOnly profile: only Off/Heat are valid SystemMode values to keep coherence
+                    // with controlSequenceOfOperation=HeatingOnly set at registration time.
+                    const safeMode = mode === 'off' ? 'off' : 'heat';
                     await matter.updateAccessoryState(uuid, 'thermostat', {
                         localTemperature: clampCentidegrees(toCentidegrees(current)),
-                        occupiedHeatingSetpoint: toCentidegrees(target),
-                        occupiedCoolingSetpoint: toCentidegrees(target),
-                        systemMode: domainModeToMatterMode(device.mode),
+                        occupiedHeatingSetpoint: Math.max(HEAT_MIN, Math.min(HEAT_MAX, toCentidegrees(target))),
+                        systemMode: domainModeToMatterMode(safeMode),
                     });
                     break;
                 }
@@ -138,6 +143,11 @@ export class MatterAccessoryRegistry {
                         case 'humidity':
                             await matter.updateAccessoryState(uuid, 'relativeHumidityMeasurement', {
                                 measuredValue: Math.round(Math.max(0, Math.min(100, val)) * 100),
+                            });
+                            break;
+                        case 'light':
+                            await matter.updateAccessoryState(uuid, 'illuminanceMeasurement', {
+                                measuredValue: val <= 0 ? 0 : Math.max(1, Math.min(65534, Math.round(10000 * Math.log10(val) + 1))),
                             });
                             break;
                         case 'motion':
@@ -178,12 +188,3 @@ export class MatterAccessoryRegistry {
     }
 }
 
-// Matter Thermostat systemMode values
-function domainModeToMatterMode(mode: 'off' | 'heat' | 'cool' | 'auto'): number {
-    switch (mode) {
-        case 'heat': return 4;
-        case 'cool': return 3;
-        case 'auto': return 1;
-        default: return 0;
-    }
-}
