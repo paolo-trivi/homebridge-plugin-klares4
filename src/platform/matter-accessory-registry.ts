@@ -70,7 +70,13 @@ export class MatterAccessoryRegistry {
 
     public async updateAccessoryState(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
-        if (!this.registeredUUIDs.has(device.id)) return;
+        // Lazy registration: an HAP status update can arrive before the WS "discovered" callback,
+        // especially for accessories already in HAP cache. Register on the fly so we don't miss
+        // any device. Both paths use addOrUpdateAccessory which is idempotent (registeredUUIDs gate).
+        if (!this.registeredUUIDs.has(device.id)) {
+            await this.addOrUpdateAccessory(device);
+            return;
+        }
         await this.pushStateUpdate(device);
     }
 
@@ -121,15 +127,18 @@ export class MatterAccessoryRegistry {
                     const current = device.currentTemperature ?? 21;
                     const target = device.targetTemperature ?? 21;
                     const mode = device.mode ?? 'heat';
-                    const HEAT_MIN = 700;
-                    const HEAT_MAX = 3000;
-                    // HeatingOnly profile: only Off/Heat are valid SystemMode values to keep coherence
-                    // with controlSequenceOfOperation=HeatingOnly set at registration time.
-                    const safeMode = mode === 'off' ? 'off' : 'heat';
+                    const HEAT_MIN = 700, HEAT_MAX = 3000;
+                    const COOL_MIN = 1600, COOL_MAX = 3200;
+                    const DEADBAND_CENTI = 250;
+                    const heatingSetpoint = Math.max(HEAT_MIN, Math.min(HEAT_MAX, toCentidegrees(target)));
+                    const coolingSetpoint = Math.max(COOL_MIN, Math.min(COOL_MAX, heatingSetpoint + DEADBAND_CENTI));
                     await matter.updateAccessoryState(uuid, 'thermostat', {
                         localTemperature: clampCentidegrees(toCentidegrees(current)),
-                        occupiedHeatingSetpoint: Math.max(HEAT_MIN, Math.min(HEAT_MAX, toCentidegrees(target))),
-                        systemMode: domainModeToMatterMode(safeMode),
+                        occupiedHeatingSetpoint: heatingSetpoint,
+                        occupiedCoolingSetpoint: coolingSetpoint,
+                        unoccupiedHeatingSetpoint: heatingSetpoint,
+                        unoccupiedCoolingSetpoint: coolingSetpoint,
+                        systemMode: domainModeToMatterMode(mode),
                     });
                     break;
                 }
