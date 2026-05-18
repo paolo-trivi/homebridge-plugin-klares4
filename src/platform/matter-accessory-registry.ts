@@ -3,7 +3,7 @@ import type { MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaWebSocketClient } from '../websocket-client';
-import { deviceToMatterAccessory, toCentidegrees, clampCentidegrees, matterSystemModeToDomain } from './matter-device-mapper';
+import { deviceToMatterAccessory, toCentidegrees, clampCentidegrees } from './matter-device-mapper';
 
 export class MatterAccessoryRegistry {
     private readonly cachedUUIDs: Set<string> = new Set();

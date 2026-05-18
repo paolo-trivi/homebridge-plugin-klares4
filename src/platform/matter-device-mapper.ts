@@ -1,4 +1,4 @@
-import type { API, Logger } from 'homebridge';
+import type { API } from 'homebridge';
 import type { MatterAccessory } from 'homebridge';
 import type {
     KseniaCover,
@@ -10,7 +10,6 @@ import type {
     KseniaThermostat,
     KseniaZone,
 } from '../types';
-import { PLUGIN_NAME } from '../settings';
 import { PLUGIN_VERSION } from '../plugin-version';
 import type { KseniaWebSocketClient } from '../websocket-client';
 
@@ -52,7 +51,7 @@ function clampCentidegrees(val: number): number {
 
 interface MapperDeps {
     api: API;
-    log: Logger;
+    log: import('homebridge').Logger;
     getWsClient: () => KseniaWebSocketClient | undefined;
 }
 
@@ -69,7 +68,7 @@ function baseFields(device: KseniaDevice): Pick<MatterAccessory, 'UUID' | 'displ
 }
 
 function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
-    const { api, log, getWsClient } = deps;
+    const { api, getWsClient } = deps;
     const isDimmable = device.status?.dimmable ?? false;
     const onOff = device.status?.on ?? false;
     const level = device.status?.brightness ?? (onOff ? 100 : 0);
@@ -116,7 +115,7 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
 }
 
 function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
-    const { api, log, getWsClient } = deps;
+    const { api, getWsClient } = deps;
     const pos = device.status?.position ?? 0;
     // Matter WindowCovering position is in percent * 100 (0–10000), and 0 = fully open, 10000 = fully closed
     // Lares4 position: 0 = closed, 100 = open — invert for Matter
@@ -145,7 +144,7 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
 }
 
 function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccessory {
-    const { api, log, getWsClient } = deps;
+    const { api, getWsClient } = deps;
     const currentTemp = device.currentTemperature ?? 21;
     const targetTemp = device.targetTemperature ?? 21;
 
