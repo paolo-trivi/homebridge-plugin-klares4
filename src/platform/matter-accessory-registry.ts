@@ -1,19 +1,63 @@
 import type { API, Logger } from 'homebridge';
 import type { MatterAccessory } from 'homebridge';
-import type { KseniaDevice } from '../types';
+import type { KseniaDevice, KseniaThermostat } from '../types';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaWebSocketClient } from '../websocket-client';
-import { deviceToMatterAccessory, toCentidegrees, clampCentidegrees, domainModeToMatterMode } from './matter-device-mapper';
+import {
+    deviceToMatterAccessory,
+    mapThermostatAsTemperatureSensor,
+} from './matter-device-mapper';
+import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
+
+// ---------------------------------------------------------------------------
+// Configuration knobs
+// ---------------------------------------------------------------------------
+
+/**
+ * Time to wait between calling `api.matter.registerPlatformAccessories(...)` and
+ * trusting that the accessory is queryable via `api.matter.updateAccessoryState(...)`.
+ * HB2's register API is fire-and-forget (it just emits an internal event); state
+ * updates received in this window are buffered.
+ */
+const MATTER_REGISTER_SETTLE_MS = 2000;
+
+/**
+ * Whether to fall back to a Matter TemperatureSensor when registering a real
+ * Thermostat fails (typically due to matter.js 0.17 `presetTypes` validation).
+ * HAP continues to expose the full Thermostat regardless.
+ */
+const MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR = true;
+
+// ---------------------------------------------------------------------------
+// Registration state machine
+// ---------------------------------------------------------------------------
+
+export type MatterRegistrationStatus = 'pending' | 'registered' | 'failed' | 'skipped';
+
+interface MatterRegistration {
+    uuid: string;
+    displayName: string;
+    deviceType: string; // Lares4 device type, used for fallback decisions
+    status: MatterRegistrationStatus;
+    registeredAt?: number;
+    failedAt?: number;
+    lastError?: string;
+    pendingStateUpdates: PendingMatterStateUpdate[];
+}
+
+// ---------------------------------------------------------------------------
+// Registry
+// ---------------------------------------------------------------------------
 
 export class MatterAccessoryRegistry {
+    /** UUIDs that HB2 reported to us via `configureMatterAccessory` (cache restore). */
     private readonly cachedUUIDs: Set<string> = new Set();
-    private readonly registeredUUIDs: Set<string> = new Set();
-    private readonly failedUUIDs: Set<string> = new Set();
-    // Tracks when each UUID was registered — state updates are deferred until the IPC commit
-    // has had time to complete (HB2 registerPlatformAccessories is fire-and-forget on the API side).
-    private readonly registeredAt: Map<string, number> = new Map();
-    private static readonly REGISTER_SETTLE_MS = 2000;
+    /** Full registration state, keyed by Lares device id (also the Matter UUID). */
+    private readonly registrations: Map<string, MatterRegistration> = new Map();
+    /** UUIDs we've seen in the current discovery cycle — used to prune stale ones. */
     private activeDiscoveredUUIDs: Set<string> = new Set();
+    /** UUIDs that fell back to TemperatureSensor — drive the alternate state-push path. */
+    private readonly thermostatFallbackUUIDs: Set<string> = new Set();
 
     constructor(
         private readonly api: API,
@@ -24,6 +68,10 @@ export class MatterAccessoryRegistry {
     public get isEnabled(): boolean {
         return !!this.api.matter;
     }
+
+    // -----------------------------------------------------------------------
+    // Lifecycle hooks called by Platform
+    // -----------------------------------------------------------------------
 
     public configureCachedAccessory(accessory: MatterAccessory): void {
         this.cachedUUIDs.add(accessory.UUID);
@@ -36,188 +84,211 @@ export class MatterAccessoryRegistry {
 
     public async addOrUpdateAccessory(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
-        // Skip devices whose registration has previously failed — retrying floods logs with
-        // identical Behavior errors and never recovers within a single process lifetime.
-        if (this.failedUUIDs.has(device.id)) return;
+        this.activeDiscoveredUUIDs.add(device.id);
 
+        const existing = this.registrations.get(device.id);
+        if (existing) {
+            // Already known — either still pending the settle window, registered, failed or skipped.
+            switch (existing.status) {
+                case 'pending':
+                    // Queue the latest state; the settle handler will flush it.
+                    this.enqueueStateFor(device);
+                    return;
+                case 'registered':
+                    await this.pushStateUpdate(device);
+                    return;
+                case 'failed':
+                case 'skipped':
+                    return; // silent, we've already logged once
+            }
+        }
+
+        await this.registerAccessory(device);
+    }
+
+    public async updateAccessoryState(device: KseniaDevice): Promise<void> {
+        if (!this.api.matter) return;
+        const existing = this.registrations.get(device.id);
+
+        if (!existing) {
+            // First time we see this device — register it (lazy path for HAP-cached devices
+            // whose WS "discovered" callback hasn't fired yet).
+            await this.registerAccessory(device);
+            return;
+        }
+
+        switch (existing.status) {
+            case 'pending':
+                this.enqueueStateFor(device);
+                return;
+            case 'registered':
+                await this.pushStateUpdate(device);
+                return;
+            case 'failed':
+            case 'skipped':
+                return;
+        }
+    }
+
+    public async pruneStaleAccessories(): Promise<void> {
+        if (!this.api.matter) return;
+        for (const [uuid, reg] of this.registrations) {
+            if (reg.status !== 'registered') continue;
+            if (this.activeDiscoveredUUIDs.has(uuid)) continue;
+            this.log.info(`[Matter] Removing stale accessory: ${reg.displayName} (${uuid})`);
+            try {
+                await this.api.matter.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
+                    { UUID: uuid } as MatterAccessory,
+                ]);
+                this.registrations.delete(uuid);
+                this.cachedUUIDs.delete(uuid);
+                this.thermostatFallbackUUIDs.delete(uuid);
+            } catch (err) {
+                this.log.warn(`[Matter] Failed to unregister ${uuid}: ${this.fmtErr(err)}`);
+            }
+        }
+    }
+
+    /** Test-only introspection: registration status for a given device id. */
+    public getStatus(uuid: string): MatterRegistrationStatus | undefined {
+        return this.registrations.get(uuid)?.status;
+    }
+
+    /** Test-only introspection: queued updates count for a device id. */
+    public getPendingCount(uuid: string): number {
+        return this.registrations.get(uuid)?.pendingStateUpdates.length ?? 0;
+    }
+
+    // -----------------------------------------------------------------------
+    // Registration internals
+    // -----------------------------------------------------------------------
+
+    private async registerAccessory(device: KseniaDevice): Promise<void> {
         const matterAccessory = deviceToMatterAccessory(device, {
             api: this.api,
             log: this.log,
             getWsClient: this.getWsClient,
         });
+        if (!matterAccessory) return;
 
-        if (!matterAccessory) {
-            return;
-        }
-
-        this.activeDiscoveredUUIDs.add(device.id);
-
-        if (this.registeredUUIDs.has(device.id)) {
-            // Already registered — push state, but only if past the IPC settle window.
-            const registeredAt = this.registeredAt.get(device.id) ?? 0;
-            if (Date.now() - registeredAt >= MatterAccessoryRegistry.REGISTER_SETTLE_MS) {
-                await this.pushStateUpdate(device);
-            }
-            return;
-        }
+        const reg: MatterRegistration = {
+            uuid: device.id,
+            displayName: device.name,
+            deviceType: device.type,
+            status: 'pending',
+            pendingStateUpdates: [],
+        };
+        this.registrations.set(device.id, reg);
 
         const fromCache = this.cachedUUIDs.has(device.id);
-        if (fromCache) {
-            this.log.debug(`[Matter] Restoring cached accessory: ${device.name}`);
-        } else {
-            this.log.info(`[Matter] Registering new accessory: ${device.name} (${device.type})`);
-        }
+        this.log.info(`[Matter] register requested: ${device.name} (${device.type})${fromCache ? ' [cache restore]' : ''}`);
 
         try {
-            await this.api.matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
-            this.registeredUUIDs.add(device.id);
-            this.registeredAt.set(device.id, Date.now());
-            this.log.info(`[Matter] Registered: ${device.name}`);
-            // Do NOT push state immediately — registerPlatformAccessories is fire-and-forget on the
-            // API side (emits an event, doesn't await commit). The initial clusters payload in the
-            // MatterAccessory already carries the current state, so the next status update will
-            // catch up after REGISTER_SETTLE_MS.
+            await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
         } catch (err) {
-            this.failedUUIDs.add(device.id);
-            this.log.warn(`[Matter] Failed to register ${device.name} — will not retry this session: ${err instanceof Error ? err.message : String(err)}`);
-        }
-    }
-
-    public async updateAccessoryState(device: KseniaDevice): Promise<void> {
-        if (!this.api.matter) return;
-        // Skip devices that we've already failed to register — avoids log spam.
-        if (this.failedUUIDs.has(device.id)) return;
-        // Lazy registration: an HAP status update can arrive before the WS "discovered" callback,
-        // especially for accessories already in HAP cache. Register on the fly so we don't miss any.
-        if (!this.registeredUUIDs.has(device.id)) {
-            await this.addOrUpdateAccessory(device);
+            await this.handleRegisterFailure(device, err);
             return;
         }
-        // Skip state pushes during the IPC settle window — the registration event hasn't been
-        // processed by the Matter server yet, so updateAccessoryState would fail with "not found".
-        const registeredAt = this.registeredAt.get(device.id) ?? 0;
-        if (Date.now() - registeredAt < MatterAccessoryRegistry.REGISTER_SETTLE_MS) {
-            return;
-        }
-        await this.pushStateUpdate(device);
+
+        this.log.debug(`[Matter] settle started (${MATTER_REGISTER_SETTLE_MS}ms): ${device.name}`);
+        // Don't `await` the settle timer — let the WS event loop continue. Queued updates
+        // are stored on the registration; we flush them when the timer fires.
+        setTimeout(() => { void this.completeRegistration(device.id); }, MATTER_REGISTER_SETTLE_MS);
     }
 
-    public async pruneStaleAccessories(): Promise<void> {
-        if (!this.api.matter) return;
+    private async completeRegistration(uuid: string): Promise<void> {
+        const reg = this.registrations.get(uuid);
+        if (!reg || reg.status !== 'pending') return;
 
-        for (const uuid of this.registeredUUIDs) {
-            if (!this.activeDiscoveredUUIDs.has(uuid)) {
-                this.log.info(`[Matter] Removing stale accessory: ${uuid}`);
-                try {
-                    await this.api.matter.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
-                        { UUID: uuid } as MatterAccessory,
-                    ]);
-                    this.registeredUUIDs.delete(uuid);
-                    this.cachedUUIDs.delete(uuid);
-                } catch (err) {
-                    this.log.warn(`[Matter] Failed to unregister ${uuid}: ${err instanceof Error ? err.message : String(err)}`);
-                }
+        reg.status = 'registered';
+        reg.registeredAt = Date.now();
+        this.log.info(`[Matter] registered: ${reg.displayName}`);
+
+        if (reg.pendingStateUpdates.length === 0) return;
+
+        const flushed = reg.pendingStateUpdates.splice(0);
+        this.log.debug(`[Matter] pending updates flushed: ${reg.displayName} (${flushed.length})`);
+        for (const update of flushed) {
+            try {
+                await this.api.matter!.updateAccessoryState(uuid, update.clusterName, update.attributes, update.partId);
+            } catch (err) {
+                this.log.debug(`[Matter] post-settle update error for ${reg.displayName}: ${this.fmtErr(err)}`);
             }
         }
     }
+
+    /**
+     * Centralised handler for failed initial registration. Currently only used for thermostats —
+     * other device types are simply marked failed and skipped for the session.
+     */
+    private async handleRegisterFailure(device: KseniaDevice, err: unknown): Promise<void> {
+        const reg = this.registrations.get(device.id)!;
+        const msg = this.fmtErr(err);
+
+        if (device.type === 'thermostat' && MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR) {
+            this.log.warn(
+                `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor `
+                + `due to matter.js thermostat presetTypes validation issue. Error: ${msg}`,
+            );
+            const fallback = mapThermostatAsTemperatureSensor(device as KseniaThermostat, {
+                api: this.api,
+                log: this.log,
+                getWsClient: this.getWsClient,
+            });
+            try {
+                await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [fallback]);
+                this.thermostatFallbackUUIDs.add(device.id);
+                this.log.debug(`[Matter] settle started (${MATTER_REGISTER_SETTLE_MS}ms): ${device.name} [fallback]`);
+                setTimeout(() => { void this.completeRegistration(device.id); }, MATTER_REGISTER_SETTLE_MS);
+                return;
+            } catch (fbErr) {
+                this.log.warn(`[Matter] Fallback TemperatureSensor also failed for ${device.name}: ${this.fmtErr(fbErr)}`);
+            }
+        }
+
+        reg.status = 'failed';
+        reg.failedAt = Date.now();
+        reg.lastError = msg;
+        reg.pendingStateUpdates = [];
+        this.log.warn(`[Matter] accessory failed: ${device.name} — ${msg}`);
+    }
+
+    // -----------------------------------------------------------------------
+    // State propagation
+    // -----------------------------------------------------------------------
 
     private async pushStateUpdate(device: KseniaDevice): Promise<void> {
+        const updates = this.buildUpdatesFor(device);
         const matter = this.api.matter!;
-        const uuid = device.id;
-
-        try {
-            switch (device.type) {
-                case 'light':
-                    await matter.updateAccessoryState(uuid, 'onOff', { onOff: device.status.on });
-                    if (device.status.dimmable && device.status.brightness !== undefined) {
-                        await matter.updateAccessoryState(uuid, 'levelControl', {
-                            currentLevel: Math.round((device.status.brightness / 100) * 254),
-                        });
-                    }
-                    break;
-
-                case 'cover': {
-                    const matterPos = Math.round((100 - (device.status.position ?? 0)) * 100);
-                    await matter.updateAccessoryState(uuid, 'windowCovering', {
-                        currentPositionLiftPercent100ths: matterPos,
-                        targetPositionLiftPercent100ths: matterPos,
-                    });
-                    break;
-                }
-
-                case 'thermostat': {
-                    const current = device.currentTemperature ?? 21;
-                    const target = device.targetTemperature ?? 21;
-                    const mode = device.mode ?? 'heat';
-                    const HEAT_MIN = 700, HEAT_MAX = 3000;
-                    const COOL_MIN = 1600, COOL_MAX = 3200;
-                    const DEADBAND_CENTI = 250;
-                    const heatingSetpoint = Math.max(HEAT_MIN, Math.min(HEAT_MAX, toCentidegrees(target)));
-                    const coolingSetpoint = Math.max(COOL_MIN, Math.min(COOL_MAX, heatingSetpoint + DEADBAND_CENTI));
-                    await matter.updateAccessoryState(uuid, 'thermostat', {
-                        localTemperature: clampCentidegrees(toCentidegrees(current)),
-                        occupiedHeatingSetpoint: heatingSetpoint,
-                        occupiedCoolingSetpoint: coolingSetpoint,
-                        unoccupiedHeatingSetpoint: heatingSetpoint,
-                        unoccupiedCoolingSetpoint: coolingSetpoint,
-                        systemMode: domainModeToMatterMode(mode),
-                    });
-                    break;
-                }
-
-                case 'sensor': {
-                    const val = device.status.value;
-                    switch (device.status.sensorType) {
-                        case 'temperature':
-                            await matter.updateAccessoryState(uuid, 'temperatureMeasurement', {
-                                measuredValue: clampCentidegrees(toCentidegrees(val)),
-                            });
-                            break;
-                        case 'humidity':
-                            await matter.updateAccessoryState(uuid, 'relativeHumidityMeasurement', {
-                                measuredValue: Math.round(Math.max(0, Math.min(100, val)) * 100),
-                            });
-                            break;
-                        case 'light':
-                            await matter.updateAccessoryState(uuid, 'illuminanceMeasurement', {
-                                measuredValue: val <= 0 ? 0 : Math.max(1, Math.min(65534, Math.round(10000 * Math.log10(val) + 1))),
-                            });
-                            break;
-                        case 'motion':
-                            await matter.updateAccessoryState(uuid, 'occupancySensing', {
-                                occupancy: { occupied: val > 0 },
-                            });
-                            break;
-                        case 'contact':
-                            await matter.updateAccessoryState(uuid, 'booleanState', {
-                                stateValue: val === 0,
-                            });
-                            break;
-                    }
-                    break;
-                }
-
-                case 'zone':
-                    await matter.updateAccessoryState(uuid, 'booleanState', {
-                        stateValue: !device.status.open,
-                    });
-                    break;
-
-                case 'scenario':
-                    await matter.updateAccessoryState(uuid, 'onOff', {
-                        onOff: device.status.active,
-                    });
-                    break;
-
-                case 'gate':
-                    await matter.updateAccessoryState(uuid, 'onOff', {
-                        onOff: device.status.on,
-                    });
-                    break;
+        for (const u of updates) {
+            try {
+                await matter.updateAccessoryState(device.id, u.clusterName, u.attributes, u.partId);
+            } catch (err) {
+                this.log.debug(`[Matter] update failed for ${device.name} (${u.clusterName}): ${this.fmtErr(err)}`);
             }
-        } catch (err) {
-            this.log.debug(`[Matter] State update error for ${uuid}: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
-}
 
+    private enqueueStateFor(device: KseniaDevice): void {
+        const reg = this.registrations.get(device.id);
+        if (!reg) return;
+        for (const u of this.buildUpdatesFor(device)) {
+            // Dedupe by (clusterName, partId) — keep only the latest payload per slot.
+            const idx = reg.pendingStateUpdates.findIndex(
+                (p) => p.clusterName === u.clusterName && p.partId === u.partId,
+            );
+            if (idx >= 0) reg.pendingStateUpdates[idx] = u;
+            else reg.pendingStateUpdates.push(u);
+        }
+        this.log.debug(`[Matter] update queued: ${device.name} (pending=${reg.pendingStateUpdates.length})`);
+    }
+
+    private buildUpdatesFor(device: KseniaDevice): PendingMatterStateUpdate[] {
+        const isFallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
+        return buildStateUpdates(device, isFallback);
+    }
+
+    private fmtErr(err: unknown): string {
+        return err instanceof Error ? err.message : String(err);
+    }
+}

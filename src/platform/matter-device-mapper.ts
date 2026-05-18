@@ -12,18 +12,16 @@ import type {
 } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import type { KseniaWebSocketClient } from '../websocket-client';
+import { buildThermostatMatterState, toMatterTemperatureCelsius, clampMatterTemperature, TEMP_ABS_MIN_CENTI, TEMP_ABS_MAX_CENTI } from './matter-thermostat-mapper';
 
-// Matter temperatures are in centidegrees (°C * 100)
-export function toCentidegrees(celsius: number): number {
-    return Math.round(celsius * 100);
-}
-
+// Re-exports for legacy callers (registry pushStateUpdate, tests)
+export { toMatterTemperatureCelsius as toCentidegrees };
+export { buildThermostatMatterState };
 export function clampCentidegrees(val: number): number {
-    return Math.max(-27000, Math.min(10000, val));
+    return clampMatterTemperature(val, TEMP_ABS_MIN_CENTI, TEMP_ABS_MAX_CENTI);
 }
 
-// Matter Thermostat systemMode values (Matter spec 1.3 §4.3.7.22)
-// 0=Off, 1=Auto, 3=Cool, 4=Heat
+// Matter Thermostat systemMode values (Matter spec 1.3 §4.3.7.32): 0=Off, 1=Auto, 3=Cool, 4=Heat
 export function domainModeToMatterMode(mode: 'off' | 'heat' | 'cool' | 'auto'): number {
     switch (mode) {
         case 'heat': return 4;
@@ -33,9 +31,10 @@ export function domainModeToMatterMode(mode: 'off' | 'heat' | 'cool' | 'auto'): 
     }
 }
 
-// Matter illuminance: measuredValue = 10000 * log10(lux) + 1  (spec §2.2.5.1)
-function luxToMatterIlluminance(lux: number): number {
-    if (lux <= 0) return 0;
+// Matter illuminance: measuredValue = 10000 * log10(lux) + 1  (Matter spec §2.2.5.1).
+// Returns 0 for lux <= 0 (the spec uses 0 to mean "below the sensor's range").
+export function luxToMatterIlluminance(lux: number): number {
+    if (!Number.isFinite(lux) || lux <= 0) return 0;
     return Math.max(1, Math.min(65534, Math.round(10000 * Math.log10(lux) + 1)));
 }
 
@@ -121,7 +120,6 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
         handlers: {
             windowCovering: {
                 goToLiftPercentage: async (args: { liftPercent100thsValue: number }) => {
-                    // Matter 0=open 10000=closed → Lares4 0=closed 100=open
                     const targetPct = 100 - Math.round(args.liftPercent100thsValue / 100);
                     await getWsClient()?.moveCover(device.id, targetPct);
                 },
@@ -132,60 +130,13 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
 
 function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccessory {
     const { api, getWsClient } = deps;
-    const currentTemp = device.currentTemperature ?? 21;
-    const targetTemp = device.targetTemperature ?? 21;
-    const mode = device.mode ?? 'heat';
-
-    // Homebridge 2's bundled Thermostat device type enables HEAT + COOL + AUTO + OCC features
-    // (heating:true, cooling:true, autoMode:true, occupancy:true). All mandatory attributes for these
-    // features must be supplied. matter.js 0.17 additionally enforces presetTypes length ≥1 (even
-    // though presets:false) — provide a single Occupied placeholder. Matter spec §4.3.7/4.3.8.
-    const HEAT_MIN = 700;   // 7°C
-    const HEAT_MAX = 3000;  // 30°C
-    const COOL_MIN = 1600;  // 16°C
-    const COOL_MAX = 3200;  // 32°C
-    const DEADBAND_CENTI = 250;  // 2.5°C in centidegrees
-    const TEMP_ABS_MIN = -27000;
-    const TEMP_ABS_MAX = 10000;
-    const CONTROL_SEQ_COOLING_AND_HEATING = 4;
-
-    const heatingSetpoint = Math.max(HEAT_MIN, Math.min(HEAT_MAX, toCentidegrees(targetTemp)));
-    // Cooling setpoint must be ≥ heating + deadband to satisfy the AUTO-mode invariant.
-    const coolingSetpoint = Math.max(COOL_MIN, Math.min(COOL_MAX, heatingSetpoint + DEADBAND_CENTI));
-    const localTemp = Math.max(TEMP_ABS_MIN, Math.min(TEMP_ABS_MAX, toCentidegrees(currentTemp)));
+    const { base, schemaInvariants } = buildThermostatMatterState(device);
 
     return {
         ...baseFields(device),
         deviceType: api.matter!.deviceTypes.Thermostat,
         clusters: {
-            thermostat: {
-                localTemperature: localTemp,
-                // HEAT feature mandatory attrs
-                occupiedHeatingSetpoint: heatingSetpoint,
-                absMinHeatSetpointLimit: HEAT_MIN,
-                absMaxHeatSetpointLimit: HEAT_MAX,
-                minHeatSetpointLimit: HEAT_MIN,
-                maxHeatSetpointLimit: HEAT_MAX,
-                // COOL feature mandatory attrs
-                occupiedCoolingSetpoint: coolingSetpoint,
-                absMinCoolSetpointLimit: COOL_MIN,
-                absMaxCoolSetpointLimit: COOL_MAX,
-                minCoolSetpointLimit: COOL_MIN,
-                maxCoolSetpointLimit: COOL_MAX,
-                // AUTO feature mandatory attr (deadband is int8s in tenths of °C → 25 = 2.5°C)
-                minSetpointDeadBand: DEADBAND_CENTI / 10,
-                // OCC feature mandatory attrs
-                unoccupiedHeatingSetpoint: heatingSetpoint,
-                unoccupiedCoolingSetpoint: coolingSetpoint,
-                // Always mandatory
-                controlSequenceOfOperation: CONTROL_SEQ_COOLING_AND_HEATING,
-                systemMode: domainModeToMatterMode(mode),
-                // matter.js 0.17 quirk: presetTypes array must have length 1..7 even with PRES feature off.
-                // PresetScenarioEnum.Occupied = 1 (spec §4.3.8.16).
-                presetTypes: [{ presetScenario: 1, numberOfPresets: 1, presetTypeFeatures: 0 }],
-                numberOfPresets: 1,
-                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-            } as Record<string, unknown>,
+            thermostat: { ...base, ...schemaInvariants } as Record<string, unknown>,
         },
         handlers: {
             thermostat: {
@@ -194,6 +145,25 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
                     const newTarget = (device.targetTemperature ?? 21) + delta;
                     await getWsClient()?.setThermostatTemperature(device.id, newTarget);
                 },
+            },
+        },
+    };
+}
+
+/**
+ * Fallback mapping: register a thermostat as a Matter TemperatureSensor.
+ * Used only when the regular Thermostat registration fails upstream (matter.js bug).
+ * HAP continues to expose the full Thermostat — Matter loses write control but keeps read.
+ */
+export function mapThermostatAsTemperatureSensor(device: KseniaThermostat, deps: MapperDeps): MatterAccessory {
+    const { api } = deps;
+    const currentC = device.currentTemperature ?? 21;
+    return {
+        ...baseFields(device),
+        deviceType: api.matter!.deviceTypes.TemperatureSensor,
+        clusters: {
+            temperatureMeasurement: {
+                measuredValue: clampCentidegrees(toMatterTemperatureCelsius(currentC)),
             },
         },
     };
@@ -210,7 +180,7 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
                 deviceType: api.matter!.deviceTypes.TemperatureSensor,
                 clusters: {
                     temperatureMeasurement: {
-                        measuredValue: clampCentidegrees(toCentidegrees(val)),
+                        measuredValue: clampCentidegrees(toMatterTemperatureCelsius(val)),
                     },
                 },
             };
@@ -224,25 +194,20 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
                     },
                 },
             };
-        case 'light': {
+        case 'light':
             return {
                 ...baseFields(device),
                 deviceType: api.matter!.deviceTypes.LightSensor,
                 clusters: {
-                    illuminanceMeasurement: {
-                        measuredValue: luxToMatterIlluminance(val),
-                    },
+                    illuminanceMeasurement: { measuredValue: luxToMatterIlluminance(val) },
                 },
             };
-        }
         case 'motion':
             return {
                 ...baseFields(device),
                 deviceType: api.matter!.deviceTypes.MotionSensor,
                 clusters: {
-                    occupancySensing: {
-                        occupancy: { occupied: val > 0 },
-                    },
+                    occupancySensing: { occupancy: { occupied: val > 0 } },
                 },
             };
         case 'contact':
