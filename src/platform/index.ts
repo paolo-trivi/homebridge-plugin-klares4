@@ -3,6 +3,7 @@ import type {
     Characteristic,
     DynamicPlatformPlugin,
     Logger,
+    MatterAccessory,
     PlatformAccessory,
     Service,
 } from 'homebridge';
@@ -15,6 +16,7 @@ import { KseniaWebSocketClient } from '../websocket-client';
 import { DebugCaptureManager } from '../debug-capture';
 import { AccessoryRegistry } from './accessory-registry';
 import { AccessoryHandlerService } from './accessory-handler-service';
+import { MatterAccessoryRegistry } from './matter-accessory-registry';
 import { PlatformConfigFileService } from './config-file-service';
 import { DeviceListService } from './device-list-service';
 import { DiscoveryService } from './discovery-service';
@@ -36,6 +38,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly discoveredDevices: Map<string, KseniaDevice> = new Map();
     private readonly activeDiscoveredUUIDs: Set<string> = new Set();
     private readonly accessoryRegistry: AccessoryRegistry;
+    private readonly matterRegistry: MatterAccessoryRegistry;
     private readonly discoveryService: DiscoveryService;
     private readonly lifecycleService: PlatformLifecycleService;
     private readonly deviceListService: DeviceListService;
@@ -75,6 +78,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             updateAccessoryHandler: (handler, device): void =>
                 this.handlerService.updateAccessoryHandler(handler, device),
         });
+        this.matterRegistry = new MatterAccessoryRegistry(
+            this.api,
+            this.log,
+            () => this.wsClient,
+        );
 
         if (!config) {
             this.log.error('No configuration found');
@@ -105,10 +113,15 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         });
     }
 
+    public configureMatterAccessory(accessory: MatterAccessory): void {
+        this.matterRegistry.configureCachedAccessory(accessory);
+    }
+
     private async initializeLares4(): Promise<void> {
         try {
             this.log.info('Initializing Ksenia Lares4 connection...');
             this.accessoryRegistry.startDiscoveryCycle();
+            this.matterRegistry.startDiscoveryCycle();
 
             const useHttps = this.config.https !== false;
             const port = this.config.port ?? (useHttps ? 443 : 80);
@@ -179,6 +192,9 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private handleInitialSyncComplete(): void {
         this.log.info('Initial synchronization completed, pruning stale accessories...');
         this.accessoryRegistry.pruneStaleAccessories();
+        this.matterRegistry.pruneStaleAccessories().catch((err: unknown) => {
+            this.log.warn('[Matter] Prune error:', err instanceof Error ? err.message : String(err));
+        });
     }
 
     private cleanupConnections(): void {
@@ -200,12 +216,18 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.discoveryService.applyCustomName(device);
         this.log.info(`Device discovered: ${device.type} - ${device.name}`);
         this.addAccessory(device);
+        this.matterRegistry.addOrUpdateAccessory(device).catch((err: unknown) => {
+            this.log.warn(`[Matter] Registration error for ${device.name}:`, err instanceof Error ? err.message : String(err));
+        });
     }
 
     private handleDeviceStatusUpdate(device: KseniaDevice): void {
         this.log.debug(`Device status update: ${device.name}`);
         this.updateAccessory(device);
         this.mqttBridge?.publishDeviceState(device);
+        this.matterRegistry.updateAccessoryState(device).catch((err: unknown) => {
+            this.log.debug(`[Matter] State update error for ${device.name}:`, err instanceof Error ? err.message : String(err));
+        });
     }
 
     public configureAccessory(accessory: PlatformAccessory): void {
