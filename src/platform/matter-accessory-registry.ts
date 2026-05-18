@@ -51,12 +51,14 @@ export class MatterAccessoryRegistry {
         }
 
         if (this.cachedUUIDs.has(device.id)) {
-            // Known from cache — re-register with fresh state (handles handler re-attachment)
-            this.log.debug(`[Matter] Restoring cached accessory: ${device.name}`);
-        } else {
-            this.log.info(`[Matter] Registering new accessory: ${device.name} (${device.type})`);
+            // Already restored from cache by HB2 — handlers re-attached. Just track and push state.
+            this.log.debug(`[Matter] Restored from cache: ${device.name}`);
+            this.registeredUUIDs.add(device.id);
+            await this.pushStateUpdate(device);
+            return;
         }
 
+        this.log.info(`[Matter] Registering new accessory: ${device.name} (${device.type})`);
         try {
             await this.api.matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
             this.registeredUUIDs.add(device.id);

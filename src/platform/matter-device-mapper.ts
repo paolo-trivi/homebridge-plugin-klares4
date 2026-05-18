@@ -136,21 +136,23 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
     const targetTemp = device.targetTemperature ?? 21;
     const mode = device.mode ?? 'heat';
 
-    // Matter Thermostat HEAT-feature-only profile (safe default for Lares4 heating zones).
-    // ControlSequenceOfOperationEnum.HeatingOnly = 0x02 (Matter spec §4.3.7.30, NOT 0 which is CoolingOnly).
-    // SystemModeEnum: Off=0x00, Heat=0x04 (Auto requires AUTO feature + minSetpointDeadBand → avoid here).
-    // HEAT range defaults: AbsMinHeatSetpointLimit=700 (7°C), AbsMaxHeatSetpointLimit=3000 (30°C).
-    const HEAT_MIN = 700;
-    const HEAT_MAX = 3000;
+    // Homebridge 2's bundled Thermostat device type enables HEAT + COOL + AUTO + OCC features
+    // (heating:true, cooling:true, autoMode:true, occupancy:true). All mandatory attributes for these
+    // features must be supplied. matter.js 0.17 additionally enforces presetTypes length ≥1 (even
+    // though presets:false) — provide a single Occupied placeholder. Matter spec §4.3.7/4.3.8.
+    const HEAT_MIN = 700;   // 7°C
+    const HEAT_MAX = 3000;  // 30°C
+    const COOL_MIN = 1600;  // 16°C
+    const COOL_MAX = 3200;  // 32°C
+    const DEADBAND_CENTI = 250;  // 2.5°C in centidegrees
     const TEMP_ABS_MIN = -27000;
     const TEMP_ABS_MAX = 10000;
-    const CONTROL_SEQ_HEATING_ONLY = 2;
+    const CONTROL_SEQ_COOLING_AND_HEATING = 4;
 
     const heatingSetpoint = Math.max(HEAT_MIN, Math.min(HEAT_MAX, toCentidegrees(targetTemp)));
+    // Cooling setpoint must be ≥ heating + deadband to satisfy the AUTO-mode invariant.
+    const coolingSetpoint = Math.max(COOL_MIN, Math.min(COOL_MAX, heatingSetpoint + DEADBAND_CENTI));
     const localTemp = Math.max(TEMP_ABS_MIN, Math.min(TEMP_ABS_MAX, toCentidegrees(currentTemp)));
-    // For HeatingOnly profile, valid SystemMode values are Off (0) or Heat (4) — collapse cool/auto to Heat
-    // so a stale Lares4 mode doesn't violate the cluster's mode/control coherence.
-    const safeMode = (mode === 'off') ? 'off' : 'heat';
 
     return {
         ...baseFields(device),
@@ -158,14 +160,32 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
         clusters: {
             thermostat: {
                 localTemperature: localTemp,
+                // HEAT feature mandatory attrs
                 occupiedHeatingSetpoint: heatingSetpoint,
                 absMinHeatSetpointLimit: HEAT_MIN,
                 absMaxHeatSetpointLimit: HEAT_MAX,
                 minHeatSetpointLimit: HEAT_MIN,
                 maxHeatSetpointLimit: HEAT_MAX,
-                controlSequenceOfOperation: CONTROL_SEQ_HEATING_ONLY,
-                systemMode: domainModeToMatterMode(safeMode),
-            },
+                // COOL feature mandatory attrs
+                occupiedCoolingSetpoint: coolingSetpoint,
+                absMinCoolSetpointLimit: COOL_MIN,
+                absMaxCoolSetpointLimit: COOL_MAX,
+                minCoolSetpointLimit: COOL_MIN,
+                maxCoolSetpointLimit: COOL_MAX,
+                // AUTO feature mandatory attr (deadband is int8s in tenths of °C → 25 = 2.5°C)
+                minSetpointDeadBand: DEADBAND_CENTI / 10,
+                // OCC feature mandatory attrs
+                unoccupiedHeatingSetpoint: heatingSetpoint,
+                unoccupiedCoolingSetpoint: coolingSetpoint,
+                // Always mandatory
+                controlSequenceOfOperation: CONTROL_SEQ_COOLING_AND_HEATING,
+                systemMode: domainModeToMatterMode(mode),
+                // matter.js 0.17 quirk: presetTypes array must have length 1..7 even with PRES feature off.
+                // PresetScenarioEnum.Occupied = 1 (spec §4.3.8.16).
+                presetTypes: [{ presetScenario: 1, numberOfPresets: 1, presetTypeFeatures: 0 }],
+                numberOfPresets: 1,
+                // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+            } as Record<string, unknown>,
         },
         handlers: {
             thermostat: {
@@ -230,7 +250,7 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
                 ...baseFields(device),
                 deviceType: api.matter!.deviceTypes.ContactSensor,
                 clusters: {
-                    booleanState: { stateValue: val === 0 }, // true = contact detected (closed)
+                    booleanState: { stateValue: val === 0 },
                 },
             };
         default:
@@ -244,7 +264,7 @@ function mapZone(device: KseniaZone, deps: MapperDeps): MatterAccessory {
         ...baseFields(device),
         deviceType: api.matter!.deviceTypes.ContactSensor,
         clusters: {
-            booleanState: { stateValue: !device.status.open }, // open=true → alarm → stateValue=false
+            booleanState: { stateValue: !device.status.open },
         },
     };
 }
@@ -260,7 +280,7 @@ function mapScenario(device: KseniaScenario, deps: MapperDeps): MatterAccessory 
         handlers: {
             onOff: {
                 on: async () => { await getWsClient()?.triggerScenario(device.id); },
-                off: async () => { /* stateless trigger — no deactivation */ },
+                off: async () => { /* stateless trigger */ },
             },
         },
     };
