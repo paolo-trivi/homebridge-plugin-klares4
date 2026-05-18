@@ -1,6 +1,7 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { Lares4Platform } from '../platform';
 import type { KseniaSensor } from '../types';
+import { PLUGIN_VERSION } from '../plugin-version';
 
 /**
  * Sensor Accessory Handler
@@ -26,8 +27,11 @@ export class SensorAccessory {
                     this.platform.Characteristic.Model,
                     `Lares4 ${this.getSensorTypeLabel()}`,
                 )
-                .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.1-beta0');
+                .setCharacteristic(
+                    this.platform.Characteristic.SerialNumber,
+                    this.device.id || `lares4-${accessory.UUID.slice(0, 8)}`,
+                )
+                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, PLUGIN_VERSION);
         }
 
         this.service = this.createSensorService();

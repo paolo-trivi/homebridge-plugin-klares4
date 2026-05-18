@@ -1,6 +1,7 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import type { Lares4Platform, Lares4Config } from '../platform';
 import type { KseniaThermostat } from '../types';
+import { PLUGIN_VERSION } from '../plugin-version';
 import {
     deriveHomeKitCurrentState,
     domainModeToHomeKitTarget,
@@ -15,6 +16,8 @@ import { syncThermostatTopLevelFromStatus, updateThermostatStatus } from '../the
 export class ThermostatAccessory {
     private service: Service;
     public device: KseniaThermostat;
+    private readonly tempMin: number;
+    private readonly tempMax: number;
 
     constructor(
         private readonly platform: Lares4Platform,
@@ -30,8 +33,11 @@ export class ThermostatAccessory {
             accessoryInfoService
                 .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Ksenia')
                 .setCharacteristic(this.platform.Characteristic.Model, 'Lares4 Thermostat')
-                .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.id)
-                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, '2.0.1-beta0');
+                .setCharacteristic(
+                    this.platform.Characteristic.SerialNumber,
+                    this.device.id || `lares4-${accessory.UUID.slice(0, 8)}`,
+                )
+                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, PLUGIN_VERSION);
         }
 
         this.service =
@@ -69,9 +75,11 @@ export class ThermostatAccessory {
         }
 
         const tempDefaults = (this.platform.config as Lares4Config).temperatureDefaults ?? {};
+        this.tempMin = tempDefaults.min ?? 10;
+        this.tempMax = tempDefaults.max ?? 38;
         this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).setProps({
-            minValue: tempDefaults.min ?? 10,
-            maxValue: tempDefaults.max ?? 38,
+            minValue: this.tempMin,
+            maxValue: this.tempMax,
             minStep: tempDefaults.step ?? 0.5,
         });
 
@@ -110,8 +118,13 @@ export class ThermostatAccessory {
             this.device.currentTemperature === undefined ||
             this.device.currentTemperature === null
         ) {
-            this.platform.log.warn(`${this.device.name}: Current temperature not available`);
-            return 0;
+            // Use last persisted value from cache to avoid showing 0°C to Matter at startup.
+            const lastKnown = this.accessory.context.lastKnownTemp as number | undefined;
+            const fallback = lastKnown ?? 21;
+            this.platform.log.warn(
+                `${this.device.name}: Current temperature not available, using ${fallback}C`,
+            );
+            return Math.max(-270, Math.min(100, fallback));
         }
         return Math.max(-270, Math.min(100, this.device.currentTemperature));
     }
@@ -121,8 +134,10 @@ export class ThermostatAccessory {
             this.device.targetTemperature === undefined ||
             this.device.targetTemperature === null
         ) {
-            const defaultTemp =
+            const configTarget =
                 (this.platform.config as Lares4Config).temperatureDefaults?.target ?? 21;
+            // Clamp the default to the configured bounds so Matter bounds validation passes.
+            const defaultTemp = Math.max(this.tempMin, Math.min(this.tempMax, configTarget));
             this.platform.log.warn(
                 `${this.device.name}: Target temperature not available, using ${defaultTemp}C as default`,
             );
@@ -208,6 +223,10 @@ export class ThermostatAccessory {
     public updateStatus(newDevice: KseniaThermostat): void {
         syncThermostatTopLevelFromStatus(newDevice);
         this.device = newDevice;
+        // Persist so the next cold-start can return a realistic fallback from cache.
+        if (newDevice.currentTemperature !== undefined && newDevice.currentTemperature !== null) {
+            this.accessory.context.lastKnownTemp = newDevice.currentTemperature;
+        }
         this.service.updateCharacteristic(
             this.platform.Characteristic.CurrentTemperature,
             Math.max(-270, Math.min(100, newDevice.currentTemperature)),

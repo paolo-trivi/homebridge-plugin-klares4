@@ -2,6 +2,7 @@ import type { Service, PlatformAccessory, CharacteristicValue } from 'homebridge
 
 import type { Lares4Platform, Lares4Config } from '../platform';
 import type { KseniaScenario } from '../types';
+import { PLUGIN_VERSION } from '../plugin-version';
 
 /**
  * Scenario Accessory Handler
@@ -26,7 +27,11 @@ export class ScenarioAccessory {
             accessoryInfoService
                 .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Ksenia')
                 .setCharacteristic(this.platform.Characteristic.Model, 'Lares4 Scenario')
-                .setCharacteristic(this.platform.Characteristic.SerialNumber, device.id);
+                .setCharacteristic(
+                    this.platform.Characteristic.SerialNumber,
+                    device.id || `lares4-${accessory.UUID.slice(0, 8)}`,
+                )
+                .setCharacteristic(this.platform.Characteristic.FirmwareRevision, PLUGIN_VERSION);
         }
 
         this.service =
