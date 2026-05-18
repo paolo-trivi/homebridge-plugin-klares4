@@ -8,6 +8,11 @@ import { deviceToMatterAccessory, toCentidegrees, clampCentidegrees, domainModeT
 export class MatterAccessoryRegistry {
     private readonly cachedUUIDs: Set<string> = new Set();
     private readonly registeredUUIDs: Set<string> = new Set();
+    private readonly failedUUIDs: Set<string> = new Set();
+    // Tracks when each UUID was registered — state updates are deferred until the IPC commit
+    // has had time to complete (HB2 registerPlatformAccessories is fire-and-forget on the API side).
+    private readonly registeredAt: Map<string, number> = new Map();
+    private static readonly REGISTER_SETTLE_MS = 2000;
     private activeDiscoveredUUIDs: Set<string> = new Set();
 
     constructor(
@@ -31,6 +36,9 @@ export class MatterAccessoryRegistry {
 
     public async addOrUpdateAccessory(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
+        // Skip devices whose registration has previously failed — retrying floods logs with
+        // identical Behavior errors and never recovers within a single process lifetime.
+        if (this.failedUUIDs.has(device.id)) return;
 
         const matterAccessory = deviceToMatterAccessory(device, {
             api: this.api,
@@ -45,36 +53,50 @@ export class MatterAccessoryRegistry {
         this.activeDiscoveredUUIDs.add(device.id);
 
         if (this.registeredUUIDs.has(device.id)) {
-            // Already registered — update state
-            await this.pushStateUpdate(device);
+            // Already registered — push state, but only if past the IPC settle window.
+            const registeredAt = this.registeredAt.get(device.id) ?? 0;
+            if (Date.now() - registeredAt >= MatterAccessoryRegistry.REGISTER_SETTLE_MS) {
+                await this.pushStateUpdate(device);
+            }
             return;
         }
 
-        if (this.cachedUUIDs.has(device.id)) {
-            // Already restored from cache by HB2 — handlers re-attached. Just track and push state.
-            this.log.debug(`[Matter] Restored from cache: ${device.name}`);
-            this.registeredUUIDs.add(device.id);
-            await this.pushStateUpdate(device);
-            return;
+        const fromCache = this.cachedUUIDs.has(device.id);
+        if (fromCache) {
+            this.log.debug(`[Matter] Restoring cached accessory: ${device.name}`);
+        } else {
+            this.log.info(`[Matter] Registering new accessory: ${device.name} (${device.type})`);
         }
 
-        this.log.info(`[Matter] Registering new accessory: ${device.name} (${device.type})`);
         try {
             await this.api.matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
             this.registeredUUIDs.add(device.id);
+            this.registeredAt.set(device.id, Date.now());
             this.log.info(`[Matter] Registered: ${device.name}`);
+            // Do NOT push state immediately — registerPlatformAccessories is fire-and-forget on the
+            // API side (emits an event, doesn't await commit). The initial clusters payload in the
+            // MatterAccessory already carries the current state, so the next status update will
+            // catch up after REGISTER_SETTLE_MS.
         } catch (err) {
-            this.log.warn(`[Matter] Failed to register ${device.name}: ${err instanceof Error ? err.message : String(err)}`);
+            this.failedUUIDs.add(device.id);
+            this.log.warn(`[Matter] Failed to register ${device.name} — will not retry this session: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
     public async updateAccessoryState(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
+        // Skip devices that we've already failed to register — avoids log spam.
+        if (this.failedUUIDs.has(device.id)) return;
         // Lazy registration: an HAP status update can arrive before the WS "discovered" callback,
-        // especially for accessories already in HAP cache. Register on the fly so we don't miss
-        // any device. Both paths use addOrUpdateAccessory which is idempotent (registeredUUIDs gate).
+        // especially for accessories already in HAP cache. Register on the fly so we don't miss any.
         if (!this.registeredUUIDs.has(device.id)) {
             await this.addOrUpdateAccessory(device);
+            return;
+        }
+        // Skip state pushes during the IPC settle window — the registration event hasn't been
+        // processed by the Matter server yet, so updateAccessoryState would fail with "not found".
+        const registeredAt = this.registeredAt.get(device.id) ?? 0;
+        if (Date.now() - registeredAt < MatterAccessoryRegistry.REGISTER_SETTLE_MS) {
             return;
         }
         await this.pushStateUpdate(device);
