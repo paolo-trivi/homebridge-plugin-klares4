@@ -25,6 +25,7 @@ function silentLog() {
 
 function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
     const registered = [];
+    const queryable = new Set();
     const updates = [];
     const metadataUpdates = [];
     const unregistered = [];
@@ -36,6 +37,9 @@ function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
                 if (registerImpl) {
                     const res = registerImpl(a);
                     if (res === 'throw') throw new Error('synthetic registration failure');
+                    if (res !== 'missing-state') queryable.add(a.UUID);
+                } else {
+                    queryable.add(a.UUID);
                 }
                 registered.push({ UUID: a.UUID, displayName: a.displayName, deviceType: a.deviceType });
             }
@@ -57,9 +61,15 @@ function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
             if (updateImpl) updateImpl(uuid, clusterName, attributes, partId);
             updates.push({ uuid, clusterName, attributes, partId });
         },
+        getAccessoryState: async (uuid) => {
+            return queryable.has(uuid) ? {} : undefined;
+        },
         unregisterPlatformAccessories: async (_p, _pl, accessories) => {
             if (unregisterImpl) unregisterImpl(accessories);
-            for (const a of accessories) unregistered.push(a.UUID);
+            for (const a of accessories) {
+                queryable.delete(a.UUID);
+                unregistered.push(a.UUID);
+            }
         },
     };
 
@@ -200,6 +210,30 @@ test('thermostat: falls back to TemperatureSensor when matter rejects the Thermo
     assert.equal(registered[0].deviceType._t, 'TemperatureSensor');
     await delay(2100);
     assert.equal(registry.getStatus('thermostat_60'), 'registered');
+});
+
+test('thermostat: async missing registration falls back before state updates', async () => {
+    let missingOnce = false;
+    const { api, registered, updates } = makeApi({
+        registerImpl: (acc) => {
+            if (!missingOnce && acc.deviceType._t === 'Thermostat') {
+                missingOnce = true;
+                return 'missing-state';
+            }
+            return undefined;
+        },
+    });
+    const registry = new MatterAccessoryRegistry(api, silentLog(), () => undefined);
+    await registry.addOrUpdateAccessory(thermostatDevice('thermostat_async_missing'));
+    await registry.updateAccessoryState(thermostatDevice('thermostat_async_missing', { currentTemperature: 19.5 }));
+    await delay(4300);
+
+    assert.equal(registry.getStatus('thermostat_async_missing'), 'registered');
+    assert.equal(registered[0].deviceType._t, 'Thermostat');
+    assert.equal(registered[1].deviceType._t, 'TemperatureSensor');
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].clusterName, 'temperatureMeasurement');
+    assert.equal(updates[0].attributes.measuredValue, 1950);
 });
 
 test('rediscovery refreshes cached Matter identity metadata when display name changes', async () => {
