@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-05-19
+
+### Fixed (Matter)
+
+- Cache-resume path now trusts the Homebridge accessory cache instead of waiting up to 10s on `getAccessoryState` to confirm the Matter endpoint is ready. With ~80 cached accessories the matter.js endpoint restore is staggered and the previous behaviour produced spurious `[Matter] cache resume probe timed out … re-registering` warnings and slow boot. The new path does a brief best-effort probe (2s) but always marks the accessory `registered`; state updates still flow through the queue, which absorbs transient endpoint-not-ready errors. No effect on Apple Home rooms/associations (same UUID, no unregister).
+- Bumped the default register-probe timeout from 10s to 30s for the genuine fresh-register path, so first-time accessory creation on slow systems doesn't fall back to recovery prematurely. Override via `KLARES4_MATTER_REGISTER_TIMEOUT_MS`.
+
 ## [2.1.0] - 2026-05-19
 
 Stable release of the Homebridge 2.0 + Matter compatibility track. Aggregates
