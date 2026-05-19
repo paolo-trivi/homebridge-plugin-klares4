@@ -43,7 +43,15 @@ function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
                 } else {
                     queryable.add(a.UUID);
                 }
-                registered.push({ UUID: a.UUID, displayName: a.displayName, deviceType: a.deviceType });
+                registered.push({
+                    UUID: a.UUID,
+                    displayName: a.displayName,
+                    manufacturer: a.manufacturer,
+                    model: a.model,
+                    serialNumber: a.serialNumber,
+                    firmwareRevision: a.firmwareRevision,
+                    deviceType: a.deviceType,
+                });
             }
         },
         updatePlatformAccessories: async (accessories) => {
@@ -131,11 +139,11 @@ test('addOrUpdateAccessory: register → pending → settled → registered', as
     assert.equal(registry.getStatus('light_1'), 'pending');
     await delay(2100); // > MATTER_REGISTER_SETTLE_MS
     assert.equal(registry.getStatus('light_1'), 'registered');
-    assert.equal(metadataUpdates.length, 1);
-    assert.equal(metadataUpdates[0].manufacturer, 'Ksenia');
-    assert.equal(metadataUpdates[0].model, 'Lares4 light');
-    assert.equal(metadataUpdates[0].serialNumber, 'light_1');
-    assert.match(metadataUpdates[0].firmwareRevision, /^\d+\.\d+\.\d+$/);
+    assert.equal(metadataUpdates.length, 0, 'must not call updatePlatformAccessories because it drops endpoints in HB2');
+    assert.equal(registered[0].manufacturer, 'Ksenia');
+    assert.equal(registered[0].model, 'Lares4 light');
+    assert.equal(registered[0].serialNumber, 'light_1');
+    assert.match(registered[0].firmwareRevision, /^\d+\.\d+\.\d+$/);
 });
 
 test('status updates received during the settle window are queued, not pushed', async () => {
@@ -241,7 +249,7 @@ test('thermostat: async missing registration falls back before state updates', a
     assert.equal(updates[0].attributes.measuredValue, 1950);
 });
 
-test('rediscovery refreshes cached Matter identity metadata when display name changes', async () => {
+test('rediscovery updates in-memory Matter identity without updatePlatformAccessories', async () => {
     const { api, metadataUpdates } = makeApi();
     const registry = new MatterAccessoryRegistry(api, silentLog(), () => undefined);
     await registry.addOrUpdateAccessory(lightDevice('light_meta'));
@@ -255,11 +263,7 @@ test('rediscovery refreshes cached Matter identity metadata when display name ch
         ...lightDevice('light_meta', { on: false }),
         name: 'Luce Sala',
     });
-    assert.equal(metadataUpdates.length, 1);
-    assert.equal(metadataUpdates[0].displayName, 'Luce Sala');
-    assert.equal(metadataUpdates[0].manufacturer, 'Ksenia');
-    assert.equal(metadataUpdates[0].model, 'Lares4 light');
-    assert.equal(metadataUpdates[0].serialNumber, 'light_meta');
+    assert.equal(metadataUpdates.length, 0, 'metadata changes must not overwrite Homebridge internal endpoint state');
 });
 
 test('thermostat fallback: state updates go to temperatureMeasurement, not thermostat cluster', async () => {

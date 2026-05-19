@@ -213,7 +213,6 @@ export class MatterAccessoryRegistry {
         reg.registeredAt = Date.now();
         this.stateUpdateQueue.markReadyAfterBootstrap(reg);
         this.log.info(`[Matter] registered: ${reg.displayName}`);
-        await this.updateCachedAccessoryMetadata(reg);
 
         this.stateUpdateQueue.scheduleFlush(uuid);
     }
@@ -287,7 +286,6 @@ export class MatterAccessoryRegistry {
 
         reg.matterAccessory = matterAccessory;
         reg.displayName = matterAccessory.displayName;
-        await this.updateCachedAccessoryMetadata(reg);
     }
 
     private hasMetadataChanged(previous: MatterAccessory, next: MatterAccessory): boolean {
@@ -296,15 +294,6 @@ export class MatterAccessoryRegistry {
             || previous.model !== next.model
             || previous.serialNumber !== next.serialNumber
             || previous.firmwareRevision !== next.firmwareRevision;
-    }
-
-    private async updateCachedAccessoryMetadata(reg: MatterRegistration): Promise<void> {
-        try {
-            await this.api.matter!.updatePlatformAccessories([reg.matterAccessory]);
-            this.log.debug(`[Matter] metadata cache refreshed: ${reg.displayName}`);
-        } catch (err) {
-            this.log.debug(`[Matter] metadata cache refresh failed for ${reg.displayName}: ${this.fmtErr(err)}`);
-        }
     }
 
     private buildUpdatesFor(device: KseniaDevice): PendingMatterStateUpdate[] {
