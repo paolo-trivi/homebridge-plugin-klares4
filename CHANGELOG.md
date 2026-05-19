@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-05-19
+
+### Fixed (Matter, critical)
+
+- Always call `registerPlatformAccessories` for every device on every boot, including UUIDs already loaded via `configureMatterAccessory`. The 2.1.0 "cache resume" optimisation (skip register for cached UUIDs) was wrong: the Homebridge MatterServer keeps a runtime accessory map populated only on register; the matter.js storage holds fabric/ACL/endpoint state but is not enough on its own. Without re-register at boot, every subsequent `updateAccessoryState` failed with `Accessory <UUID> not found or not registered` and Apple Home saw no devices. Apple Home rooms/automations are preserved because the same UUID is reused.
+
 ## [2.1.1] - 2026-05-19
 
 ### Fixed (Matter)

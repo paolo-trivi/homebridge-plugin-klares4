@@ -163,14 +163,14 @@ export class MatterAccessoryRegistry {
         this.registrations.set(device.id, reg);
 
         const fromCache = this.cachedUUIDs.has(device.id);
-        if (fromCache) {
-            this.log.info(`[Matter] resumed from cache: ${device.name} (${device.type})${persistedFallback ? ' [fallback]' : ''}`);
-            // The Matter storage already holds the endpoint — skip register, just probe.
-            void this.completeRegistration(device.id, /*skipRegister=*/ true);
-            return;
-        }
-
-        this.log.info(`[Matter] register requested: ${device.name} (${device.type})${persistedFallback ? ' [fallback]' : ''}`);
+        this.log.info(`[Matter] register requested: ${device.name} (${device.type})${fromCache ? ' [cache restore]' : ''}${persistedFallback ? ' [fallback]' : ''}`);
+        // We must always call registerPlatformAccessories — the MatterServer keeps
+        // a runtime accessory map that is populated only on register. The Homebridge
+        // accessory cache (configureMatterAccessory) is necessary but NOT sufficient:
+        // without register, `updateAccessoryState` will fail with
+        // `Accessory <UUID> not found or not registered` even though the matter.js
+        // storage still holds the fabric/ACL. The same UUID is reused, so Apple Home
+        // rooms and automations survive the re-register.
         try {
             await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
         } catch (err) {
@@ -180,28 +180,9 @@ export class MatterAccessoryRegistry {
         void this.completeRegistration(device.id);
     }
 
-    private async completeRegistration(uuid: string, skipRegister = false): Promise<void> {
+    private async completeRegistration(uuid: string): Promise<void> {
         const reg = this.registrations.get(uuid);
         if (!reg || reg.status !== 'pending') return;
-
-        // Cache-resume path: trust the Homebridge accessory cache. The Matter
-        // storage holds the endpoint — even if matter.js hasn't restored it yet
-        // at the moment we probe, it will, and our updates go through the
-        // state-update queue anyway (which retries naturally on first failure).
-        // We do a quick best-effort probe to surface the rare "endpoint really
-        // gone" case, but never re-register on a soft timeout.
-        if (skipRegister) {
-            await probeUntilQueryable(this.api, this.log, (e) => this.fmtErr(e), reg, {
-                timeoutMs: 2000,
-                initialDelayMs: 200,
-                maxDelayMs: 500,
-            });
-            reg.status = 'registered';
-            reg.registeredAt = Date.now();
-            this.stateUpdateQueue.markReadyAfterBootstrap(reg);
-            this.stateUpdateQueue.scheduleFlush(uuid);
-            return;
-        }
 
         const queryable = await probeUntilQueryable(this.api, this.log, (e) => this.fmtErr(e), reg);
         if (!queryable) {
