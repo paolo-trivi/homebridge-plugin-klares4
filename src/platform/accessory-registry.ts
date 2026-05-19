@@ -30,6 +30,22 @@ export class AccessoryRegistry {
     public configureAccessory(accessory: PlatformAccessory): void {
         this.options.log.info('Loading accessory from cache:', accessory.displayName);
         this.options.accessories.set(accessory.UUID, accessory);
+
+        // Matter-readiness: the Matter bridge inspects accessories immediately at startup,
+        // before the WS discovery cycle runs. Attach the handler now from cached context.
+        const device = accessory.context?.device as KseniaDevice | undefined;
+        if (!device || !device.id) {
+            this.options.log.warn(
+                `Skipping cache handler init for ${accessory.displayName}: missing device context`,
+            );
+            return;
+        }
+
+        const handler = this.options.createAccessoryHandler(accessory, device);
+        if (handler) {
+            this.options.accessoryHandlers.set(accessory.UUID, handler);
+            this.options.log.debug(`Handler attached from cache for ${device.name}`);
+        }
     }
 
     public addAccessory(device: KseniaDevice): void {
