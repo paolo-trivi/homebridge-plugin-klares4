@@ -38,6 +38,7 @@ interface MatterRegistration {
     uuid: string;
     displayName: string;
     deviceType: string; // Lares4 device type, used for fallback decisions
+    matterAccessory: MatterAccessory;
     status: MatterRegistrationStatus;
     registeredAt?: number;
     failedAt?: number;
@@ -95,6 +96,7 @@ export class MatterAccessoryRegistry {
                     this.enqueueStateFor(device);
                     return;
                 case 'registered':
+                    await this.refreshAccessoryMetadata(device, existing);
                     await this.pushStateUpdate(device);
                     return;
                 case 'failed':
@@ -175,6 +177,7 @@ export class MatterAccessoryRegistry {
             uuid: device.id,
             displayName: device.name,
             deviceType: device.type,
+            matterAccessory,
             status: 'pending',
             pendingStateUpdates: [],
         };
@@ -203,6 +206,7 @@ export class MatterAccessoryRegistry {
         reg.status = 'registered';
         reg.registeredAt = Date.now();
         this.log.info(`[Matter] registered: ${reg.displayName}`);
+        await this.updateCachedAccessoryMetadata(reg);
 
         if (reg.pendingStateUpdates.length === 0) return;
 
@@ -238,6 +242,7 @@ export class MatterAccessoryRegistry {
             try {
                 await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [fallback]);
                 this.thermostatFallbackUUIDs.add(device.id);
+                reg.matterAccessory = fallback;
                 this.log.debug(`[Matter] settle started (${MATTER_REGISTER_SETTLE_MS}ms): ${device.name} [fallback]`);
                 setTimeout(() => { void this.completeRegistration(device.id); }, MATTER_REGISTER_SETTLE_MS);
                 return;
@@ -281,6 +286,38 @@ export class MatterAccessoryRegistry {
             else reg.pendingStateUpdates.push(u);
         }
         this.log.debug(`[Matter] update queued: ${device.name} (pending=${reg.pendingStateUpdates.length})`);
+    }
+
+    private async refreshAccessoryMetadata(device: KseniaDevice, reg: MatterRegistration): Promise<void> {
+        const matterAccessory = deviceToMatterAccessory(device, {
+            api: this.api,
+            log: this.log,
+            getWsClient: this.getWsClient,
+        });
+        if (!matterAccessory) return;
+
+        if (!this.hasMetadataChanged(reg.matterAccessory, matterAccessory)) return;
+
+        reg.matterAccessory = matterAccessory;
+        reg.displayName = matterAccessory.displayName;
+        await this.updateCachedAccessoryMetadata(reg);
+    }
+
+    private hasMetadataChanged(previous: MatterAccessory, next: MatterAccessory): boolean {
+        return previous.displayName !== next.displayName
+            || previous.manufacturer !== next.manufacturer
+            || previous.model !== next.model
+            || previous.serialNumber !== next.serialNumber
+            || previous.firmwareRevision !== next.firmwareRevision;
+    }
+
+    private async updateCachedAccessoryMetadata(reg: MatterRegistration): Promise<void> {
+        try {
+            await this.api.matter!.updatePlatformAccessories([reg.matterAccessory]);
+            this.log.debug(`[Matter] metadata cache refreshed: ${reg.displayName}`);
+        } catch (err) {
+            this.log.debug(`[Matter] metadata cache refresh failed for ${reg.displayName}: ${this.fmtErr(err)}`);
+        }
     }
 
     private buildUpdatesFor(device: KseniaDevice): PendingMatterStateUpdate[] {

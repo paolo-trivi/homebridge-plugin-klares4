@@ -26,6 +26,7 @@ function silentLog() {
 function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
     const registered = [];
     const updates = [];
+    const metadataUpdates = [];
     const unregistered = [];
 
     const matter = {
@@ -39,6 +40,19 @@ function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
                 registered.push({ UUID: a.UUID, displayName: a.displayName, deviceType: a.deviceType });
             }
         },
+        updatePlatformAccessories: async (accessories) => {
+            for (const a of accessories) {
+                metadataUpdates.push({
+                    UUID: a.UUID,
+                    displayName: a.displayName,
+                    manufacturer: a.manufacturer,
+                    model: a.model,
+                    serialNumber: a.serialNumber,
+                    firmwareRevision: a.firmwareRevision,
+                    deviceType: a.deviceType,
+                });
+            }
+        },
         updateAccessoryState: async (uuid, clusterName, attributes, partId) => {
             if (updateImpl) updateImpl(uuid, clusterName, attributes, partId);
             updates.push({ uuid, clusterName, attributes, partId });
@@ -50,7 +64,7 @@ function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
     };
 
     const api = { matter };
-    return { api, registered, updates, unregistered };
+    return { api, registered, updates, metadataUpdates, unregistered };
 }
 
 function lightDevice(id = 'light_1', extras = {}) {
@@ -95,13 +109,18 @@ test('does not crash when api.matter is undefined', async () => {
 });
 
 test('addOrUpdateAccessory: register → pending → settled → registered', async () => {
-    const { api, registered } = makeApi();
+    const { api, registered, metadataUpdates } = makeApi();
     const registry = new MatterAccessoryRegistry(api, silentLog(), () => undefined);
     await registry.addOrUpdateAccessory(lightDevice());
     assert.equal(registered.length, 1);
     assert.equal(registry.getStatus('light_1'), 'pending');
     await delay(2100); // > MATTER_REGISTER_SETTLE_MS
     assert.equal(registry.getStatus('light_1'), 'registered');
+    assert.equal(metadataUpdates.length, 1);
+    assert.equal(metadataUpdates[0].manufacturer, 'Ksenia');
+    assert.equal(metadataUpdates[0].model, 'Lares4 light');
+    assert.equal(metadataUpdates[0].serialNumber, 'light_1');
+    assert.match(metadataUpdates[0].firmwareRevision, /^\d+\.\d+\.\d+$/);
 });
 
 test('status updates received during the settle window are queued, not pushed', async () => {
@@ -181,6 +200,27 @@ test('thermostat: falls back to TemperatureSensor when matter rejects the Thermo
     assert.equal(registered[0].deviceType._t, 'TemperatureSensor');
     await delay(2100);
     assert.equal(registry.getStatus('thermostat_60'), 'registered');
+});
+
+test('rediscovery refreshes cached Matter identity metadata when display name changes', async () => {
+    const { api, metadataUpdates } = makeApi();
+    const registry = new MatterAccessoryRegistry(api, silentLog(), () => undefined);
+    await registry.addOrUpdateAccessory(lightDevice('light_meta'));
+    await delay(2100);
+    metadataUpdates.length = 0;
+
+    await registry.addOrUpdateAccessory(lightDevice('light_meta', { on: false }));
+    assert.equal(metadataUpdates.length, 0, 'unchanged metadata should not rewrite the cache');
+
+    await registry.addOrUpdateAccessory({
+        ...lightDevice('light_meta', { on: false }),
+        name: 'Luce Sala',
+    });
+    assert.equal(metadataUpdates.length, 1);
+    assert.equal(metadataUpdates[0].displayName, 'Luce Sala');
+    assert.equal(metadataUpdates[0].manufacturer, 'Ksenia');
+    assert.equal(metadataUpdates[0].model, 'Lares4 light');
+    assert.equal(metadataUpdates[0].serialNumber, 'light_meta');
 });
 
 test('thermostat fallback: state updates go to temperatureMeasurement, not thermostat cluster', async () => {
