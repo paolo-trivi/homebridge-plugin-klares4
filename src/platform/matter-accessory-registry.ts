@@ -11,6 +11,7 @@ import {
     registerFallbackAccessory,
     type MatterRegistration,
 } from './matter-registration-recovery';
+import { MatterStateUpdateQueue } from './matter-state-update-queue';
 
 // ---------------------------------------------------------------------------
 // Configuration knobs
@@ -46,6 +47,7 @@ export class MatterAccessoryRegistry {
     private readonly cachedUUIDs: Set<string> = new Set();
     /** Full registration state, keyed by Lares device id (also the Matter UUID). */
     private readonly registrations: Map<string, MatterRegistration> = new Map();
+    private readonly stateUpdateQueue: MatterStateUpdateQueue;
     /** UUIDs we've seen in the current discovery cycle — used to prune stale ones. */
     private activeDiscoveredUUIDs: Set<string> = new Set();
     /** UUIDs that fell back to TemperatureSensor — drive the alternate state-push path. */
@@ -55,7 +57,14 @@ export class MatterAccessoryRegistry {
         private readonly api: API,
         private readonly log: Logger,
         private readonly getWsClient: () => KseniaWebSocketClient | undefined,
-    ) {}
+    ) {
+        this.stateUpdateQueue = new MatterStateUpdateQueue(
+            this.api,
+            this.log,
+            this.registrations,
+            (err) => this.fmtErr(err),
+        );
+    }
 
     public get isEnabled(): boolean {
         return !!this.api.matter;
@@ -205,17 +214,7 @@ export class MatterAccessoryRegistry {
         this.log.info(`[Matter] registered: ${reg.displayName}`);
         await this.updateCachedAccessoryMetadata(reg);
 
-        if (reg.pendingStateUpdates.length === 0) return;
-
-        const flushed = reg.pendingStateUpdates.splice(0);
-        this.log.debug(`[Matter] pending updates flushed: ${reg.displayName} (${flushed.length})`);
-        for (const update of flushed) {
-            try {
-                await this.api.matter!.updateAccessoryState(uuid, update.clusterName, update.attributes, update.partId);
-            } catch (err) {
-                this.log.debug(`[Matter] post-settle update error for ${reg.displayName}: ${this.fmtErr(err)}`);
-            }
-        }
+        this.stateUpdateQueue.scheduleFlush(uuid, 0);
     }
 
     /**
@@ -251,14 +250,12 @@ export class MatterAccessoryRegistry {
     // -----------------------------------------------------------------------
 
     private async pushStateUpdate(device: KseniaDevice): Promise<void> {
+        const reg = this.registrations.get(device.id);
+        if (!reg) return;
+
         const updates = this.buildUpdatesFor(device);
-        const matter = this.api.matter!;
         for (const u of updates) {
-            try {
-                await matter.updateAccessoryState(device.id, u.clusterName, u.attributes, u.partId);
-            } catch (err) {
-                this.log.debug(`[Matter] update failed for ${device.name} (${u.clusterName}): ${this.fmtErr(err)}`);
-            }
+            await this.stateUpdateQueue.pushOrQueue(reg, u);
         }
     }
 

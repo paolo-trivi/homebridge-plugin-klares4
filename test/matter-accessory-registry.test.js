@@ -105,6 +105,9 @@ function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const SETTLE_AND_UPDATE_FLUSH_MS = 7200;
+const FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS = 9400;
+
 // ---------------------------------------------------------------------------
 
 test('does not crash when api.matter is undefined', async () => {
@@ -150,7 +153,7 @@ test('queued updates are flushed after the settle window', async () => {
     await registry.addOrUpdateAccessory(lightDevice('light_3'));
     await registry.updateAccessoryState({ ...lightDevice('light_3'), status: { on: false, dimmable: false } });
     assert.equal(updates.length, 0);
-    await delay(2100);
+    await delay(SETTLE_AND_UPDATE_FLUSH_MS);
     assert.ok(updates.length >= 1, 'queued update should be flushed after settle');
     assert.equal(updates[0].uuid, 'light_3');
     assert.equal(updates[0].clusterName, 'onOff');
@@ -166,7 +169,7 @@ test('queue dedupes by (clusterName, partId): only latest payload is kept', asyn
     await registry.updateAccessoryState({ ...lightDevice('light_4'), status: { on: true, dimmable: false } });
     await registry.updateAccessoryState({ ...lightDevice('light_4'), status: { on: false, dimmable: false } });
     assert.equal(registry.getPendingCount('light_4'), 1);
-    await delay(2100);
+    await delay(SETTLE_AND_UPDATE_FLUSH_MS);
     const onOffUpdates = updates.filter((u) => u.uuid === 'light_4' && u.clusterName === 'onOff');
     assert.equal(onOffUpdates.length, 1);
     assert.deepEqual(onOffUpdates[0].attributes, { onOff: false });
@@ -226,7 +229,7 @@ test('thermostat: async missing registration falls back before state updates', a
     const registry = new MatterAccessoryRegistry(api, silentLog(), () => undefined);
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_async_missing'));
     await registry.updateAccessoryState(thermostatDevice('thermostat_async_missing', { currentTemperature: 19.5 }));
-    await delay(4300);
+    await delay(FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
 
     assert.equal(registry.getStatus('thermostat_async_missing'), 'registered');
     assert.equal(registered[0].deviceType._t, 'Thermostat');
