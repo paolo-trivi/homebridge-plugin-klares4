@@ -2,10 +2,14 @@ import type { API, Logger } from 'homebridge';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { PendingMatterStateUpdate } from './matter-state-updates';
 
-const MATTER_STATE_UPDATE_RETRY_MS = 5000;
-const MATTER_STATE_UPDATE_RETRY_LIMIT = 6;
+const DEFAULT_MATTER_STATE_UPDATE_BOOTSTRAP_MS = 30000;
+const MATTER_STATE_UPDATE_BOOTSTRAP_MS = Number(
+    process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS ?? DEFAULT_MATTER_STATE_UPDATE_BOOTSTRAP_MS,
+);
 
 export class MatterStateUpdateQueue {
+    private readonly flushTimers = new Map<string, NodeJS.Timeout>();
+
     constructor(
         private readonly api: API,
         private readonly log: Logger,
@@ -13,55 +17,60 @@ export class MatterStateUpdateQueue {
         private readonly fmtErr: (err: unknown) => string,
     ) {}
 
+    public markReadyAfterBootstrap(reg: MatterRegistration): void {
+        reg.stateUpdatesReadyAt = Date.now() + MATTER_STATE_UPDATE_BOOTSTRAP_MS;
+    }
+
     public async pushOrQueue(
         reg: MatterRegistration,
         update: PendingMatterStateUpdate,
-        attempt = 0,
     ): Promise<void> {
-        if (!await this.isClusterQueryable(reg, update)) {
+        if (!this.isReadyForStateUpdates(reg)) {
             this.queue(reg, update);
-            this.scheduleFlush(reg.uuid, attempt + 1);
+            this.scheduleFlush(reg.uuid);
             return;
         }
 
-        this.api.matter!.updateAccessoryState(reg.uuid, update.clusterName, update.attributes, update.partId);
+        await this.updateAccessoryState(reg, update);
     }
 
-    public scheduleFlush(uuid: string, attempt: number): void {
+    public scheduleFlush(uuid: string): void {
         const reg = this.registrations.get(uuid);
         if (!reg || reg.pendingStateUpdates.length === 0) return;
+        if (this.flushTimers.has(uuid)) return;
 
-        if (attempt > MATTER_STATE_UPDATE_RETRY_LIMIT) {
-            this.log.warn(
-                `[Matter] pending state updates dropped for ${reg.displayName}: Matter endpoint was not ready `
-                + `after ${MATTER_STATE_UPDATE_RETRY_LIMIT} retries.`,
-            );
-            reg.pendingStateUpdates = [];
+        const delay = Math.max(0, (reg.stateUpdatesReadyAt ?? Date.now()) - Date.now());
+        const timer = setTimeout(() => {
+            this.flushTimers.delete(uuid);
+            void this.flush(uuid);
+        }, delay);
+        this.flushTimers.set(uuid, timer);
+    }
+
+    private async flush(uuid: string): Promise<void> {
+        const reg = this.registrations.get(uuid);
+        if (!reg || reg.status !== 'registered' || reg.pendingStateUpdates.length === 0) return;
+        if (!this.isReadyForStateUpdates(reg)) {
+            this.scheduleFlush(uuid);
             return;
         }
 
-        const delay = attempt === 0 ? MATTER_STATE_UPDATE_RETRY_MS : MATTER_STATE_UPDATE_RETRY_MS * attempt;
-        setTimeout(() => { void this.flush(uuid, attempt); }, delay);
-    }
-
-    private async flush(uuid: string, attempt: number): Promise<void> {
-        const reg = this.registrations.get(uuid);
-        if (!reg || reg.status !== 'registered' || reg.pendingStateUpdates.length === 0) return;
-
         const pending = reg.pendingStateUpdates.splice(0);
-        this.log.debug(`[Matter] pending updates flush attempt ${attempt + 1}: ${reg.displayName} (${pending.length})`);
+        this.log.debug(`[Matter] pending updates flush: ${reg.displayName} (${pending.length})`);
         for (const update of pending) {
-            await this.pushOrQueue(reg, update, attempt);
+            await this.updateAccessoryState(reg, update);
         }
     }
 
-    private async isClusterQueryable(reg: MatterRegistration, update: PendingMatterStateUpdate): Promise<boolean> {
+    private isReadyForStateUpdates(reg: MatterRegistration): boolean {
+        return !reg.stateUpdatesReadyAt || Date.now() >= reg.stateUpdatesReadyAt;
+    }
+
+    private async updateAccessoryState(reg: MatterRegistration, update: PendingMatterStateUpdate): Promise<void> {
         try {
-            const current = await this.api.matter!.getAccessoryState(reg.uuid, update.clusterName, update.partId);
-            return current !== undefined;
+            await this.api.matter!.updateAccessoryState(reg.uuid, update.clusterName, update.attributes, update.partId);
         } catch (err) {
-            this.log.debug(`[Matter] state probe failed for ${reg.displayName} (${update.clusterName}): ${this.fmtErr(err)}`);
-            return false;
+            this.log.debug(`[Matter] state update failed for ${reg.displayName} (${update.clusterName}): ${this.fmtErr(err)}`);
         }
     }
 

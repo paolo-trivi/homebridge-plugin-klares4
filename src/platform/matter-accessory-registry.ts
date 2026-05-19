@@ -211,10 +211,11 @@ export class MatterAccessoryRegistry {
 
         reg.status = 'registered';
         reg.registeredAt = Date.now();
+        this.stateUpdateQueue.markReadyAfterBootstrap(reg);
         this.log.info(`[Matter] registered: ${reg.displayName}`);
         await this.updateCachedAccessoryMetadata(reg);
 
-        this.stateUpdateQueue.scheduleFlush(uuid, 0);
+        this.stateUpdateQueue.scheduleFlush(uuid);
     }
 
     /**

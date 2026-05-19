@@ -14,6 +14,7 @@ export interface MatterRegistration {
     matterAccessory: MatterAccessory;
     status: 'pending' | 'registered' | 'failed' | 'skipped';
     registeredAt?: number;
+    stateUpdatesReadyAt?: number;
     failedAt?: number;
     lastError?: string;
     recoveryAttempts: number;

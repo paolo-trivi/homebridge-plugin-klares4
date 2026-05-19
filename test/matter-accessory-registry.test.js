@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS = '1000';
+
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 
 // Mirrors api.matter.deviceTypes — we don't need the real Matter device types, just placeholder
@@ -105,8 +107,8 @@ function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const SETTLE_AND_UPDATE_FLUSH_MS = 7200;
-const FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS = 9400;
+const SETTLE_AND_UPDATE_FLUSH_MS = 3400;
+const FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS = 5600;
 
 // ---------------------------------------------------------------------------
 
@@ -179,7 +181,7 @@ test('post-settle: updates are pushed immediately', async () => {
     const { api, updates } = makeApi();
     const registry = new MatterAccessoryRegistry(api, silentLog(), () => undefined);
     await registry.addOrUpdateAccessory(lightDevice('light_5'));
-    await delay(2100); // settle
+    await delay(SETTLE_AND_UPDATE_FLUSH_MS); // settle + state update bootstrap
     updates.length = 0;
     await registry.updateAccessoryState({ ...lightDevice('light_5'), status: { on: false, dimmable: false } });
     assert.equal(updates.length, 1);
@@ -272,7 +274,7 @@ test('thermostat fallback: state updates go to temperatureMeasurement, not therm
     });
     const registry = new MatterAccessoryRegistry(api, silentLog(), () => undefined);
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_70'));
-    await delay(2100);
+    await delay(FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
     updates.length = 0;
     await registry.updateAccessoryState(thermostatDevice('thermostat_70', { currentTemperature: 19.5 }));
     assert.equal(updates.length, 1);
