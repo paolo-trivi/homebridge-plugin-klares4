@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-05-19
+
+Stable release of the Homebridge 2.0 + Matter compatibility track. Aggregates
+the work shipped over the `2.1.0-rc.0` … `2.1.0-rc.12` cycle, verified on a
+production Matter-only child bridge (`hap=false`) with 81 Lares4 accessories
+in Apple Home.
+
+Highlights vs `2.0.1`:
+
+- Homebridge 2.0 support with native Matter accessory registration via
+  `api.matter.registerPlatformAccessories` (Thermostat, OnOffLight,
+  DimmableLight, WindowCovering, TemperatureSensor, HumiditySensor,
+  LightSensor, MotionSensor, ContactSensor, OnOffSwitch).
+- Probe-based register settle: state updates are only pushed once
+  `getAccessoryState` confirms the Matter endpoint is queryable.
+- Cache-resume path: accessories already in the Homebridge cache are
+  resumed without re-registering, so controllers (Apple Home, Google
+  Home) no longer see `parts list change` notifications at every
+  restart.
+- Persistent thermostat fallback set (`klares4-matter-fallback.json`):
+  thermostats that fall back to `TemperatureSensor` stay in sync with
+  the Matter storage across restarts.
+- Scenarios and gates are momentary `OnOffSwitch` devices with
+  configurable auto-off (`scenarioAutoOffDelay`, default 500ms).
+- Thermostat presetTypes workaround: `presetTypeFeatures` is now passed
+  as a bitmap object, so matter.js 0.17 accepts the `Thermostat`
+  cluster and thermostats register as full Thermostat devices in
+  Apple Home (setpoint + mode control restored).
+
 ## [2.1.0-rc.12] - 2026-05-19
 
 ### Fixed (Matter)
