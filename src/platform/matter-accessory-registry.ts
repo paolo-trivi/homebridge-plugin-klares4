@@ -184,19 +184,27 @@ export class MatterAccessoryRegistry {
         const reg = this.registrations.get(uuid);
         if (!reg || reg.status !== 'pending') return;
 
+        // Cache-resume path: trust the Homebridge accessory cache. The Matter
+        // storage holds the endpoint — even if matter.js hasn't restored it yet
+        // at the moment we probe, it will, and our updates go through the
+        // state-update queue anyway (which retries naturally on first failure).
+        // We do a quick best-effort probe to surface the rare "endpoint really
+        // gone" case, but never re-register on a soft timeout.
+        if (skipRegister) {
+            await probeUntilQueryable(this.api, this.log, (e) => this.fmtErr(e), reg, {
+                timeoutMs: 2000,
+                initialDelayMs: 200,
+                maxDelayMs: 500,
+            });
+            reg.status = 'registered';
+            reg.registeredAt = Date.now();
+            this.stateUpdateQueue.markReadyAfterBootstrap(reg);
+            this.stateUpdateQueue.scheduleFlush(uuid);
+            return;
+        }
+
         const queryable = await probeUntilQueryable(this.api, this.log, (e) => this.fmtErr(e), reg);
         if (!queryable) {
-            if (skipRegister) {
-                // Cache resume failed — endpoint was lost from storage. Fall back to full register.
-                this.log.warn(`[Matter] cache resume probe timed out for ${reg.displayName}; re-registering.`);
-                try {
-                    await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [reg.matterAccessory]);
-                    void this.completeRegistration(uuid);
-                } catch (err) {
-                    await this.handleRegisterFailure(reg.matterAccessory.context.device as KseniaDevice, err);
-                }
-                return;
-            }
             await handleMissingRegisteredAccessory(reg, this.recoveryDeps());
             return;
         }

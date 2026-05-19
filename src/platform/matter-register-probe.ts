@@ -12,7 +12,7 @@ import { isMatterAccessoryQueryable } from './matter-registration-recovery';
  * Returns `true` if the endpoint became queryable, `false` if the timeout
  * elapsed first (caller decides recovery).
  */
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_POLL_INITIAL_MS = 250;
 const DEFAULT_POLL_MAX_MS = 1000;
 
