@@ -28,8 +28,9 @@ interface RecoveryDeps {
     getWsClient: () => KseniaWebSocketClient | undefined;
     scheduleComplete: (uuid: string) => void;
     fmtErr: (err: unknown) => string;
-    settleMs: number;
     thermostatFallbackEnabled: boolean;
+    momentaryAutoOffMs?: number;
+    onFallbackPersist?: (uuid: string) => void;
 }
 
 export async function isMatterAccessoryQueryable(
@@ -100,19 +101,21 @@ export async function handleMissingRegisteredAccessory(
 export async function registerFallbackAccessory(
     device: KseniaThermostat,
     reg: MatterRegistration,
-    deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'settleMs'>,
+    deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'momentaryAutoOffMs' | 'onFallbackPersist'>,
 ): Promise<void> {
     const fallback = mapThermostatAsTemperatureSensor(device, {
         api: deps.api,
         log: deps.log,
         getWsClient: deps.getWsClient,
+        momentaryAutoOffMs: deps.momentaryAutoOffMs,
     });
     await deps.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [fallback]);
     deps.thermostatFallbackUUIDs.add(device.id);
+    deps.onFallbackPersist?.(device.id);
     reg.matterAccessory = fallback;
     reg.status = 'pending';
     reg.recoveryAttempts = 0;
     reg.pendingStateUpdates = buildStateUpdates(device, true);
-    deps.log.debug(`[Matter] settle started (${deps.settleMs}ms): ${device.name} [fallback]`);
+    deps.log.debug(`[Matter] fallback registered, probing: ${device.name}`);
     deps.scheduleComplete(device.id);
 }

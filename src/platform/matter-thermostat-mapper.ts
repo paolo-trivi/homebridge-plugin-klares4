@@ -92,18 +92,11 @@ export function domainModeToMatterSystemMode(mode: DomainThermostatMode | undefi
 
 /**
  * matter.js 0.17 alpha applies the Presets-feature schema validation to the
- * Thermostat cluster even when Homebridge composes the device type with
- * `presets: false` (the `ThermostatBaseServer` enables the feature internally to
- * provide the default implementation, then exports the class with the default
- * feature set — but the schema-bound validators remain anchored to the base).
- *
- * Result: registering a Thermostat without `presetTypes` triggers
- *   [constraint] Validating ...thermostat.state.presetTypes:
- *   Constraint "1 to 7": Array length 0 is not within bounds defined by constraint
- *
- * Workaround: ship a single "Occupied" preset slot. The values mirror what
- * matter.js expects for `Thermostat.PresetType[]`. Remove this once
- * matter.js gates the validator on the active feature set.
+ * Thermostat cluster even when the device type is composed without the Presets
+ * feature, so `presetTypes` must be present with at least one entry. The
+ * `presetTypeFeatures` field is a bitmap and must be passed as an object —
+ * matter.js's BitmapManager rejects raw numbers ("Cannot manage number because
+ * it is not a bitmap object").
  *
  * Tracking: https://github.com/project-chip/matter.js/issues (search "presetTypes")
  */
@@ -114,7 +107,7 @@ export function getThermostatPresetWorkaroundAttributes(): Record<string, unknow
             {
                 presetScenario: PRESET_SCENARIO_OCCUPIED,
                 numberOfPresets: 1,
-                presetTypeFeatures: 0, // bitmap8: no automatic, no supportsNames
+                presetTypeFeatures: { automatic: false, supportsNames: false },
             },
         ],
     };

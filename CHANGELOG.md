@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0-rc.12] - 2026-05-19
+
+### Fixed (Matter)
+
+- Thermostat registration: `presetTypeFeatures` now passed as a bitmap object `{ automatic: false, supportsNames: false }` instead of the number `0`, which matter.js 0.17 rejected with `Cannot manage number because it is not a bitmap object`. Thermostats now register as proper Matter `Thermostat` devices (not as `TemperatureSensor` fallback), restoring setpoint and mode control from Apple Home.
+- Register/update race condition: replaced the fixed 2-second settle timer with a probe-based loop (`getAccessoryState` with exponential backoff, configurable via `KLARES4_MATTER_REGISTER_TIMEOUT_MS` / `KLARES4_MATTER_REGISTER_POLL_MS` / `KLARES4_MATTER_REGISTER_POLL_MAX_MS`). State updates are no longer pushed before the Matter endpoint is actually ready, eliminating `MatterDeviceError: Accessory ... not registered or missing endpoint` at startup.
+- Scenarios stuck in `ON` state: scenarios now expose `OnOffSwitch` and auto-reset to off after a configurable delay (`scenarioAutoOffDelay`, default 500ms) so subsequent triggers work as expected.
+- Gate handler asymmetry: gates now use `OnOffSwitch` with momentary semantics (single impulse + auto-off) instead of `OnOffOutlet` with dual toggle.
+- Full re-registration on every restart: accessories already present in the Homebridge cache are now resumed via probe instead of re-registered, preventing controllers (Apple Home, Google Home) from seeing 81 spurious `parts list change` notifications.
+- Fallback persistence: thermostats that fall back to `TemperatureSensor` are persisted to `klares4-matter-fallback.json` so the plugin and the Matter storage stay in sync across restarts (no more cluster mismatch between an endpoint stored as `TemperatureSensor` and the plugin still pushing to the `thermostat` cluster).
+- 30-second state-update bootstrap delay reduced to 0 by default (env override still available); combined with probe-based settle, system temperature sensors now appear in Apple Home within seconds of startup.
+
 ## [2.0.1] - 2026-03-13
 
 ### Added

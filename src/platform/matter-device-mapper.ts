@@ -42,6 +42,20 @@ interface MapperDeps {
     api: API;
     log: import('homebridge').Logger;
     getWsClient: () => KseniaWebSocketClient | undefined;
+    /** Auto-off delay (ms) for momentary OnOff devices (scenarios, gates). Default 500ms. */
+    momentaryAutoOffMs?: number;
+}
+
+const DEFAULT_MOMENTARY_AUTO_OFF_MS = 500;
+
+function scheduleMomentaryAutoOff(uuid: string, deps: MapperDeps): void {
+    const delay = deps.momentaryAutoOffMs ?? DEFAULT_MOMENTARY_AUTO_OFF_MS;
+    setTimeout(() => {
+        deps.api.matter?.updateAccessoryState(uuid, 'onOff', { onOff: false })
+            .catch((err: unknown) => {
+                deps.log.debug(`[Matter] momentary auto-off failed for ${uuid}: ${err instanceof Error ? err.message : String(err)}`);
+            });
+    }, delay);
 }
 
 function baseFields(device: KseniaDevice): Pick<MatterAccessory, 'UUID' | 'displayName' | 'serialNumber' | 'manufacturer' | 'model' | 'firmwareRevision' | 'context'> {
@@ -240,12 +254,15 @@ function mapScenario(device: KseniaScenario, deps: MapperDeps): MatterAccessory 
         ...baseFields(device),
         deviceType: api.matter!.deviceTypes.OnOffSwitch,
         clusters: {
-            onOff: { onOff: device.status.active },
+            onOff: { onOff: false },
         },
         handlers: {
             onOff: {
-                on: async () => { await getWsClient()?.triggerScenario(device.id); },
-                off: async () => { /* stateless trigger */ },
+                on: async () => {
+                    await getWsClient()?.triggerScenario(device.id);
+                    scheduleMomentaryAutoOff(device.id, deps);
+                },
+                off: async () => { /* momentary trigger — no-op */ },
             },
         },
     };
@@ -255,14 +272,17 @@ function mapGate(device: KseniaGate, deps: MapperDeps): MatterAccessory {
     const { api, getWsClient } = deps;
     return {
         ...baseFields(device),
-        deviceType: api.matter!.deviceTypes.OnOffOutlet,
+        deviceType: api.matter!.deviceTypes.OnOffSwitch,
         clusters: {
-            onOff: { onOff: device.status.on },
+            onOff: { onOff: false },
         },
         handlers: {
             onOff: {
-                on: async () => { await getWsClient()?.toggleGate(device.id); },
-                off: async () => { await getWsClient()?.toggleGate(device.id); },
+                on: async () => {
+                    await getWsClient()?.toggleGate(device.id);
+                    scheduleMomentaryAutoOff(device.id, deps);
+                },
+                off: async () => { /* momentary trigger — no-op */ },
             },
         },
     };

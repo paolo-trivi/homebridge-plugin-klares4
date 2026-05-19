@@ -78,11 +78,13 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             updateAccessoryHandler: (handler, device): void =>
                 this.handlerService.updateAccessoryHandler(handler, device),
         });
-        this.matterRegistry = new MatterAccessoryRegistry(
-            this.api,
-            this.log,
-            () => this.wsClient,
-        );
+        this.matterRegistry = new MatterAccessoryRegistry({
+            api: this.api,
+            log: this.log,
+            getWsClient: () => this.wsClient,
+            storagePath: this.api.user.storagePath(),
+            momentaryAutoOffMs: this.config?.scenarioAutoOffDelay,
+        });
 
         if (!config) {
             this.log.error('No configuration found');

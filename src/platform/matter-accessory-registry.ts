@@ -3,61 +3,53 @@ import type { MatterAccessory } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaWebSocketClient } from '../websocket-client';
-import { deviceToMatterAccessory } from './matter-device-mapper';
-import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
+import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } from './matter-device-mapper';
+import { buildStateUpdates } from './matter-state-updates';
 import {
     handleMissingRegisteredAccessory,
-    isMatterAccessoryQueryable,
     registerFallbackAccessory,
     type MatterRegistration,
 } from './matter-registration-recovery';
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
-
-// ---------------------------------------------------------------------------
-// Configuration knobs
-// ---------------------------------------------------------------------------
-
-/**
- * Time to wait between calling `api.matter.registerPlatformAccessories(...)` and
- * trusting that the accessory is queryable via `api.matter.updateAccessoryState(...)`.
- * HB2's register API is fire-and-forget (it just emits an internal event); state
- * updates received in this window are buffered.
- */
-const MATTER_REGISTER_SETTLE_MS = 2000;
+import { MatterFallbackStore } from './matter-fallback-store';
+import { probeUntilQueryable } from './matter-register-probe';
 
 /**
  * Whether to fall back to a Matter TemperatureSensor when registering a real
  * Thermostat fails (typically due to matter.js 0.17 `presetTypes` validation).
- * HAP continues to expose the full Thermostat regardless.
  */
 const MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR = true;
 
-// ---------------------------------------------------------------------------
-// Registration state machine
-// ---------------------------------------------------------------------------
-
 export type MatterRegistrationStatus = 'pending' | 'registered' | 'failed' | 'skipped';
 
-// ---------------------------------------------------------------------------
-// Registry
-// ---------------------------------------------------------------------------
+export interface MatterRegistryDeps {
+    api: API;
+    log: Logger;
+    getWsClient: () => KseniaWebSocketClient | undefined;
+    storagePath: string;
+    momentaryAutoOffMs?: number;
+}
 
 export class MatterAccessoryRegistry {
-    /** UUIDs that HB2 reported to us via `configureMatterAccessory` (cache restore). */
+    private readonly api: API;
+    private readonly log: Logger;
+    private readonly getWsClient: () => KseniaWebSocketClient | undefined;
+    private readonly momentaryAutoOffMs?: number;
     private readonly cachedUUIDs: Set<string> = new Set();
-    /** Full registration state, keyed by Lares device id (also the Matter UUID). */
     private readonly registrations: Map<string, MatterRegistration> = new Map();
     private readonly stateUpdateQueue: MatterStateUpdateQueue;
-    /** UUIDs we've seen in the current discovery cycle — used to prune stale ones. */
     private activeDiscoveredUUIDs: Set<string> = new Set();
-    /** UUIDs that fell back to TemperatureSensor — drive the alternate state-push path. */
     private readonly thermostatFallbackUUIDs: Set<string> = new Set();
+    private readonly fallbackStore: MatterFallbackStore;
 
-    constructor(
-        private readonly api: API,
-        private readonly log: Logger,
-        private readonly getWsClient: () => KseniaWebSocketClient | undefined,
-    ) {
+    constructor(deps: MatterRegistryDeps) {
+        this.api = deps.api;
+        this.log = deps.log;
+        this.getWsClient = deps.getWsClient;
+        this.momentaryAutoOffMs = deps.momentaryAutoOffMs;
+        this.fallbackStore = new MatterFallbackStore(deps.storagePath, deps.log);
+        for (const uuid of this.fallbackStore.load()) this.thermostatFallbackUUIDs.add(uuid);
+
         this.stateUpdateQueue = new MatterStateUpdateQueue(
             this.api,
             this.log,
@@ -69,10 +61,6 @@ export class MatterAccessoryRegistry {
     public get isEnabled(): boolean {
         return !!this.api.matter;
     }
-
-    // -----------------------------------------------------------------------
-    // Lifecycle hooks called by Platform
-    // -----------------------------------------------------------------------
 
     public configureCachedAccessory(accessory: MatterAccessory): void {
         this.cachedUUIDs.add(accessory.UUID);
@@ -89,19 +77,18 @@ export class MatterAccessoryRegistry {
 
         const existing = this.registrations.get(device.id);
         if (existing) {
-            // Already known — either still pending the settle window, registered, failed or skipped.
             switch (existing.status) {
                 case 'pending':
-                    // Queue the latest state; the settle handler will flush it.
                     this.enqueueStateFor(device);
                     return;
                 case 'registered':
                     await this.refreshAccessoryMetadata(device, existing);
-                    await this.pushStateUpdate(device);
+                    this.enqueueStateFor(device);
+                    this.stateUpdateQueue.scheduleFlush(device.id);
                     return;
                 case 'failed':
                 case 'skipped':
-                    return; // silent, we've already logged once
+                    return;
             }
         }
 
@@ -111,25 +98,13 @@ export class MatterAccessoryRegistry {
     public async updateAccessoryState(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
         const existing = this.registrations.get(device.id);
-
         if (!existing) {
-            // First time we see this device — register it (lazy path for HAP-cached devices
-            // whose WS "discovered" callback hasn't fired yet).
             await this.registerAccessory(device);
             return;
         }
-
-        switch (existing.status) {
-            case 'pending':
-                this.enqueueStateFor(device);
-                return;
-            case 'registered':
-                await this.pushStateUpdate(device);
-                return;
-            case 'failed':
-            case 'skipped':
-                return;
-        }
+        if (existing.status === 'failed' || existing.status === 'skipped') return;
+        this.enqueueStateFor(device);
+        this.stateUpdateQueue.scheduleFlush(device.id);
     }
 
     public async pruneStaleAccessories(): Promise<void> {
@@ -145,32 +120,35 @@ export class MatterAccessoryRegistry {
                 this.registrations.delete(uuid);
                 this.cachedUUIDs.delete(uuid);
                 this.thermostatFallbackUUIDs.delete(uuid);
+                this.fallbackStore.remove(uuid);
             } catch (err) {
                 this.log.warn(`[Matter] Failed to unregister ${uuid}: ${this.fmtErr(err)}`);
             }
         }
     }
 
-    /** Test-only introspection: registration status for a given device id. */
     public getStatus(uuid: string): MatterRegistrationStatus | undefined {
         return this.registrations.get(uuid)?.status;
     }
 
-    /** Test-only introspection: queued updates count for a device id. */
     public getPendingCount(uuid: string): number {
         return this.registrations.get(uuid)?.pendingStateUpdates.length ?? 0;
     }
 
-    // -----------------------------------------------------------------------
-    // Registration internals
-    // -----------------------------------------------------------------------
-
-    private async registerAccessory(device: KseniaDevice): Promise<void> {
-        const matterAccessory = deviceToMatterAccessory(device, {
+    private mapperDeps() {
+        return {
             api: this.api,
             log: this.log,
             getWsClient: this.getWsClient,
-        });
+            momentaryAutoOffMs: this.momentaryAutoOffMs,
+        };
+    }
+
+    private async registerAccessory(device: KseniaDevice): Promise<void> {
+        const persistedFallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
+        const matterAccessory = persistedFallback
+            ? mapThermostatAsTemperatureSensor(device as KseniaThermostat, this.mapperDeps())
+            : deviceToMatterAccessory(device, this.mapperDeps());
         if (!matterAccessory) return;
 
         const reg: MatterRegistration = {
@@ -180,55 +158,72 @@ export class MatterAccessoryRegistry {
             matterAccessory,
             status: 'pending',
             recoveryAttempts: 0,
-            pendingStateUpdates: [],
+            pendingStateUpdates: buildStateUpdates(device, persistedFallback),
         };
         this.registrations.set(device.id, reg);
 
         const fromCache = this.cachedUUIDs.has(device.id);
-        this.log.info(`[Matter] register requested: ${device.name} (${device.type})${fromCache ? ' [cache restore]' : ''}`);
+        if (fromCache) {
+            this.log.info(`[Matter] resumed from cache: ${device.name} (${device.type})${persistedFallback ? ' [fallback]' : ''}`);
+            // The Matter storage already holds the endpoint — skip register, just probe.
+            void this.completeRegistration(device.id, /*skipRegister=*/ true);
+            return;
+        }
 
+        this.log.info(`[Matter] register requested: ${device.name} (${device.type})${persistedFallback ? ' [fallback]' : ''}`);
         try {
             await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
         } catch (err) {
             await this.handleRegisterFailure(device, err);
             return;
         }
-
-        this.log.debug(`[Matter] settle started (${MATTER_REGISTER_SETTLE_MS}ms): ${device.name}`);
-        // Don't `await` the settle timer — let the WS event loop continue. Queued updates
-        // are stored on the registration; we flush them when the timer fires.
-        this.scheduleComplete(device.id);
+        void this.completeRegistration(device.id);
     }
 
-    private async completeRegistration(uuid: string): Promise<void> {
+    private async completeRegistration(uuid: string, skipRegister = false): Promise<void> {
         const reg = this.registrations.get(uuid);
         if (!reg || reg.status !== 'pending') return;
 
-        if (!await isMatterAccessoryQueryable(this.api, this.log, (err) => this.fmtErr(err), reg)) {
+        const queryable = await probeUntilQueryable(this.api, this.log, (e) => this.fmtErr(e), reg);
+        if (!queryable) {
+            if (skipRegister) {
+                // Cache resume failed — endpoint was lost from storage. Fall back to full register.
+                this.log.warn(`[Matter] cache resume probe timed out for ${reg.displayName}; re-registering.`);
+                try {
+                    await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [reg.matterAccessory]);
+                    void this.completeRegistration(uuid);
+                } catch (err) {
+                    await this.handleRegisterFailure(reg.matterAccessory.context.device as KseniaDevice, err);
+                }
+                return;
+            }
             await handleMissingRegisteredAccessory(reg, this.recoveryDeps());
             return;
         }
 
         reg.status = 'registered';
         reg.registeredAt = Date.now();
+        // After successful register as real Thermostat, drop any stale fallback marker.
+        if (reg.deviceType === 'thermostat' && !this.isFallbackAccessory(reg)) {
+            if (this.thermostatFallbackUUIDs.delete(uuid)) this.fallbackStore.remove(uuid);
+        }
         this.stateUpdateQueue.markReadyAfterBootstrap(reg);
         this.log.info(`[Matter] registered: ${reg.displayName}`);
-
         this.stateUpdateQueue.scheduleFlush(uuid);
     }
 
-    /**
-     * Centralised handler for failed initial registration. Currently only used for thermostats —
-     * other device types are simply marked failed and skipped for the session.
-     */
+    private isFallbackAccessory(reg: MatterRegistration): boolean {
+        const clusters = reg.matterAccessory.clusters ?? {};
+        return 'temperatureMeasurement' in clusters && !('thermostat' in clusters);
+    }
+
     private async handleRegisterFailure(device: KseniaDevice, err: unknown): Promise<void> {
         const reg = this.registrations.get(device.id)!;
         const msg = this.fmtErr(err);
 
         if (device.type === 'thermostat' && MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR) {
             this.log.warn(
-                `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor `
-                + `due to matter.js thermostat presetTypes validation issue. Error: ${msg}`,
+                `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor. Error: ${msg}`,
             );
             try {
                 await registerFallbackAccessory(device as KseniaThermostat, reg, this.recoveryDeps());
@@ -245,45 +240,27 @@ export class MatterAccessoryRegistry {
         this.log.warn(`[Matter] accessory failed: ${device.name} — ${msg}`);
     }
 
-    // -----------------------------------------------------------------------
-    // State propagation
-    // -----------------------------------------------------------------------
-
-    private async pushStateUpdate(device: KseniaDevice): Promise<void> {
-        const reg = this.registrations.get(device.id);
-        if (!reg) return;
-
-        const updates = this.buildUpdatesFor(device);
-        for (const u of updates) {
-            await this.stateUpdateQueue.pushOrQueue(reg, u);
-        }
-    }
-
     private enqueueStateFor(device: KseniaDevice): void {
         const reg = this.registrations.get(device.id);
         if (!reg) return;
         reg.matterAccessory.context.device = device;
-        for (const u of this.buildUpdatesFor(device)) {
-            // Dedupe by (clusterName, partId) — keep only the latest payload per slot.
+        const fallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
+        for (const u of buildStateUpdates(device, fallback)) {
             const idx = reg.pendingStateUpdates.findIndex(
                 (p) => p.clusterName === u.clusterName && p.partId === u.partId,
             );
             if (idx >= 0) reg.pendingStateUpdates[idx] = u;
             else reg.pendingStateUpdates.push(u);
         }
-        this.log.debug(`[Matter] update queued: ${device.name} (pending=${reg.pendingStateUpdates.length})`);
     }
 
     private async refreshAccessoryMetadata(device: KseniaDevice, reg: MatterRegistration): Promise<void> {
-        const matterAccessory = deviceToMatterAccessory(device, {
-            api: this.api,
-            log: this.log,
-            getWsClient: this.getWsClient,
-        });
+        const fallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
+        const matterAccessory = fallback
+            ? mapThermostatAsTemperatureSensor(device as KseniaThermostat, this.mapperDeps())
+            : deviceToMatterAccessory(device, this.mapperDeps());
         if (!matterAccessory) return;
-
         if (!this.hasMetadataChanged(reg.matterAccessory, matterAccessory)) return;
-
         reg.matterAccessory = matterAccessory;
         reg.displayName = matterAccessory.displayName;
     }
@@ -296,17 +273,8 @@ export class MatterAccessoryRegistry {
             || previous.firmwareRevision !== next.firmwareRevision;
     }
 
-    private buildUpdatesFor(device: KseniaDevice): PendingMatterStateUpdate[] {
-        const isFallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
-        return buildStateUpdates(device, isFallback);
-    }
-
     private fmtErr(err: unknown): string {
         return err instanceof Error ? err.message : String(err);
-    }
-
-    private scheduleComplete(uuid: string): void {
-        setTimeout(() => { void this.completeRegistration(uuid); }, MATTER_REGISTER_SETTLE_MS);
     }
 
     private recoveryDeps(): Parameters<typeof handleMissingRegisteredAccessory>[1] {
@@ -315,10 +283,11 @@ export class MatterAccessoryRegistry {
             log: this.log,
             thermostatFallbackUUIDs: this.thermostatFallbackUUIDs,
             getWsClient: this.getWsClient,
-            scheduleComplete: (uuid) => this.scheduleComplete(uuid),
+            scheduleComplete: (uuid) => { void this.completeRegistration(uuid); },
             fmtErr: (err) => this.fmtErr(err),
-            settleMs: MATTER_REGISTER_SETTLE_MS,
             thermostatFallbackEnabled: MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR,
+            momentaryAutoOffMs: this.momentaryAutoOffMs,
+            onFallbackPersist: (uuid) => this.fallbackStore.add(uuid),
         };
     }
 }

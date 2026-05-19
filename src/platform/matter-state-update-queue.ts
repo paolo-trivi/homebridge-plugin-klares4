@@ -2,7 +2,11 @@ import type { API, Logger } from 'homebridge';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { PendingMatterStateUpdate } from './matter-state-updates';
 
-const DEFAULT_MATTER_STATE_UPDATE_BOOTSTRAP_MS = 30000;
+// With the probe-based settle in MatterAccessoryRegistry (Fix 2), the endpoint
+// is only marked `registered` once `getAccessoryState` actually returns. No
+// additional bootstrap delay is needed; the env var stays available as an
+// emergency override.
+const DEFAULT_MATTER_STATE_UPDATE_BOOTSTRAP_MS = 0;
 const MATTER_STATE_UPDATE_BOOTSTRAP_MS = Number(
     process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS ?? DEFAULT_MATTER_STATE_UPDATE_BOOTSTRAP_MS,
 );

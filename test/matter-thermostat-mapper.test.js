@@ -67,7 +67,7 @@ test('getThermostatPresetWorkaroundAttributes: ships exactly one valid preset sl
     assert.equal(wa.presetTypes.length, 1);
     assert.equal(wa.presetTypes[0].presetScenario, 1);             // Occupied
     assert.equal(wa.presetTypes[0].numberOfPresets, 1);
-    assert.equal(wa.presetTypes[0].presetTypeFeatures, 0);
+    assert.deepEqual(wa.presetTypes[0].presetTypeFeatures, { automatic: false, supportsNames: false });
 });
 
 test('thermostatSupportsCooling: detects Italian + English naming', () => {

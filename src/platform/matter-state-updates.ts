@@ -111,11 +111,14 @@ export function buildStateUpdates(
             break;
 
         case 'scenario':
-            out.push({ clusterName: 'onOff', attributes: { onOff: device.status.active } });
+            // Momentary trigger: state in Matter is always reported as off; the
+            // mapper's `on` handler auto-resets after a short delay.
+            out.push({ clusterName: 'onOff', attributes: { onOff: false } });
             break;
 
         case 'gate':
-            out.push({ clusterName: 'onOff', attributes: { onOff: device.status.on } });
+            // Momentary trigger: same pattern as scenarios.
+            out.push({ clusterName: 'onOff', attributes: { onOff: false } });
             break;
     }
 
