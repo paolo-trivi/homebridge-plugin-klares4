@@ -114,6 +114,42 @@ export function getThermostatPresetWorkaroundAttributes(): Record<string, unknow
 }
 
 // ---------------------------------------------------------------------------
+// Handler helpers — used by mapThermostat command handlers
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a Matter SystemMode value (Matter spec §4.3.7.32) back to a klares4 domain mode.
+ * Returns null for modes the device does not support (e.g. Cool/Auto on a heating-only
+ * thermostat) so callers can log a warning and skip the command instead of crashing.
+ */
+export function matterSystemModeToKlares4Mode(
+    matterMode: number,
+    supportsCooling: boolean,
+): DomainThermostatMode | null {
+    switch (matterMode) {
+        case SYSTEM_MODE_OFF:  return 'off';
+        case SYSTEM_MODE_HEAT: return 'heat';
+        case SYSTEM_MODE_COOL: return supportsCooling ? 'cool' : null;
+        case SYSTEM_MODE_AUTO: return supportsCooling ? 'auto' : null;
+        default:               return null;
+    }
+}
+
+/**
+ * Convert a Matter setpoint (centidegrees) to °C, clamped to [minC, maxC].
+ * Returns the (possibly clamped) value and a flag indicating whether clamping occurred.
+ */
+export function normalizeMatterSetpointC(
+    centidegrees: number,
+    minC: number,
+    maxC: number,
+): { value: number; clamped: boolean } {
+    const raw = fromMatterTemperatureCelsius(centidegrees);
+    const value = Math.max(minC, Math.min(maxC, raw));
+    return { value, clamped: value !== raw };
+}
+
+// ---------------------------------------------------------------------------
 // Capability detection (heuristic — Lares4 zone names follow Italian conventions)
 // ---------------------------------------------------------------------------
 

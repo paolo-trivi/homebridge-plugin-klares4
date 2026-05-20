@@ -9,8 +9,14 @@ const {
     getThermostatPresetWorkaroundAttributes,
     thermostatSupportsCooling,
     buildThermostatMatterState,
+    matterSystemModeToKlares4Mode,
+    normalizeMatterSetpointC,
     DEFAULT_HEATING_SETPOINT_C,
     DEFAULT_DEADBAND_C,
+    DEFAULT_MIN_HEAT_C,
+    DEFAULT_MAX_HEAT_C,
+    DEFAULT_MIN_COOL_C,
+    DEFAULT_MAX_COOL_C,
     TEMP_ABS_MIN_CENTI,
     TEMP_ABS_MAX_CENTI,
     CONTROL_SEQ_HEATING_ONLY,
@@ -168,4 +174,66 @@ test('buildThermostatMatterState: deadband invariant always holds (cooling - hea
         base.occupiedCoolingSetpoint - base.occupiedHeatingSetpoint >= deadbandCenti,
         `cooling(${base.occupiedCoolingSetpoint}) - heating(${base.occupiedHeatingSetpoint}) must be >= deadband(${deadbandCenti})`,
     );
+});
+
+// ---------------------------------------------------------------------------
+// matterSystemModeToKlares4Mode
+// ---------------------------------------------------------------------------
+
+test('matterSystemModeToKlares4Mode: heating-only thermostat', () => {
+    const supportsCooling = false;
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_OFF, supportsCooling), 'off');
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_HEAT, supportsCooling), 'heat');
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_COOL, supportsCooling), null, 'cool not supported → null');
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_AUTO, supportsCooling), null, 'auto not supported → null');
+    assert.equal(matterSystemModeToKlares4Mode(99, supportsCooling), null, 'unknown → null');
+});
+
+test('matterSystemModeToKlares4Mode: cooling-capable thermostat', () => {
+    const supportsCooling = true;
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_OFF, supportsCooling), 'off');
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_HEAT, supportsCooling), 'heat');
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_COOL, supportsCooling), 'cool');
+    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_AUTO, supportsCooling), 'auto');
+    assert.equal(matterSystemModeToKlares4Mode(99, supportsCooling), null, 'unknown → null');
+});
+
+// ---------------------------------------------------------------------------
+// normalizeMatterSetpointC
+// ---------------------------------------------------------------------------
+
+test('normalizeMatterSetpointC: converts centidegrees to °C without clamping', () => {
+    const { value, clamped } = normalizeMatterSetpointC(2150, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
+    assert.equal(value, 21.5);
+    assert.equal(clamped, false);
+});
+
+test('normalizeMatterSetpointC: converts 2000 centidegrees → 20°C without clamping', () => {
+    const { value, clamped } = normalizeMatterSetpointC(2000, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
+    assert.equal(value, 20);
+    assert.equal(clamped, false);
+});
+
+test('normalizeMatterSetpointC: clamps below-minimum value', () => {
+    const { value, clamped } = normalizeMatterSetpointC(0, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
+    assert.equal(value, DEFAULT_MIN_HEAT_C);
+    assert.equal(clamped, true);
+});
+
+test('normalizeMatterSetpointC: clamps above-maximum value', () => {
+    const { value, clamped } = normalizeMatterSetpointC(9999, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
+    assert.equal(value, DEFAULT_MAX_HEAT_C);
+    assert.equal(clamped, true);
+});
+
+test('normalizeMatterSetpointC: works for cooling range', () => {
+    const { value, clamped } = normalizeMatterSetpointC(2400, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C);
+    assert.equal(value, 24);
+    assert.equal(clamped, false);
+});
+
+test('normalizeMatterSetpointC: clamps cooling value below minimum', () => {
+    const { value, clamped } = normalizeMatterSetpointC(100, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C);
+    assert.equal(value, DEFAULT_MIN_COOL_C);
+    assert.equal(clamped, true);
 });
