@@ -262,3 +262,27 @@ export function buildThermostatMatterState(device: KseniaThermostat): Thermostat
 
     return { base, schemaInvariants };
 }
+
+// ---------------------------------------------------------------------------
+// Echo-suppression guard for Matter attribute-change handlers
+// ---------------------------------------------------------------------------
+
+/**
+ * Prevents feedback loops when Matter attribute-change handlers send commands to
+ * Lares4, which then echoes the change back as a state update: the plugin pushes
+ * the update via `api.matter.updateAccessoryState`, which writes the Matter attribute,
+ * which re-fires the handler — an infinite loop.
+ *
+ * Usage: call `record(key, centi)` immediately before sending a command; the handler
+ * checks `isEcho(key, centi)` first and returns early if the invocation is an echo.
+ */
+export class ThermostatEchoGuard {
+    private readonly sent = new Map<string, { centi: number; time: number }>();
+    private readonly ttlMs: number;
+    constructor(ttlMs = 8000) { this.ttlMs = ttlMs; }
+    record(key: string, centi: number): void { this.sent.set(key, { centi, time: Date.now() }); }
+    isEcho(key: string, centi: number): boolean {
+        const s = this.sent.get(key);
+        return !!s && s.centi === centi && (Date.now() - s.time) < this.ttlMs;
+    }
+}

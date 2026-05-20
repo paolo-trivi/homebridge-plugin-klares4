@@ -16,7 +16,7 @@ import {
     buildThermostatMatterState, toMatterTemperatureCelsius, clampMatterTemperature,
     TEMP_ABS_MIN_CENTI, TEMP_ABS_MAX_CENTI, thermostatSupportsCooling,
     matterSystemModeToKlares4Mode, normalizeMatterSetpointC,
-    DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C,
+    DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C, ThermostatEchoGuard,
 } from './matter-thermostat-mapper';
 import { sanitizeMatterAccessoryName, MatterNameRegistry } from './matter-name-sanitizer';
 
@@ -159,6 +159,7 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
     const { api, log, getWsClient } = deps;
     const { base, schemaInvariants } = buildThermostatMatterState(device);
     const supportsCooling = thermostatSupportsCooling(device);
+    const echoGuard = new ThermostatEchoGuard();
 
     return {
         ...baseFields(device, log),
@@ -171,30 +172,26 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
                 setpointRaiseLower: async (args: { mode: number; amount: number }) => {
                     const delta = args.amount / 10;
                     const raw = (device.targetTemperature ?? 21) + delta;
-                    const { value, clamped } = normalizeMatterSetpointC(raw * 100, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
-                    if (clamped) log.debug(`[Matter] ${device.name} setpoint clamped: ${raw} -> ${value}`);
+                    const { value } = normalizeMatterSetpointC(raw * 100, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
+                    echoGuard.record('heat', Math.round(value * 100));
                     await getWsClient()?.setThermostatTemperature(device.id, value);
                 },
                 occupiedHeatingSetpointChange: async (args: { occupiedHeatingSetpoint: number }) => {
-                    const { value, clamped } = normalizeMatterSetpointC(args.occupiedHeatingSetpoint, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
-                    if (clamped) log.debug(`[Matter] ${device.name} heating setpoint clamped: ${args.occupiedHeatingSetpoint / 100} -> ${value}`);
+                    if (echoGuard.isEcho('heat', args.occupiedHeatingSetpoint)) return;
+                    const { value } = normalizeMatterSetpointC(args.occupiedHeatingSetpoint, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
+                    echoGuard.record('heat', args.occupiedHeatingSetpoint);
                     await getWsClient()?.setThermostatTemperature(device.id, value);
                 },
                 occupiedCoolingSetpointChange: async (args: { occupiedCoolingSetpoint: number }) => {
-                    if (!supportsCooling) {
-                        log.warn(`[Matter] ${device.name}: cooling setpoint change ignored (device does not support cooling)`);
-                        return;
-                    }
-                    const { value, clamped } = normalizeMatterSetpointC(args.occupiedCoolingSetpoint, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C);
-                    if (clamped) log.debug(`[Matter] ${device.name} cooling setpoint clamped: ${args.occupiedCoolingSetpoint / 100} -> ${value}`);
+                    if (!supportsCooling) { log.warn(`[Matter] ${device.name}: cooling setpoint change ignored (device does not support cooling)`); return; }
+                    if (echoGuard.isEcho('cool', args.occupiedCoolingSetpoint)) return;
+                    const { value } = normalizeMatterSetpointC(args.occupiedCoolingSetpoint, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C);
+                    echoGuard.record('cool', args.occupiedCoolingSetpoint);
                     await getWsClient()?.setThermostatTemperature(device.id, value);
                 },
                 systemModeChange: async (args: { systemMode: number }) => {
                     const klares4Mode = matterSystemModeToKlares4Mode(args.systemMode, supportsCooling);
-                    if (klares4Mode === null) {
-                        log.warn(`[Matter] ${device.name}: unsupported Matter systemMode ${args.systemMode} ignored`);
-                        return;
-                    }
+                    if (klares4Mode === null) { log.warn(`[Matter] ${device.name}: unsupported Matter systemMode ${args.systemMode} ignored`); return; }
                     log.debug(`[Matter] ${device.name} systemMode ${args.systemMode} -> ${klares4Mode}`);
                     await getWsClient()?.setThermostatMode(device.id, klares4Mode);
                 },
@@ -205,126 +202,53 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
 
 /**
  * Fallback mapping: register a thermostat as a Matter TemperatureSensor.
- * Used only when the regular Thermostat registration fails upstream (matter.js bug).
  * HAP continues to expose the full Thermostat — Matter loses write control but keeps read.
  */
 export function mapThermostatAsTemperatureSensor(device: KseniaThermostat, deps: MapperDeps): MatterAccessory {
-    const { api } = deps;
     const currentC = device.currentTemperature ?? 21;
     return {
         ...baseFields(device, deps.log),
-        deviceType: api.matter!.deviceTypes.TemperatureSensor,
-        clusters: {
-            temperatureMeasurement: {
-                measuredValue: clampCentidegrees(toMatterTemperatureCelsius(currentC)),
-            },
-        },
+        deviceType: deps.api.matter!.deviceTypes.TemperatureSensor,
+        clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(currentC)) } },
     };
 }
 
 function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | undefined {
     const { api } = deps;
+    const bf = baseFields(device, deps.log);
     const val = device.status.value;
-
     switch (device.status.sensorType) {
-        case 'temperature':
-            return {
-                ...baseFields(device, deps.log),
-                deviceType: api.matter!.deviceTypes.TemperatureSensor,
-                clusters: {
-                    temperatureMeasurement: {
-                        measuredValue: clampCentidegrees(toMatterTemperatureCelsius(val)),
-                    },
-                },
-            };
-        case 'humidity':
-            return {
-                ...baseFields(device, deps.log),
-                deviceType: api.matter!.deviceTypes.HumiditySensor,
-                clusters: {
-                    relativeHumidityMeasurement: {
-                        measuredValue: Math.round(Math.max(0, Math.min(100, val)) * 100),
-                    },
-                },
-            };
-        case 'light':
-            return {
-                ...baseFields(device, deps.log),
-                deviceType: api.matter!.deviceTypes.LightSensor,
-                clusters: {
-                    illuminanceMeasurement: { measuredValue: luxToMatterIlluminance(val) },
-                },
-            };
-        case 'motion':
-            return {
-                ...baseFields(device, deps.log),
-                deviceType: api.matter!.deviceTypes.MotionSensor,
-                clusters: {
-                    occupancySensing: { occupancy: { occupied: val > 0 } },
-                },
-            };
-        case 'contact':
-            return {
-                ...baseFields(device, deps.log),
-                deviceType: api.matter!.deviceTypes.ContactSensor,
-                clusters: {
-                    booleanState: { stateValue: val === 0 },
-                },
-            };
-        default:
-            return undefined;
+        case 'temperature': return { ...bf, deviceType: api.matter!.deviceTypes.TemperatureSensor, clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(val)) } } };
+        case 'humidity':    return { ...bf, deviceType: api.matter!.deviceTypes.HumiditySensor,    clusters: { relativeHumidityMeasurement: { measuredValue: Math.round(Math.max(0, Math.min(100, val)) * 100) } } };
+        case 'light':       return { ...bf, deviceType: api.matter!.deviceTypes.LightSensor,       clusters: { illuminanceMeasurement: { measuredValue: luxToMatterIlluminance(val) } } };
+        case 'motion':      return { ...bf, deviceType: api.matter!.deviceTypes.MotionSensor,      clusters: { occupancySensing: { occupancy: { occupied: val > 0 } } } };
+        case 'contact':     return { ...bf, deviceType: api.matter!.deviceTypes.ContactSensor,     clusters: { booleanState: { stateValue: val === 0 } } };
+        default:            return undefined;
     }
 }
 
 function mapZone(device: KseniaZone, deps: MapperDeps): MatterAccessory {
-    const { api } = deps;
+    return { ...baseFields(device, deps.log), deviceType: deps.api.matter!.deviceTypes.ContactSensor, clusters: { booleanState: { stateValue: !device.status.open } } };
+}
+
+function mapMomentarySwitch(device: KseniaDevice, trigger: () => Promise<void>, deps: MapperDeps): MatterAccessory {
     return {
         ...baseFields(device, deps.log),
-        deviceType: api.matter!.deviceTypes.ContactSensor,
-        clusters: {
-            booleanState: { stateValue: !device.status.open },
-        },
+        deviceType: deps.api.matter!.deviceTypes.OnOffSwitch,
+        clusters: { onOff: { onOff: false } },
+        handlers: { onOff: {
+            on: async () => { await trigger(); scheduleMomentaryAutoOff(device.id, deps); },
+            off: async () => { /* momentary trigger — no-op */ },
+        } },
     };
 }
 
 function mapScenario(device: KseniaScenario, deps: MapperDeps): MatterAccessory {
-    const { api, getWsClient } = deps;
-    return {
-        ...baseFields(device, deps.log),
-        deviceType: api.matter!.deviceTypes.OnOffSwitch,
-        clusters: {
-            onOff: { onOff: false },
-        },
-        handlers: {
-            onOff: {
-                on: async () => {
-                    await getWsClient()?.triggerScenario(device.id);
-                    scheduleMomentaryAutoOff(device.id, deps);
-                },
-                off: async () => { /* momentary trigger — no-op */ },
-            },
-        },
-    };
+    return mapMomentarySwitch(device, async () => { await deps.getWsClient()?.triggerScenario(device.id); }, deps);
 }
 
 function mapGate(device: KseniaGate, deps: MapperDeps): MatterAccessory {
-    const { api, getWsClient } = deps;
-    return {
-        ...baseFields(device, deps.log),
-        deviceType: api.matter!.deviceTypes.OnOffSwitch,
-        clusters: {
-            onOff: { onOff: false },
-        },
-        handlers: {
-            onOff: {
-                on: async () => {
-                    await getWsClient()?.toggleGate(device.id);
-                    scheduleMomentaryAutoOff(device.id, deps);
-                },
-                off: async () => { /* momentary trigger — no-op */ },
-            },
-        },
-    };
+    return mapMomentarySwitch(device, async () => { await deps.getWsClient()?.toggleGate(device.id); }, deps);
 }
 
 export function deviceToMatterAccessory(device: KseniaDevice, deps: MapperDeps): MatterAccessory | undefined {
