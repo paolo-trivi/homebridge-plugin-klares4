@@ -15,10 +15,10 @@ import type { KseniaWebSocketClient } from '../websocket-client';
 import {
     buildThermostatMatterState, toMatterTemperatureCelsius, clampMatterTemperature,
     TEMP_ABS_MIN_CENTI, TEMP_ABS_MAX_CENTI, thermostatSupportsCooling,
-    matterSystemModeToKlares4Mode, normalizeMatterSetpointC,
-    DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C, ThermostatEchoGuard,
 } from './matter-thermostat-mapper';
 import { sanitizeMatterAccessoryName, MatterNameRegistry } from './matter-name-sanitizer';
+import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { buildThermostatHandlers } from './matter-thermostat-handlers';
 
 const matterNameRegistry = new MatterNameRegistry();
 
@@ -52,6 +52,13 @@ interface MapperDeps {
     getWsClient: () => KseniaWebSocketClient | undefined;
     /** Auto-off delay (ms) for momentary OnOff devices (scenarios, gates). Default 500ms. */
     momentaryAutoOffMs?: number;
+    /**
+     * Plugin-level echo/idempotency tracker for Matter Thermostat attribute writes.
+     * Required to break the self-sustaining matter.js handler-rewrite loop documented
+     * in `matter-thermostat-echo-tracker.ts`. The mapper falls back to a no-op tracker
+     * when omitted (kept for unit-test convenience).
+     */
+    thermostatEchoTracker?: MatterThermostatEchoTracker;
 }
 
 const DEFAULT_MOMENTARY_AUTO_OFF_MS = 500;
@@ -156,10 +163,9 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
 }
 
 function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccessory {
-    const { api, log, getWsClient } = deps;
+    const { api, log, getWsClient, thermostatEchoTracker } = deps;
     const { base, schemaInvariants } = buildThermostatMatterState(device);
     const supportsCooling = thermostatSupportsCooling(device);
-    const echoGuard = new ThermostatEchoGuard();
 
     return {
         ...baseFields(device, log),
@@ -167,35 +173,12 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
         clusters: {
             thermostat: { ...base, ...schemaInvariants } as Record<string, unknown>,
         },
+        // The echo tracker is plugin-scoped (lives in MatterAccessoryRegistry). All
+        // mapping calls for the same UUID — including re-mappings via
+        // `refreshAccessoryMetadata` — share its state, which is what makes the
+        // echo-suppression survive the multi-second WRITE_CFG round-trip.
         handlers: {
-            thermostat: {
-                setpointRaiseLower: async (args: { mode: number; amount: number }) => {
-                    const delta = args.amount / 10;
-                    const raw = (device.targetTemperature ?? 21) + delta;
-                    const { value } = normalizeMatterSetpointC(raw * 100, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
-                    echoGuard.record('heat', Math.round(value * 100));
-                    await getWsClient()?.setThermostatTemperature(device.id, value);
-                },
-                occupiedHeatingSetpointChange: async (args: { occupiedHeatingSetpoint: number }) => {
-                    if (echoGuard.isEcho('heat', args.occupiedHeatingSetpoint)) return;
-                    const { value } = normalizeMatterSetpointC(args.occupiedHeatingSetpoint, DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C);
-                    echoGuard.record('heat', args.occupiedHeatingSetpoint);
-                    await getWsClient()?.setThermostatTemperature(device.id, value);
-                },
-                occupiedCoolingSetpointChange: async (args: { occupiedCoolingSetpoint: number }) => {
-                    if (!supportsCooling) { log.warn(`[Matter] ${device.name}: cooling setpoint change ignored (device does not support cooling)`); return; }
-                    if (echoGuard.isEcho('cool', args.occupiedCoolingSetpoint)) return;
-                    const { value } = normalizeMatterSetpointC(args.occupiedCoolingSetpoint, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C);
-                    echoGuard.record('cool', args.occupiedCoolingSetpoint);
-                    await getWsClient()?.setThermostatTemperature(device.id, value);
-                },
-                systemModeChange: async (args: { systemMode: number }) => {
-                    const klares4Mode = matterSystemModeToKlares4Mode(args.systemMode, supportsCooling);
-                    if (klares4Mode === null) { log.warn(`[Matter] ${device.name}: unsupported Matter systemMode ${args.systemMode} ignored`); return; }
-                    log.debug(`[Matter] ${device.name} systemMode ${args.systemMode} -> ${klares4Mode}`);
-                    await getWsClient()?.setThermostatMode(device.id, klares4Mode);
-                },
-            },
+            thermostat: buildThermostatHandlers({ device, supportsCooling, log, getWsClient, tracker: thermostatEchoTracker }),
         },
     };
 }

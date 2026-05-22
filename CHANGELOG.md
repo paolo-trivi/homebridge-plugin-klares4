@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3-rc.3] - 2026-05-22
+
+### Fixed (Matter, critical)
+
+- **Bug 1 — Matter accessory rejected for `nodeLabel` > 32 chars.** Matter spec §1.7.7.1 caps `BridgedDeviceBasicInformation.nodeLabel` at 32 characters, but the plugin's name sanitiser used a 64-char limit. Real-world failure on `scenario_12 "Inserisci Tapparelle+Volumetrici"` (32 chars → ` e ` expansion → 34 chars → register rejected with `String length of 34 is not within bounds`). Lowered `MAX_NAME_LENGTH` to 32 in `matter-name-sanitizer.ts`; the collision-suffix path was already bound to the same constant. Regression tests cover the failing scenario and the collision case for long sanitised names.
+
+- **Bug 2 P0 — Self-sustaining thermostat command loop.** A single setpoint change from HomeKit on `thermostat_21 (Riscaldamento Matrimoniale)` would trigger repeated WRITE_CFG commands on `thermostat_20 (Riscaldamento Bagno)` and a multi-second autonomous loop that hammered the Lares4 centrale every 2-3 s until Homebridge was stopped. Root cause: matter.js re-fires attribute-change handlers for the plugin's own state pushes via `api.matter.updateAccessoryState`; the closure-scoped `ThermostatEchoGuard` from 2.1.3-rc.2 was insufficient because (a) it was recreated on every `refreshAccessoryMetadata`, losing state across re-mappings, (b) it never observed the registry-side pushes, only outgoing handler-side writes, and (c) it did not cover `systemMode`. Replaced with a **plugin-scoped `MatterThermostatEchoTracker`** (one instance per `MatterAccessoryRegistry`) that:
+  - records every thermostat-cluster value the registry is about to push *before* `updateAccessoryState` (via a new `onBeforePush` hook in `MatterStateUpdateQueue`);
+  - records the initial cluster values at `registerPlatformAccessories` time so the first matter.js reactor firings are also recognised as echoes;
+  - is consulted by every Matter Thermostat handler (`occupiedHeatingSetpointChange`, `occupiedCoolingSetpointChange`, `systemModeChange`, `setpointRaiseLower`) before forwarding to the Lares4 WS client.
+- Added **idempotency guard** to all thermostat handlers: a setpoint or systemMode change that already matches the device's current state short-circuits without sending WRITE_CFG. Prevents a degenerate restart of the loop if the echo tracker's TTL ever expires before the centrale broadcast lands.
+- **Heating-only cooling-setpoint changes are now strictly read/state-only.** The Homebridge bundled Thermostat device type ships HEAT+COOL+AUTO+OCC features even for heating-only Lares4 zones; any controller-side write to `occupiedCoolingSetpoint` on a heating-only thermostat is dropped with a debug log instead of producing a WS command.
+- **WS errors in Matter thermostat handlers are now swallowed.** A WRITE_CFG timeout used to bubble up to matter.js, which marked the reactor `Unhandled` and prompted controllers to retry — feeding the loop. The handler now logs at warn and returns; the echo tracker has already recorded the intent so the centrale echo (when it eventually lands) is still suppressed.
+
+### Refactored
+
+- Extracted the four Matter Thermostat handlers into `src/platform/matter-thermostat-handlers.ts` so the mapper module stays under the 350-line repo limit and the loop-prevention logic lives in one focused file alongside the new echo tracker.
+
+### Tests
+
+- `matter-thermostat-echo-tracker.test.js` — unit coverage for the new tracker (per-UUID scoping, TTL expiry, recordPushed / recordIntent / clear).
+- `matter-thermostat-echo-loop.test.js` — integration scenario reproducing the production failure: internal push does not trigger a WS command; external command on `thermostat_21` never touches `thermostat_20`; heating-only cooling change is a no-op; idempotent change is a no-op; WS timeout in handler does not throw.
+- `matter-name-sanitizer.test.js` — regression on the two real-world failing scenario names and on the long-name collision-suffix path under the 32-char limit.
+
 ## [2.1.2] - 2026-05-19
 
 ### Fixed (Matter, critical)

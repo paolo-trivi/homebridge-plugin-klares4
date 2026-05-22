@@ -19,6 +19,12 @@ export class MatterStateUpdateQueue {
         private readonly log: Logger,
         private readonly registrations: Map<string, MatterRegistration>,
         private readonly fmtErr: (err: unknown) => string,
+        /**
+         * Invoked just before `api.matter.updateAccessoryState` so the registry can
+         * record the values it's about to push (used by the thermostat echo tracker
+         * to recognise its own state echo when matter.js re-fires the handlers).
+         */
+        private readonly onBeforePush?: (uuid: string, clusterName: string, attrs: Record<string, unknown>) => void,
     ) {}
 
     public markReadyAfterBootstrap(reg: MatterRegistration): void {
@@ -72,6 +78,7 @@ export class MatterStateUpdateQueue {
 
     private async updateAccessoryState(reg: MatterRegistration, update: PendingMatterStateUpdate): Promise<void> {
         try {
+            this.onBeforePush?.(reg.uuid, update.clusterName, update.attributes);
             await this.api.matter!.updateAccessoryState(reg.uuid, update.clusterName, update.attributes, update.partId);
         } catch (err) {
             this.log.debug(`[Matter] state update failed for ${reg.displayName} (${update.clusterName}): ${this.fmtErr(err)}`);

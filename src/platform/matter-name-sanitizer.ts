@@ -7,7 +7,17 @@
  * Pure functions + a stateful collision registry (one instance per registry object).
  */
 
-const MAX_NAME_LENGTH = 64;
+/**
+ * Matter spec §1.7.7.1 (BridgedDeviceBasicInformation.nodeLabel and Basic.nodeLabel)
+ * caps node-label / display-name strings at 32 characters. The Homebridge 2 Matter
+ * bundle validates this constraint at register time and refuses the accessory if
+ * exceeded — see real-world failure on scenario_12 / "Inserisci Tapparelle+Volumetrici"
+ * (32 chars → " e " expansion → 34 chars → register rejected).
+ *
+ * Keep this constant authoritative: any name surfaced to Matter as displayName or
+ * nodeLabel MUST be sanitised through this module.
+ */
+const MAX_NAME_LENGTH = 32;
 
 /**
  * Sanitise a device name for use as a Matter accessory `displayName`.

@@ -13,6 +13,7 @@ import {
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { MatterFallbackStore } from './matter-fallback-store';
 import { probeUntilQueryable } from './matter-register-probe';
+import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 
 /**
  * Whether to fall back to a Matter TemperatureSensor when registering a real
@@ -41,6 +42,7 @@ export class MatterAccessoryRegistry {
     private activeDiscoveredUUIDs: Set<string> = new Set();
     private readonly thermostatFallbackUUIDs: Set<string> = new Set();
     private readonly fallbackStore: MatterFallbackStore;
+    private readonly thermostatEchoTracker = new MatterThermostatEchoTracker();
 
     constructor(deps: MatterRegistryDeps) {
         this.api = deps.api;
@@ -55,6 +57,13 @@ export class MatterAccessoryRegistry {
             this.log,
             this.registrations,
             (err) => this.fmtErr(err),
+            (uuid, clusterName, attrs) => {
+                // Record every thermostat-cluster push so the mapper's attribute-change
+                // handlers can recognise their own state echo and skip forwarding it
+                // back to Lares4. See matter-thermostat-echo-tracker.ts for the loop
+                // failure mode this prevents.
+                if (clusterName === 'thermostat') this.thermostatEchoTracker.recordPushed(uuid, attrs);
+            },
         );
     }
 
@@ -121,6 +130,7 @@ export class MatterAccessoryRegistry {
                 this.cachedUUIDs.delete(uuid);
                 this.thermostatFallbackUUIDs.delete(uuid);
                 this.fallbackStore.remove(uuid);
+                this.thermostatEchoTracker.clear(uuid);
             } catch (err) {
                 this.log.warn(`[Matter] Failed to unregister ${uuid}: ${this.fmtErr(err)}`);
             }
@@ -141,6 +151,7 @@ export class MatterAccessoryRegistry {
             log: this.log,
             getWsClient: this.getWsClient,
             momentaryAutoOffMs: this.momentaryAutoOffMs,
+            thermostatEchoTracker: this.thermostatEchoTracker,
         };
     }
 
@@ -172,6 +183,14 @@ export class MatterAccessoryRegistry {
         // storage still holds the fabric/ACL. The same UUID is reused, so Apple Home
         // rooms and automations survive the re-register.
         try {
+            // Record the thermostat-cluster values we're about to register with
+            // matter.js as already-pushed, so the very first handler firings (which
+            // some matter.js versions emit eagerly after registerPlatformAccessories)
+            // are recognised as echoes of our own register payload, not external commands.
+            if (device.type === 'thermostat' && !persistedFallback) {
+                const tc = matterAccessory.clusters?.thermostat as Record<string, unknown> | undefined;
+                if (tc) this.thermostatEchoTracker.recordPushed(device.id, tc);
+            }
             await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
         } catch (err) {
             await this.handleRegisterFailure(device, err);

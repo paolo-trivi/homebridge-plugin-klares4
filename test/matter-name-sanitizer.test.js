@@ -67,10 +67,24 @@ test('sanitizeMatterAccessoryName: uses default fallback "Device" when none supp
     assert.equal(sanitizeMatterAccessoryName(''), 'Device');
 });
 
-test('sanitizeMatterAccessoryName: truncates names longer than 64 chars', () => {
+test('sanitizeMatterAccessoryName: truncates names longer than 32 chars (Matter nodeLabel limit)', () => {
     const long = 'A'.repeat(70);
     const result = sanitizeMatterAccessoryName(long);
-    assert.equal(result.length, 64);
+    assert.equal(result.length, 32);
+});
+
+// Regression: real-world Lares4 scenario name that previously failed Matter
+// registration with "String length of 34 is not within bounds" because the "+"
+// → " e " expansion grew the string past 32 chars while the sanitiser still used
+// the old 64-char ceiling.
+test('sanitizeMatterAccessoryName: real-world failing scenario "Inserisci Tapparelle+Volumetrici" stays <= 32', () => {
+    const result = sanitizeMatterAccessoryName('Inserisci Tapparelle+Volumetrici');
+    assert.ok(result.length <= 32, `length ${result.length} > 32: "${result}"`);
+});
+
+test('sanitizeMatterAccessoryName: "Inserisci Finestre+Volumetrici" stays <= 32', () => {
+    const result = sanitizeMatterAccessoryName('Inserisci Finestre+Volumetrici');
+    assert.ok(result.length <= 32, `length ${result.length} > 32: "${result}"`);
 });
 
 test('sanitizeMatterAccessoryName: preserves accented Italian letters', () => {
@@ -103,10 +117,22 @@ test('MatterNameRegistry: collision produces distinct name with stable suffix', 
     assert.ok(second.includes('bbbb'), `expected suffix "bbbb" in "${second}"`);
 });
 
-test('MatterNameRegistry: collision suffix fits within 64 chars', () => {
+test('MatterNameRegistry: collision suffix fits within 32 chars', () => {
     const registry = new MatterNameRegistry();
-    const longName = 'A'.repeat(60);
+    const longName = 'A'.repeat(30);
     registry.resolve('uuid-aaaa', longName);
     const second = registry.resolve('uuid-bbbb', longName);
-    assert.ok(second.length <= 64, `name length ${second.length} exceeds 64`);
+    assert.ok(second.length <= 32, `name length ${second.length} exceeds 32`);
+});
+
+test('MatterNameRegistry: long-name collision still ends with stable uuid suffix and stays <= 32', () => {
+    const registry = new MatterNameRegistry();
+    // Real-world: two scenarios that collide after sanitisation to a 32-char string
+    const name = sanitizeMatterAccessoryName('Inserisci Tapparelle+Volumetrici');
+    const first = registry.resolve('00000000-0000-0000-0000-000000001111', name);
+    const second = registry.resolve('00000000-0000-0000-0000-000000002222', name);
+    assert.equal(first.length <= 32, true);
+    assert.equal(second.length <= 32, true);
+    assert.notEqual(first, second);
+    assert.ok(second.endsWith('2222'), `expected "2222" suffix in "${second}"`);
 });
