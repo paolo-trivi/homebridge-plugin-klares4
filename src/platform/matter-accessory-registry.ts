@@ -174,7 +174,19 @@ export class MatterAccessoryRegistry {
         this.registrations.set(device.id, reg);
 
         const fromCache = this.cachedUUIDs.has(device.id);
-        this.log.info(`[Matter] register requested: ${device.name} (${device.type})${fromCache ? ' [cache restore]' : ''}${persistedFallback ? ' [fallback]' : ''}`);
+        // Include the *post-sanitisation* displayName + length so register failures
+        // can be diagnosed without re-deriving the sanitiser output: the original
+        // `device.name` may exceed Matter's 32-char nodeLabel limit while the
+        // displayName actually sent to matter.js does not.
+        const matterName = matterAccessory.displayName;
+        const nameAnnotation = matterName !== device.name
+            ? ` -> "${matterName}" [${matterName.length}ch]`
+            : ` [${matterName.length}ch]`;
+        this.log.info(
+            `[Matter] register requested: ${device.name}${nameAnnotation} `
+            + `(${device.type}, uuid=${device.id})`
+            + `${fromCache ? ' [cache restore]' : ''}${persistedFallback ? ' [fallback]' : ''}`,
+        );
         // We must always call registerPlatformAccessories — the MatterServer keeps
         // a runtime accessory map that is populated only on register. The Homebridge
         // accessory cache (configureMatterAccessory) is necessary but NOT sufficient:

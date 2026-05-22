@@ -263,6 +263,62 @@ test('thermostat: async missing registration falls back before state updates', a
     assert.equal(updates[0].attributes.measuredValue, 1950);
 });
 
+test('stale matter.js endpoint: second recovery attempt unregisters before re-registering (UUID preserved)', async () => {
+    // Production scenario after the 32-char nodeLabel fix (2.1.3-rc.3): a previous
+    // boot left an endpoint in matter.js with the over-limit displayName; new
+    // register() succeeds but getAccessoryState() keeps returning undefined
+    // because matter.js holds the stale record. The recovery path's second
+    // attempt must purge the stale endpoint via unregister and then re-register.
+    let registerCount = 0;
+    const { api, registered, unregistered } = makeApi({
+        registerImpl: (acc) => {
+            registerCount += 1;
+            // First two registers don't make the accessory queryable (stale state).
+            // The third (after unregister) does.
+            if (registerCount <= 2) return 'missing-state';
+            return undefined;
+        },
+    });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    // Use a non-thermostat device so the thermostat fallback path is bypassed.
+    await registry.addOrUpdateAccessory({
+        id: 'scenario_stale',
+        type: 'scenario',
+        name: 'Inserisci Tapparelle+Volumetrici',
+        description: '',
+        status: {},
+    });
+    await delay(FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
+
+    assert.equal(registry.getStatus('scenario_stale'), 'registered');
+    assert.equal(registerCount, 3, 'three register calls: initial + recovery#1 + recovery#2-after-purge');
+    assert.deepEqual(unregistered, ['scenario_stale'], 'recovery#2 must unregister the stale endpoint before re-registering');
+    // UUID is preserved across all attempts — Apple Home rooms survive.
+    for (const r of registered) assert.equal(r.UUID, 'scenario_stale');
+});
+
+test('register log includes sanitised displayName + length when name was sanitised', async () => {
+    const logs = [];
+    const log = { info: (m) => logs.push(m), warn: () => {}, debug: () => {}, error: () => {} };
+    const { api } = makeApi();
+    const registry = new MatterAccessoryRegistry({ api, log, getWsClient: () => undefined, storagePath: tmpStorage() });
+    await registry.addOrUpdateAccessory({
+        id: 'scenario_long',
+        type: 'scenario',
+        name: 'Inserisci Tapparelle+Volumetrici',
+        description: '',
+        status: {},
+    });
+    const registerLine = logs.find((l) => l.startsWith('[Matter] register requested:'));
+    assert.ok(registerLine, 'register-request log line must be emitted');
+    assert.ok(
+        registerLine.includes('Inserisci Tapparelle e Volumetrici') || registerLine.includes('Inserisci Tapparelle'),
+        `expected sanitised name in log: ${registerLine}`,
+    );
+    assert.match(registerLine, /\[\d+ch\]/, 'log must include the displayName length in chars');
+    assert.match(registerLine, /uuid=scenario_long/, 'log must include the UUID');
+});
+
 test('rediscovery updates in-memory Matter identity without updatePlatformAccessories', async () => {
     const { api, metadataUpdates } = makeApi();
     const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });

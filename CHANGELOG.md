@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3-rc.4] - 2026-05-22
+
+### Fixed (Matter)
+
+- **Stale matter.js endpoint after the 32-char nodeLabel fix.** After upgrading to 2.1.3-rc.3, `scenario_12 "Inserisci Tapparelle+Volumetrici"` still failed registration with `Matter accessory not queryable after registration` despite the name now being inside the 32-char limit. Root cause: matter.js had persisted the previous (over-limit) endpoint for that UUID on disk; the new `registerPlatformAccessories` call returned success but `getAccessoryState` kept reading the stale record, which the probe interpreted as a missing endpoint. The recovery path now performs an `unregisterPlatformAccessories` + `registerPlatformAccessories` purge on the second recovery attempt (same UUID — Apple Home rooms / automations survive), forcing matter.js to recreate the endpoint with the current sanitised displayName.
+
+### Observability
+
+- The `[Matter] register requested:` log line now includes the sanitised displayName, its character count, and the UUID. Makes register failures diagnosable directly from the log without re-deriving sanitiser output: `register requested: <original> -> "<sanitised>" [Nch] (<type>, uuid=<uuid>)`.
+
+### Tests
+
+- New regression in `matter-accessory-registry.test.js` covering the stale-endpoint recovery path (verifies the `unregister` precedes the second-attempt `register`, and that the UUID is preserved across all attempts).
+- New test asserting the register-request log line includes the sanitised name, the char-count annotation, and the UUID.
+
 ## [2.1.3-rc.3] - 2026-05-22
 
 ### Fixed (Matter, critical)

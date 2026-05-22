@@ -78,11 +78,32 @@ export async function handleMissingRegisteredAccessory(
     }
 
     if (reg.recoveryAttempts <= MATTER_REGISTER_RECOVERY_LIMIT) {
+        // On the *second* attempt, force-clear any stale matter.js endpoint for
+        // this UUID before re-registering. Observed in production after the 32-char
+        // nodeLabel fix (2.1.3-rc.3): scenario_12 had a previous endpoint stored in
+        // matter.js with the old (over-limit) displayName, so `getAccessoryState`
+        // kept returning undefined for the new accessory even though register
+        // succeeded. unregister+register reuses the same UUID — Apple Home rooms
+        // and automations survive — but forces matter.js to recreate the endpoint
+        // record with the current sanitised displayName.
+        const stalePurge = reg.recoveryAttempts >= 2;
         deps.log.warn(
             `[Matter] ${reg.displayName} was not queryable after registration; retrying registration `
-            + `(${reg.recoveryAttempts}/${MATTER_REGISTER_RECOVERY_LIMIT}).`,
+            + `(${reg.recoveryAttempts}/${MATTER_REGISTER_RECOVERY_LIMIT})${stalePurge ? ' [stale-endpoint purge]' : ''}.`,
         );
         try {
+            if (stalePurge) {
+                try {
+                    await deps.api.matter!.unregisterPlatformAccessories(
+                        PLUGIN_NAME, PLATFORM_NAME, [{ UUID: reg.uuid } as MatterAccessory],
+                    );
+                } catch (unregErr) {
+                    // Unregister may legitimately fail if matter.js doesn't have an
+                    // endpoint for this UUID at all — that's exactly the state we
+                    // want, so we ignore and proceed to register.
+                    deps.log.debug(`[Matter] stale-endpoint unregister for ${reg.displayName} (${reg.uuid}) returned: ${deps.fmtErr(unregErr)}`);
+                }
+            }
             await deps.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [reg.matterAccessory]);
             deps.scheduleComplete(reg.uuid);
             return;
