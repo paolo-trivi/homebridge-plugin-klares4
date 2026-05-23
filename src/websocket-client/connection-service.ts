@@ -56,9 +56,17 @@ export class ConnectionService {
                 };
 
                 if (this.deps.useHttps && allowInsecureTls) {
+                    // Node.js 24 ships an OpenSSL build that refuses unsafe legacy
+                    // renegotiation by default. The Lares4 panel still requires it
+                    // (`SSL_OP_LEGACY_SERVER_CONNECT` is not enough — see error
+                    // `unsafe legacy renegotiation disabled` from
+                    // ssl/statem/extensions.c:893). Enabling both flags restores
+                    // compatibility on Node 20–24.
                     wsOptions.agent = new https.Agent({
                         rejectUnauthorized: false,
-                        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+                        secureOptions:
+                            crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT
+                            | crypto.constants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
                         secureProtocol: 'TLS_method',
                         ciphers: 'ALL:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA',
                     });

@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.3-rc.4] - 2026-05-22
+## [2.1.3-rc.5] - 2026-05-23
+
+### Fixed (WebSocket, critical)
+
+- **Node.js 24 / OpenSSL 3 — `unsafe legacy renegotiation disabled` blocks connection to Lares4 panel.** With Homebridge container upgraded to Node 24, the WebSocket handshake to `wss://<panel>:443/KseniaWsock/` failed at TLS level with `write EPROTO ... unsafe legacy renegotiation disabled (ssl/statem/extensions.c:893)`. The plugin already passed `SSL_OP_LEGACY_SERVER_CONNECT` but that flag only allows the initial handshake against panels missing RFC 5746; the renegotiation path required by the Lares4 firmware needs the separate `SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION` flag. The two flags are now OR-ed together in the `https.Agent` `secureOptions`, restoring connectivity on Node 20–24 without weakening the `allowInsecureTls=false` path.
+
+
 
 ### Fixed (Matter)
 

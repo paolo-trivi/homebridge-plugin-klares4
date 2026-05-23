@@ -53,6 +53,7 @@ temp/
 research/
 scripts/reverse/
 lares 4.0.app/
+Screenshot*
 
 # Config files
 config.json 
