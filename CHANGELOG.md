@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3-rc.7] - 2026-05-23
+
+### Fixed (Thermostat, critical)
+
+- **Cross-pollination between thermostats with "swapped" `(cfg, DOMUS sensor)` pairs.** In production: user changes setpoint on "Riscaldamento Matrimoniale" (output 21, cfg 3, DOMUS sensor 4) → "Riscaldamento Bagno" (output 20, cfg 4, DOMUS sensor 3) also flips to the same setpoint and turns ON. Inverse on the other direction. Other thermostats (Studio cfg=5/sensor=5, Cameretta cfg=2/sensor=2) unaffected.
+
+  **Root cause (verified via debug capture `klares4-debug-2026-05-23T07-29-03.json`)**: `STATUS_TEMPERATURES.ID` from the Lares4 panel is the **DOMUS sensor id**, NOT the cfg/program id. The previous `resolveThermostatOutputIds` (in `src/websocket-client/thermostat-status-updater.ts`) compared the broadcast `ID` against each thermostat's `manualCommandId` / `programCommandId` / `cachedCommandId` — all of which are **cfg ids**. When two thermostats had numerically-swapped pairs (cfg=3/sensor=4 vs cfg=4/sensor=3), the candidate list of one thermostat numerically matched the sensor id of the other, so the patch landed on the wrong device. Pairs where cfg and sensor coincide numerically (cfg=5/sensor=5, etc.) were spared by accident, which is why the bug was invisible on most installations.
+
+  **Fix**: `resolveThermostatOutputIds` now computes each thermostat's **expected DOMUS sensor id** (from `state.thermostatToDomus`, with a fallback to `state.domusSensorIdByThermostatProgramId[programCommandId]`) and matches `STATUS_TEMPERATURES.ID` strictly against that. The degraded-mode path (no DOMUS mapping at all) is preserved but no longer mixes cfg ids into the candidate set.
+
+  **Secondary fix**: removed a stale write `state.thermostatCommandIdByOutputId.set(outputId, entry.ID)` from `updateTemperatureStatuses`. That line was overwriting the cache used by the command resolver (`command-service.ts`) and config-sync path with a sensor id instead of a cfg id, poisoning subsequent WRITE_CFG routing decisions. Only `command-service.ts` and `thermostat-config-sync.ts` write that map now, and they always write the cfg id.
+
+### Tests
+
+- New regression test `STATUS_TEMPERATURES regression: crossed (cfg,sensor) pairs do NOT cross-pollinate` reproduces the exact Matrimoniale↔Bagno scenario and asserts that an `ID=4` broadcast patches only `thermostat_21` (Matrimoniale, sensor 4), leaves `thermostat_20` (Bagno, sensor 3) untouched, and vice-versa for `ID=3`.
+- Updated `STATUS_TEMPERATURES.ID is the DOMUS sensor id ...` (renamed from the old `PRG_THERMOSTATS routes thermostat output 21 to cfg id 3 and sensor 4`) to feed the realistic `ID=sensor_id=4` payload instead of the unreal `ID=cfg_id=3` previously assumed.
+
+### Notes
+
+- Setups where, for every thermostat, the cfg id and the DOMUS sensor id are the same number (Sala, Cameretta, Studio in our reference install) saw no symptom because the candidate set "by accident" contained the correct id. The fix is a no-op for those.
+
 ## [2.1.3-rc.6] - 2026-05-23
 
 ### Added (Diagnostics)

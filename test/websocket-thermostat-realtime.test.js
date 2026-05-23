@@ -278,7 +278,15 @@ test('message pipeline applies STATUS_TEMPERATURES from realtime snapshots and c
   assert.equal(thermostat.status.hvacOutputActive, true);
 });
 
-test('PRG_THERMOSTATS routes thermostat output 21 to cfg id 3 and sensor 4', () => {
+test('STATUS_TEMPERATURES.ID is the DOMUS sensor id (4 for Matrimoniale), patch goes to thermostat_21', () => {
+  // Regression test for the production bug captured on 2026-05-23:
+  // The Lares4 panel broadcasts STATUS_TEMPERATURES keyed by the DOMUS sensor id,
+  // not by the cfg/program id. In the affected setup:
+  //   - Matrimoniale: output 21, cfg 3, DOMUS sensor 4
+  //   - Bagno:        output 20, cfg 4, DOMUS sensor 3
+  // A STATUS_TEMPERATURES with ID="4" must patch ONLY Matrimoniale (sensor 4),
+  // never Bagno (cfg 4) — the previous resolver crossed the two.
+  // See `src/websocket-client/thermostat-status-updater.ts:resolveThermostatOutputIds`.
   const state = createInitialWebSocketClientState({
     enabled: true,
     manualPairs: [],
@@ -359,7 +367,10 @@ test('PRG_THERMOSTATS routes thermostat output 21 to cfg id 3 and sensor 4', () 
     PAYLOAD_TYPE: 'REGISTER_ACK',
     PAYLOAD: {
       STATUS_TEMPERATURES: [{
-        ID: '3',
+        // Broadcast keyed by DOMUS sensor id (4 = Matrimoniale's sensor),
+        // NOT by cfg id. This is the real panel behaviour confirmed in
+        // klares4-debug-2026-05-23T07-29-03.json.
+        ID: '4',
         TEMP: '20.9',
         THERM: {
           ACT_MODEL: 'MAN',
@@ -377,6 +388,105 @@ test('PRG_THERMOSTATS routes thermostat output 21 to cfg id 3 and sensor 4', () 
   assert.equal(thermostat.status.targetTemperature, 22);
   assert.equal(thermostat.status.currentTemperature, 20.9);
   assert.equal(thermostat.status.mode, 'cool');
+});
+
+test('STATUS_TEMPERATURES regression: crossed (cfg,sensor) pairs do NOT cross-pollinate', () => {
+  // Reproduces the exact production scenario:
+  //   Matrimoniale: output 21, cfg 3, sensor 4
+  //   Bagno:        output 20, cfg 4, sensor 3
+  // User changed Matrimoniale (cfg 3) -> WRITE_CFG cfg=3 -> panel broadcast
+  // STATUS_TEMPERATURES ID=4 (sensor of Matrimoniale, NOT cfg id).
+  // BEFORE FIX: candidates for Bagno = [cfg "4", program "4", cached] included "4",
+  //             so the patch landed on Bagno (output 20) instead of Matrimoniale.
+  // AFTER FIX:  candidates for Bagno = expected sensor "3", does NOT include "4".
+  //             Matrimoniale (expected sensor "4") matches correctly.
+  const state = createInitialWebSocketClientState({
+    enabled: true,
+    manualPairs: [],
+    sensorFreshnessMs: 300000,
+  });
+  const updates = [];
+  const statusUpdater = createStatusUpdater(state, updates);
+  const thermostatUpdater = createThermostatStatusUpdater(state, updates);
+  const systemTemperatureUpdater = createSystemTemperatureUpdater(state, updates);
+  const messageService = new MessageService({
+    state,
+    callbacks: {},
+    log: createLogger(),
+    logLevel: 2,
+    debugEnabled: false,
+    statusUpdater,
+    systemTemperatureUpdater,
+    thermostatStatusUpdater: thermostatUpdater,
+    commandService: { requestSystemData: async () => undefined },
+    routeMessage: () => undefined,
+    emitRawMessage: () => undefined,
+    onLoginCompleted: () => undefined,
+  });
+
+  messageService.handleReadResponse({
+    CMD: 'READ_RES', ID: '1', SENDER: 'x', RECEIVER: 'x', TIMESTAMP: '0', CRC_16: '0x0000',
+    PAYLOAD_TYPE: 'MULTI_TYPES',
+    PAYLOAD: {
+      OUTPUTS: [
+        { ID: '21', DES: 'Riscaldamento Matrimoniale', TYPE: 'THERM', CAT: 'THERMO' },
+        { ID: '20', DES: 'Riscaldamento Bagno',        TYPE: 'THERM', CAT: 'THERMO' },
+      ],
+      BUS_HAS: [
+        { ID: '4', DES: 'Term. Matrimoniale', TYP: 'DOMUS' },
+        { ID: '3', DES: 'Term. Bagno Grande', TYP: 'DOMUS' },
+      ],
+    },
+  });
+
+  messageService.handleReadResponse({
+    CMD: 'READ_RES', ID: '2', SENDER: 'x', RECEIVER: 'x', TIMESTAMP: '0', CRC_16: '0x0000',
+    PAYLOAD_TYPE: 'PRG_THERMOSTATS',
+    PAYLOAD: {
+      PRG_THERMOSTATS: [
+        { ID: '3', DES: 'Termostato Matrimoniale', PERIPH: { TYP: 'DOMUS', PID: '4' }, HEATING_OUT: '21' },
+        { ID: '4', DES: 'Termostato Bagno',        PERIPH: { TYP: 'DOMUS', PID: '3' }, HEATING_OUT: '20' },
+      ],
+    },
+  });
+
+  // Pre-existing thermostat state we'll verify is NOT mutated for the wrong device.
+  state.devices.get('thermostat_20').status.targetTemperature = 21.0;
+  state.devices.get('thermostat_20').targetTemperature = 21.0;
+
+  // Panel broadcast after the user changed MATRIMONIALE's setpoint to 25.0
+  // → centrale keys it by sensor 4 (Matrimoniale's DOMUS probe).
+  messageService.handleRealtimeResponse({
+    CMD: 'REALTIME_RES', ID: '4', SENDER: 'x', RECEIVER: 'x', TIMESTAMP: '0', CRC_16: '0x0000',
+    PAYLOAD_TYPE: 'REGISTER_ACK',
+    PAYLOAD: {
+      STATUS_TEMPERATURES: [{
+        ID: '4',
+        TEMP: '21.8',
+        THERM: { ACT_MODEL: 'MAN', ACT_SEA: 'WIN', OUT_STATUS: 'ON', TEMP_THR: { T: 'M', VAL: '25.0' } },
+      }],
+    },
+  });
+
+  const matrimoniale = state.devices.get('thermostat_21');
+  const bagno = state.devices.get('thermostat_20');
+  assert.equal(matrimoniale.status.targetTemperature, 25.0, 'Matrimoniale (sensor 4) MUST get the 25°C patch');
+  assert.equal(bagno.status.targetTemperature, 21.0, 'Bagno (sensor 3) MUST NOT be touched by an ID=4 broadcast');
+
+  // And the inverse: broadcast keyed by sensor 3 must patch Bagno only.
+  messageService.handleRealtimeResponse({
+    CMD: 'REALTIME_RES', ID: '5', SENDER: 'x', RECEIVER: 'x', TIMESTAMP: '0', CRC_16: '0x0000',
+    PAYLOAD_TYPE: 'REGISTER_ACK',
+    PAYLOAD: {
+      STATUS_TEMPERATURES: [{
+        ID: '3',
+        TEMP: '22.0',
+        THERM: { ACT_MODEL: 'MAN', ACT_SEA: 'WIN', OUT_STATUS: 'ON', TEMP_THR: { T: 'M', VAL: '23.0' } },
+      }],
+    },
+  });
+  assert.equal(bagno.status.targetTemperature, 23.0, 'Bagno (sensor 3) MUST get the 23°C patch');
+  assert.equal(matrimoniale.status.targetTemperature, 25.0, 'Matrimoniale MUST keep its prior 25°C (no cross-pollination)');
 });
 
 test('CommandService does not fall back to legacy WRITE/THERMOSTAT', async () => {
