@@ -7,7 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.3-rc.7] - 2026-05-23
+## [2.1.3] - 2026-05-23
+
+Stable release of the **`2.1.3-rc.1` … `2.1.3-rc.7`** cycle, validated on a
+production Matter-only child bridge running Node 24 with 109 cached
+accessories. Aggregates the fixes shipped over the seven release candidates
+below; per-rc detail is preserved further down for archival reference.
+
+### Fixed — Thermostat command routing (critical, verified in production)
+
+- **`STATUS_TEMPERATURES` cross-pollination on swapped `(cfg, DOMUS sensor)` pairs.** On installations where two thermostats had numerically-swapped `(cfg-id, sensor-id)` pairs — in the reference setup *Matrimoniale* `(cfg 3, sensor 4)` and *Bagno* `(cfg 4, sensor 3)` — a setpoint or mode change on one was silently applied to the *other*: change Matrimoniale to 25 °C and Bagno's `targetTemperature` ended up at 25 °C too. Root cause inchiodato sul debug capture `klares4-debug-2026-05-23T07-29-03.json`: the Lares4 panel keys `STATUS_TEMPERATURES` broadcasts by **DOMUS sensor id**, not by cfg/program id. The previous resolver compared the broadcast id against each thermostat's cfg ids, producing a numeric collision for swapped pairs. Fix: `resolveThermostatOutputIds` now matches strictly against each thermostat's **expected DOMUS sensor id** (via `state.thermostatToDomus`, falling back to `domusSensorIdByThermostatProgramId[programId]`). The degraded path is preserved but no longer mixes cfg ids into the candidate set. Secondary fix: removed a stale `thermostatCommandIdByOutputId[outputId] = entry.ID` write from `updateTemperatureStatuses` that was poisoning the command-resolver cache with a sensor id. Setups whose `cfg` and `sensor` ids coincide numerically (e.g. Sala `(1,1)`, Cameretta `(2,2)`, Studio `(5,5)`) were invisibly correct before and remain a no-op after.
+
+- **Self-sustaining thermostat command loop on Matter (P0).** A single setpoint change from Apple Home on `thermostat_21` would trigger repeated `WRITE_CFG` commands at 2-3 s intervals until the user stopped Homebridge. Root cause: matter.js re-fires attribute-change handlers for the plugin's own pushes via `api.matter.updateAccessoryState`; the closure-scoped `ThermostatEchoGuard` from the abandoned rc.2 was recreated on every `refreshAccessoryMetadata`, losing state across re-mappings. Replaced with a plugin-scoped `MatterThermostatEchoTracker` (one per `MatterAccessoryRegistry`) that records every cluster value before pushing it, recognises matter.js re-fires as echoes, and covers `occupiedHeatingSetpoint`, `occupiedCoolingSetpoint` and `systemMode`. Added idempotency guards on all four thermostat handlers, swallowed WS errors so timeouts don't promote to matter.js retry loops, and made heating-only cooling-setpoint writes read/state-only.
+
+### Fixed — Matter accessory registration
+
+- **Matter accessory rejected for `nodeLabel` > 32 chars.** Matter spec §1.7.7.1 caps `BridgedDeviceBasicInformation.nodeLabel` at 32 characters but the plugin's sanitiser used 64. Real-world failure on `scenario_12 "Inserisci Tapparelle+Volumetrici"` (32 chars → ` e ` expansion → 34 chars → rejected with `String length of 34 is not within bounds`). `MAX_NAME_LENGTH` lowered to 32; the collision-suffix path was already bound to the same constant.
+- **Stale matter.js endpoint after the 32-char fix.** Following the sanitisation tightening above, `scenario_12` still failed registration because matter.js had persisted the previous (over-limit) endpoint for that UUID. New register call succeeded but `getAccessoryState` kept reading the stale record. The recovery path now performs an `unregister` + `register` purge on the second recovery attempt — same UUID is reused so Apple Home rooms / automations survive — forcing matter.js to recreate the endpoint with the current sanitised displayName.
+
+### Fixed — WebSocket / connectivity
+
+- **Node.js 24 / OpenSSL 3 — `unsafe legacy renegotiation disabled` blocks connection to the Lares4 panel.** On Homebridge containers upgraded to Node 24 the WebSocket handshake to `wss://<panel>:443/KseniaWsock/` aborted at TLS level. The plugin already set `SSL_OP_LEGACY_SERVER_CONNECT` but the Lares4 firmware also triggers a TLS renegotiation later in the session that needs the separate `SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION` flag (OpenSSL 3 default-denies it). Both flags are now OR-ed together in the `https.Agent` `secureOptions`. No change to the `allowInsecureTls=false` strict path.
+
+### Added — Diagnostics
+
+- **Configurable debug-capture duration** (`debugCaptureDurationMs`, default 60_000 ms, clamp 10s..30min, exposed in the Homebridge UI under "Diagnostica & Debug"). The previous fixed 60 s window often closed before the user could reproduce the failing scenario from HomeKit, because on Matter-only setups Apple Home can take several minutes to re-sync the mesh after a child-bridge restart. Setting `debugCaptureDurationMs: 600000` (10 minutes) keeps the WebSocket trace alive long enough.
+- **Register-request log line** now includes the sanitised displayName, its character count and the UUID: `register requested: <original> -> "<sanitised>" [Nch] (<type>, uuid=<uuid>)` — makes register failures diagnosable directly from the log.
+
+### Observability — Apple Home / HomeKit side-effects
+
+- As a beneficial side-effect of the `STATUS_TEMPERATURES` fix, the two channels that update a thermostat's `currentTemperature` and `humidity` (broadcast on `STATUS_BUS_HA_SENSORS` for DOMUS readings, and `STATUS_TEMPERATURES` for the thermostat program) now patch the *same* device coherently on swapped-pair installations. Before, they could fight each other and present "ballerine" temperature readings in HomeKit.
+
+### Refactored
+
+- Extracted the four Matter Thermostat handlers into `src/platform/matter-thermostat-handlers.ts` to keep `matter-device-mapper.ts` under the 350-line repo limit and co-locate the loop-prevention logic with the echo tracker.
+
+### Tests
+
+- **149/149 passing.** New regression suite for the production scenarios:
+  - `STATUS_TEMPERATURES regression: crossed (cfg,sensor) pairs do NOT cross-pollinate` — reproduces the exact Matrimoniale↔Bagno setup in both directions.
+  - `STATUS_TEMPERATURES.ID is the DOMUS sensor id (4 for Matrimoniale), patch goes to thermostat_21` — rewritten from the old test that wrongly assumed `ID = cfg id`.
+  - `matter-thermostat-echo-tracker.test.js` — unit coverage for the new echo tracker (per-UUID scoping, TTL expiry, record / consume / clear).
+  - `matter-thermostat-echo-loop.test.js` — integration scenario for the matter.js handler-rewrite loop.
+  - `matter-name-sanitizer.test.js` — regression on the two real-world failing scenario names and the long-name collision-suffix path under the 32-char limit.
+  - `matter-accessory-registry.test.js` — stale-endpoint recovery (unregister-then-register) and register-request log format.
+
+### Notes
+
+- The KSA-cache pre-population path is unchanged: setups where the Lares4 panel rejects `READ PRG_THERMOSTATS` with `CMD_NOT_AVAILABLE` (firmware-dependent) still operate correctly because the plugin pre-loads `thermostatProgramById` / `thermostatProgramIdByOutputId` from the on-disk KSA cache (`klares4-ksa-cache.json`).
+- Apple Home rooms and automations survive all the register/unregister cycles because the same accessory UUID is reused throughout.
+
+---
+
+### Per-RC archival history
+
+#### [2.1.3-rc.7] - 2026-05-23
 
 ### Fixed (Thermostat, critical)
 
@@ -28,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Setups where, for every thermostat, the cfg id and the DOMUS sensor id are the same number (Sala, Cameretta, Studio in our reference install) saw no symptom because the candidate set "by accident" contained the correct id. The fix is a no-op for those.
 
-## [2.1.3-rc.6] - 2026-05-23
+#### [2.1.3-rc.6] - 2026-05-23
 
 ### Added (Diagnostics)
 
@@ -38,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The debug capture itself does NOT cause accessories to disappear from Apple Home — the delay is the legitimate Matter mesh resync that follows every child-bridge restart (the Matter spec doesn't bound this on the controller side). Increasing the capture duration is the right knob.
 
-## [2.1.3-rc.5] - 2026-05-23
+#### [2.1.3-rc.5] - 2026-05-23
 
 ### Fixed (WebSocket, critical)
 
@@ -59,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New regression in `matter-accessory-registry.test.js` covering the stale-endpoint recovery path (verifies the `unregister` precedes the second-attempt `register`, and that the UUID is preserved across all attempts).
 - New test asserting the register-request log line includes the sanitised name, the char-count annotation, and the UUID.
 
-## [2.1.3-rc.3] - 2026-05-22
+#### [2.1.3-rc.3] - 2026-05-22
 
 ### Fixed (Matter, critical)
 
