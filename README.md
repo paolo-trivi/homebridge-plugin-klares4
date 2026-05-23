@@ -1,17 +1,69 @@
 # homebridge-plugin-klares4
 
-[![npm version](https://badge.fury.io/js/homebridge-plugin-klares4.svg)](https://badge.fury.io/js/homebridge-plugin-klares4)
-[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+**Bring your Ksenia Lares4 alarm system into Apple HomeKit — and Matter** — security zones, lights, covers, thermostats and environmental sensors, all from a single Homebridge plugin. Local-only via WebSocket, no cloud required. Full **Matter** support via Homebridge 2.x: the same accessories are exposed to Google Home, Amazon Alexa and SmartThings.
 
-Complete plugin for Ksenia Lares4 systems integrating security zones, lights, covers, thermostats, and environmental sensors into a single Homebridge solution.
+[![npm version](https://img.shields.io/npm/v/homebridge-plugin-klares4.svg?logo=npm)](https://www.npmjs.com/package/homebridge-plugin-klares4)
+[![npm downloads](https://img.shields.io/npm/dm/homebridge-plugin-klares4.svg?logo=npm)](https://www.npmjs.com/package/homebridge-plugin-klares4)
+[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
+[![Node](https://img.shields.io/node/v/homebridge-plugin-klares4.svg?logo=node.js)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/paolo-trivi/homebridge-plugin-klares4.svg?style=social)](https://github.com/paolo-trivi/homebridge-plugin-klares4/stargazers)
+
+![Lares4 devices in the Apple Home app](https://raw.githubusercontent.com/paolo-trivi/homebridge-plugin-klares4/main/docs/images/home-app-rooms.png)
+
+*Zones, lights, covers, thermostats and Ksenia scenarios appear as native HomeKit accessories, grouped by room.*
+
+![Climate category in Home app — temperature, humidity, covers and fans from Lares4](https://raw.githubusercontent.com/paolo-trivi/homebridge-plugin-klares4/main/docs/images/home-app-climate.png)
+
+*Environmental sensors and climate controls integrate into the Home app's category views (Climate, Security, Lights).*
+
+---
+
+## Why this plugin?
+
+| | **homebridge-plugin-klares4** | Home Assistant + HomeKit Bridge | Ksenia ergo / Lares 4.0 app | None (no HomeKit) |
+|---|---|---|---|---|
+| Native HomeKit (Siri, scenes, automations) | ✅ | ✅ (via HA bridge) | ❌ | ❌ |
+| **Matter** (Google Home, Alexa, SmartThings) | ✅ via Homebridge 2.x | ✅ via HA Matter Server | ❌ | ❌ |
+| Works **fully local** (no cloud) | ✅ | ✅ | depends | n/a |
+| Setup effort | Install + IP/PIN | Full HA stack required | Already installed | n/a |
+| Zones, lights, covers, thermostats, env. sensors | ✅ all in one | ✅ (community/HACS, if any) | ✅ (Ksenia UI only) | n/a |
+| Thermostat handling tuned for Matter (echo guard, endpoint recovery) | ✅ | partial | n/a | n/a |
+| MQTT bridge built-in | ✅ optional | via HA | ❌ | n/a |
+| Real-time updates (WebSocket) | ✅ | ✅ | ✅ | n/a |
+| `.ksa` backup import for routing & room mapping | ✅ | ❌ | n/a | n/a |
+| Maintained, in active development | ✅ | community | vendor | n/a |
+| Open source | ✅ MIT | ✅ | ❌ | n/a |
+
+If you already run Home Assistant, both options are valid; this plugin is the simplest path if your hub is already Homebridge.
+
+## Matter support
+
+Running on **Homebridge 2.x**, every Lares4 accessory exposed by this plugin is automatically reachable via Matter — meaning the same lights, covers, thermostats and sensors that show up in the Apple Home app also work in **Google Home**, **Amazon Alexa** and **Samsung SmartThings**, all over your local network.
+
+The plugin includes Matter-specific reliability code that has been tested in real installations:
+
+- **Thermostat echo guard** — suppresses spurious round-trip updates from Matter controllers, so target temperatures and modes don't flicker.
+- **Stale endpoint recovery** — when a Matter endpoint becomes stale after a controller restart, the plugin detects and rebuilds it instead of leaving a ghost accessory.
+- **Mode and temperature mapping** tailored for Matter clusters (heat/cool/auto, setpoint ranges) so commands from any ecosystem reach the panel correctly.
+
+No extra configuration is required: enable Matter in Homebridge and pair the bridge with your preferred ecosystem.
+
+## Compatibility
+
+Tested with **Ksenia Lares 4.0** central units (firmware exposing the `KS_WSOCK` WebSocket subprotocol on the panel's local IP, with a valid system PIN). If your specific Lares 4.0 model works or has issues, please open an issue so the compatibility list can grow.
+
+Requires Homebridge `>= 1.6.0` (also compatible with the 2.x beta line) and Node.js `>= 20`. **Matter support requires Homebridge 2.x.**
 
 ---
 
 ## Full Documentation
 
-- English docs: `docs/en/`
-- Documentazione italiana: `docs/it/`
+- English docs: [`docs/en/`](docs/en/)
+- Documentazione italiana: [`docs/it/`](docs/it/)
+- Internal architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+
+If this plugin saves you time, please ⭐ the repo — it really helps others discover it.
 
 ---
 
@@ -27,6 +79,7 @@ Complete plugin for Ksenia Lares4 systems integrating security zones, lights, co
 - **System Temperature Sensors**: Internal and external temperature from central unit
 - **Real-time Updates**: WebSocket connection with automatic reconnection
 - **Command ACK & Timeout**: Write commands wait for API response with configurable timeout
+- **Matter Support**: Automatic Matter exposure via Homebridge 2.x (Google Home, Alexa, SmartThings)
 - **UI Configuration**: Complete graphical interface in Homebridge UI
 - **Customization**: Custom names and selective entity exclusion
 - **MQTT Bridge**: State publishing and command reception via MQTT (optional)
@@ -34,7 +87,7 @@ Complete plugin for Ksenia Lares4 systems integrating security zones, lights, co
 
 ### Prerequisites
 
-- Homebridge >= 1.6.0
+- Homebridge >= 1.6.0 (Homebridge 2.x required for Matter)
 - Node.js >= 20.0.0
 - Ksenia Lares4 system with WebSocket access enabled
 
@@ -334,6 +387,46 @@ This project is released under the MIT license.
 
 ## Documentazione Italiana
 
+**Porta il tuo sistema d'allarme Ksenia Lares4 dentro Apple HomeKit — e Matter** — zone di sicurezza, luci, tapparelle, termostati e sensori ambientali, tutto da un unico plugin Homebridge. Solo locale via WebSocket, nessun cloud richiesto. Supporto **Matter** completo tramite Homebridge 2.x: gli stessi accessori vengono esposti a Google Home, Amazon Alexa e SmartThings.
+
+### Perche questo plugin?
+
+| | **homebridge-plugin-klares4** | Home Assistant + Bridge HomeKit | App Ksenia ergo / Lares 4.0 | Nessuna integrazione |
+|---|---|---|---|---|
+| HomeKit nativo (Siri, scene, automazioni) | ✅ | ✅ (via bridge HA) | ❌ | ❌ |
+| **Matter** (Google Home, Alexa, SmartThings) | ✅ via Homebridge 2.x | ✅ via HA Matter Server | ❌ | ❌ |
+| Funziona **solo locale** (no cloud) | ✅ | ✅ | dipende | n/a |
+| Sforzo di setup | Install + IP/PIN | Stack HA completo richiesto | Gia installata | n/a |
+| Zone, luci, tapparelle, termostati, sensori | ✅ tutto in uno | ✅ (community/HACS, se esiste) | ✅ (solo UI Ksenia) | n/a |
+| Gestione termostati ottimizzata per Matter (echo guard, recovery endpoint) | ✅ | parziale | n/a | n/a |
+| Bridge MQTT integrato | ✅ opzionale | tramite HA | ❌ | n/a |
+| Aggiornamenti real-time (WebSocket) | ✅ | ✅ | ✅ | n/a |
+| Import backup `.ksa` per routing e mappatura stanze | ✅ | ❌ | n/a | n/a |
+| Mantenuto, in sviluppo attivo | ✅ | community | vendor | n/a |
+| Open source | ✅ MIT | ✅ | ❌ | n/a |
+
+Se usi gia Home Assistant, entrambe le opzioni sono valide; questo plugin e la strada piu semplice se il tuo hub e gia Homebridge.
+
+### Supporto Matter
+
+Con **Homebridge 2.x**, ogni accessorio Lares4 esposto da questo plugin e automaticamente raggiungibile via Matter — le stesse luci, tapparelle, termostati e sensori che compaiono nell'app Casa funzionano anche in **Google Home**, **Amazon Alexa** e **Samsung SmartThings**, tutto sulla rete locale.
+
+Il plugin include codice di affidabilita specifico per Matter, testato in installazioni reali:
+
+- **Echo guard sui termostati** — sopprime gli aggiornamenti spuri di ritorno dai controller Matter, evitando che temperature impostate e modalita "ballino".
+- **Recovery degli endpoint stale** — quando un endpoint Matter diventa stale dopo il riavvio di un controller, il plugin lo rileva e lo ricostruisce invece di lasciare un accessorio fantasma.
+- **Mapping modalita/temperature** pensato per i cluster Matter (heat/cool/auto, range setpoint) cosi i comandi da qualsiasi ecosistema arrivano correttamente alla centrale.
+
+Non serve nessuna configurazione aggiuntiva: abilita Matter in Homebridge e abbina il bridge all'ecosistema preferito.
+
+### Compatibilita
+
+Testato con centrali **Ksenia Lares 4.0** (firmware che espone il sottoprotocollo WebSocket `KS_WSOCK` sull'IP locale del pannello, con PIN di sistema valido). Se il tuo modello specifico Lares 4.0 funziona o ha problemi, apri una issue cosi possiamo ampliare la lista di compatibilita.
+
+Richiede Homebridge `>= 1.6.0` (compatibile anche con la linea 2.x beta) e Node.js `>= 20`. **Il supporto Matter richiede Homebridge 2.x.**
+
+Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davvero altri a trovarlo.
+
 ### Caratteristiche
 
 - **Zone di Sicurezza**: Sensori di contatto per porte e finestre
@@ -343,13 +436,14 @@ This project is released under the MIT license.
 - **Sensori Ambientali**: Temperatura, umidita e luminosita in tempo reale
 - **Sensori Temperatura Sistema**: Temperatura interna ed esterna dalla centrale
 - **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
+- **Supporto Matter**: Esposizione automatica via Matter su Homebridge 2.x (Google Home, Alexa, SmartThings)
 - **Configurazione UI**: Interfaccia grafica completa in Homebridge UI
 - **Personalizzazione**: Nomi personalizzati ed esclusione selettiva di entita
 - **Bridge MQTT**: Pubblicazione stati e ricezione comandi via MQTT (opzionale)
 
 ### Prerequisiti
 
-- Homebridge >= 1.6.0
+- Homebridge >= 1.6.0 (Homebridge 2.x richiesto per Matter)
 - Node.js >= 20.0.0
 - Sistema Ksenia Lares4 con accesso WebSocket abilitato
 
