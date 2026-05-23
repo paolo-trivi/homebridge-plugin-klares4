@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3-rc.6] - 2026-05-23
+
+### Added (Diagnostics)
+
+- **`debugCaptureDurationMs` config option**: makes the boot-time debug capture duration configurable (default 60s, range 10s..30min, exposed in the Homebridge UI under "Diagnostica & Debug"). On Matter-only setups, Apple Home / Matter mesh can take several minutes to become responsive again after a child-bridge restart — the previous fixed 60s window often closed before the user could reproduce the failing scenario from HomeKit. Setting `debugCaptureDurationMs: 600000` (10 minutes) keeps the WebSocket trace alive long enough to capture a real user-triggered command after the mesh resync completes.
+
+### Notes
+
+- The debug capture itself does NOT cause accessories to disappear from Apple Home — the delay is the legitimate Matter mesh resync that follows every child-bridge restart (the Matter spec doesn't bound this on the controller side). Increasing the capture duration is the right knob.
+
 ## [2.1.3-rc.5] - 2026-05-23
 
 ### Fixed (WebSocket, critical)

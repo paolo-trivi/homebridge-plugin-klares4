@@ -55,6 +55,13 @@ export interface Lares4Config extends PlatformConfig {
     domusThermostat?: DomusThermostatConfig;
     ksaImport?: KsaImportConfig;
     generateDebugFile?: boolean;
+    /**
+     * Duration (in ms) of the boot-time debug capture when `generateDebugFile` is true.
+     * Default 60_000 (60s). Increase to ~600_000 (10 minutes) on Matter-only setups where
+     * Apple Home needs several minutes to re-sync the mesh after a child-bridge restart
+     * — otherwise the capture window closes before you can reproduce the issue from HomeKit.
+     */
+    debugCaptureDurationMs?: number;
 }
 
 export interface DeviceListItem {

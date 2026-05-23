@@ -505,6 +505,14 @@
                 "type": "boolean",
                 "default": false,
                 "description": "Attiva per generare un file di diagnostica completo al prossimo riavvio (si disabilita automaticamente dopo la generazione)"
+            },
+            "debugCaptureDurationMs": {
+                "title": "Durata cattura debug (ms)",
+                "type": "integer",
+                "default": 60000,
+                "minimum": 10000,
+                "maximum": 1800000,
+                "description": "Durata della cattura di debug in millisecondi (default 60000 = 60s). Aumentare a 300000 (5 min) o 600000 (10 min) su setup Matter-only se Apple Home impiega minuti a tornare responsive dopo il riavvio del child bridge."
             }
         },
         "required": [
@@ -1094,6 +1102,11 @@
                             "key": "generateDebugFile",
                             "title": "Genera File Debug al Prossimo Avvio",
                             "description": "Si disattiverà automaticamente dopo la generazione del file"
+                        },
+                        {
+                            "key": "debugCaptureDurationMs",
+                            "title": "Durata cattura (ms)",
+                            "description": "Default 60000 (60s). Su Matter-only con Apple Home che impiega minuti a tornare responsive, alzare a 600000 (10 min)."
                         },
                         {
                             "type": "help",

@@ -176,9 +176,19 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             }
 
             if (this.config.generateDebugFile) {
-                this.log.warn('[DEBUG] Debug capture requested - starting 60-second capture...');
+                // After a child-bridge restart, Apple Home / Matter mesh can need several
+                // minutes to become responsive again. The default 60s window often closes
+                // before the user can trigger the failing scenario from HomeKit, so we make
+                // it configurable via `debugCaptureDurationMs`. Allowed range is 10s..30min.
+                const requested = this.config.debugCaptureDurationMs;
+                const durationMs = Math.max(
+                    10_000,
+                    Math.min(1_800_000, typeof requested === 'number' && Number.isFinite(requested) ? requested : 60_000),
+                );
+                const durationSeconds = Math.round(durationMs / 1000);
+                this.log.warn(`[DEBUG] Debug capture requested - starting ${durationSeconds}-second capture...`);
                 const debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
-                debugCapture.startCapture(this.wsClient, 60000);
+                debugCapture.startCapture(this.wsClient, durationMs);
                 void this.configFileService.disableDebugFlag(PLATFORM_NAME);
             }
 
