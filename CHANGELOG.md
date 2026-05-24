@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4-rc.1] - 2026-05-24
+
+### Fixed — Matter scenarios visible on Alexa (and re-tappable on Apple Home)
+
+- **Scenarios were invisible in the Alexa app and stuck "ON" forever in Apple Home.** The momentary-switch mapper (used for `scenario` and `gate` devices) registered them with Matter device type `OnOffSwitch` (0x0103). Per Matter spec, `OnOffSwitch` is a **client** device — a wall switch that emits commands via binding, not a controllable endpoint. Apple Home is permissive and exposed it anyway, but Alexa follows the spec strictly and silently drops it from the device list. Combined with the existing momentary-trigger semantics (no real "off"), the result was: invisibility on Alexa, and on Apple Home the cluster `onOff` value latched to `true` so a second tap was suppressed by the controller before reaching the panel. Fix in [`src/platform/matter-device-mapper.ts`](src/platform/matter-device-mapper.ts): `mapMomentarySwitch` now uses `deviceTypes.OnOffOutlet` (Matter `OnOffPlugInUnit`, 0x010A) — a controllable server device that every ecosystem (Apple Home, Alexa, Google Home, SmartThings) imports as a tappable plug. The auto-off path (`scheduleMomentaryAutoOff`, default 500 ms, configurable via `scenarioAutoOffDelay`) continues to reset the cluster state so subsequent taps re-trigger the scenario. Visual effect: in Apple Home the scenario icon changes from "switch" to "outlet"; in Alexa scenarios now appear under **Plugs** and respond to voice commands ("Alexa, accendi Mood Cena"). Regression coverage: new test file [`test/matter-device-mapper.test.js`](test/matter-device-mapper.test.js) asserts the device type, the auto-off scheduling and that an auto-off rejection (e.g. endpoint not yet ready) is swallowed without surfacing to the controller.
+
 ## [2.1.3] - 2026-05-23
 
 Stable release of the **`2.1.3-rc.1` … `2.1.3-rc.7`** cycle, validated on a

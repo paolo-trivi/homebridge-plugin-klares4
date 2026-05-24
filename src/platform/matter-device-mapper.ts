@@ -215,9 +215,14 @@ function mapZone(device: KseniaZone, deps: MapperDeps): MatterAccessory {
 }
 
 function mapMomentarySwitch(device: KseniaDevice, trigger: () => Promise<void>, deps: MapperDeps): MatterAccessory {
+    // OnOffOutlet (= Matter OnOffPlugInUnit, 0x010A) instead of OnOffSwitch (0x0103).
+    // OnOffSwitch is a Matter *client* device (a wall switch sending commands via binding) —
+    // Alexa follows the spec and refuses to import it as a controllable accessory, leaving
+    // scenarios invisible. OnOffOutlet is a controllable server device that every ecosystem
+    // (Apple Home, Alexa, Google) exposes as a tappable plug.
     return {
         ...baseFields(device, deps.log),
-        deviceType: deps.api.matter!.deviceTypes.OnOffSwitch,
+        deviceType: deps.api.matter!.deviceTypes.OnOffOutlet,
         clusters: { onOff: { onOff: false } },
         handlers: { onOff: {
             on: async () => { await trigger(); scheduleMomentaryAutoOff(device.id, deps); },
