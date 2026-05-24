@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4-rc.3] - 2026-05-24
+
+### Changed — Matter name collisions: priority-based + abbreviated suffix
+
+- **Higher-priority device types now win the clean name.** Real-world Lares4 discovery emits `ZONES` before `MULTI_TYPES`, which on 2.1.4-rc.2 meant the contact-sensor zone took the clean label and the controllable cover ended up tagged. The `MatterNameRegistry` now compares Lares4 device types on collision: cover, light, thermostat, gate and scenario (priority 10) displace zone and sensor (priority 1). When a higher-priority device arrives second, the registry hands the clean name to the newcomer and queues the displaced uuid in a *pending renames* map (`consumePendingMatterRenames`) that `MatterAccessoryRegistry` drains after each successful register, triggering a metadata refresh on the displaced accessory so the controller sees the new ` - Sens.` suffix. Net effect on the production log: `Finestra Cucina (cover)` keeps the clean label, `Finestra Cucina (zone)` becomes `Finestra Cucina - Sens.`.
+- **Abbreviated suffixes avoid mid-word truncation.** rc.2 produced labels like `Finestra Matrimonia - Tapparella` (Matrimoniale chopped at 32-char limit). Suffix table is now: `zone/sensor → ' - Sens.'`, `cover → ' - Tapp.'`, `light → ' - Luce'`, `thermostat → ' - Term.'`, `scenario → ' - Scenario'`, `gate → ' - Cancello'`. Short enough that 27-char names fit without head truncation; pathological cases still truncate the head, never the suffix.
+- **Anti-redundancy is now root-based.** Names like `Tapparella Studio` (which already starts with the cover type) no longer receive a redundant `- Tapp.` suffix when colliding with a peer; the registry falls back to the uuid-derived 4-char tag. Same for `Termostato …` → `Term.`, `Sensore …` → `Sens.`.
+
+### Internal
+
+- New export `consumePendingMatterRenames()` in `matter-device-mapper.ts` so `MatterAccessoryRegistry` can drain displaced-name events without reaching into the module-level singleton directly.
+- `MatterNameRegistry` API additions: `consumePendingRenames()` returns and clears the pending-rename map. The `resolve` signature is unchanged.
+
 ## [2.1.4-rc.2] - 2026-05-24
 
 ### Changed — Matter accessory name sanitisation (allowlist + typed collision suffix)

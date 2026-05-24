@@ -22,6 +22,17 @@ import { buildThermostatHandlers } from './matter-thermostat-handlers';
 
 const matterNameRegistry = new MatterNameRegistry();
 
+/**
+ * Drain the typed-suffix collision queue. When a high-priority device (cover,
+ * light, thermostat, gate, scenario) displaces a previously-registered
+ * sensor/zone that was sharing the same sanitised name, the displaced uuid is
+ * queued here so the platform registry can refresh its matter metadata with
+ * the new ' - Sens.' / ' - <Tipo>' suffix.
+ */
+export function consumePendingMatterRenames(): Map<string, string> {
+    return matterNameRegistry.consumePendingRenames();
+}
+
 // Re-exports for legacy callers (registry pushStateUpdate, tests)
 export { toMatterTemperatureCelsius as toCentidegrees };
 export { buildThermostatMatterState };

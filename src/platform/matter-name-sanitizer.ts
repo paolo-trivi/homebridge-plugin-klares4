@@ -36,16 +36,6 @@ const BOUNDARY_RIGHT = /[^\p{L}\p{N}’]+$/u;
 
 /**
  * Sanitise a device name for use as a Matter accessory `displayName`.
- *
- * Pipeline:
- *  1. Replace `+` with ` e ` (human-readable expansion of "Inserisci A+B").
- *  2. Strip parentheses/brackets but keep their content.
- *  3. Replace every char outside the allowlist with a space.
- *  4. Collapse whitespace, trim.
- *  5. Trim non-allowed boundary chars (so first/last char satisfies HAP rule).
- *  6. Truncate to MAX_NAME_LENGTH, retrim boundary on the right.
- *  7. Empty result → `fallback` (default 'Device'), itself run through the
- *     same boundary trim to guarantee HomeKit compliance.
  */
 export function sanitizeMatterAccessoryName(name: string, fallback = 'Device'): string {
     const safe = clean(typeof name === 'string' ? name : '');
@@ -68,34 +58,55 @@ function clean(raw: string): string {
 
 /**
  * Italian, HomeKit-safe collision suffix per Lares4 device type.
- * Every value uses only characters from the allowlist above.
+ * Abbreviations chosen so even the longest sanitised name (32 chars) + suffix
+ * stays within the 32-char Matter limit when the head is itself reasonable.
+ * For pathologically long names the head is truncated, never the suffix.
  */
 const TYPE_SUFFIX: Record<string, string> = {
-    zone: 'Sensore',
-    sensor: 'Sensore',
-    cover: 'Tapparella',
+    zone: 'Sens.',
+    sensor: 'Sens.',
+    cover: 'Tapp.',
     light: 'Luce',
-    thermostat: 'Termostato',
+    thermostat: 'Term.',
     scenario: 'Scenario',
     gate: 'Cancello',
 };
 
+/**
+ * Priority: higher = retains the clean name on collision.
+ * User-controllable devices (cover, light, thermostat, gate, scenario)
+ * outrank passive sensors (zone, sensor) — so a "Finestra Cucina" cover
+ * keeps the clean label while the matching contact-sensor zone gets
+ * "Finestra Cucina - Sens.".
+ */
+const TYPE_PRIORITY: Record<string, number> = {
+    cover: 10,
+    light: 10,
+    thermostat: 10,
+    gate: 10,
+    scenario: 10,
+    zone: 1,
+    sensor: 1,
+};
+
+function priorityOf(deviceType: string | undefined): number {
+    if (!deviceType) return 0;
+    return TYPE_PRIORITY[deviceType] ?? 0;
+}
+
 const SUFFIX_SEPARATOR = ' - ';
 
-/**
- * Does `name` already mention `suffix` as a whole word?
- * Used to skip redundant collision tags like "Tapparella Studio - Tapparella".
- */
 function nameAlreadyMentions(name: string, suffix: string): boolean {
-    const pattern = new RegExp(`(^|\\s)${suffix}(\\s|$)`, 'iu');
+    // Treat the suffix as a *root*: strip any trailing "." so "Tapp." → "Tapp",
+    // and match it at any word boundary. This way "Tapparella Studio" is
+    // recognised as already mentioning "Tapp.", and "Termostato Sala" as
+    // already mentioning "Term.". Avoids redundant " - Tapp." / " - Term."
+    // tags on names that already describe their own type.
+    const root = suffix.replace(/\.$/, '');
+    const pattern = new RegExp(`\\b${root}`, 'iu');
     return pattern.test(name);
 }
 
-/**
- * Build a typed-suffix candidate, honouring the 32-char cap by truncating the
- * *name* part, never the suffix. Returns the candidate or `null` if the type
- * suffix is unknown or the original name already mentions the type.
- */
 function buildTypedSuffix(name: string, deviceType: string | undefined): string | null {
     if (!deviceType) return null;
     const suffix = TYPE_SUFFIX[deviceType];
@@ -110,11 +121,6 @@ function buildTypedSuffix(name: string, deviceType: string | undefined): string 
     return `${head}${tail}`;
 }
 
-/**
- * Last-resort suffix when the typed suffix is unavailable or also collides.
- * Uses the last 4 hex-like chars of the uuid — same shape as before for
- * backward compatibility with installations that may already display this.
- */
 function buildUuidFallbackSuffix(name: string, uuid: string): string {
     const tag = uuid.replace(/-/g, '').slice(-4);
     const tail = `${SUFFIX_SEPARATOR}${tag}`;
@@ -124,42 +130,84 @@ function buildUuidFallbackSuffix(name: string, uuid: string): string {
     return `${head}${tail}`;
 }
 
+interface SlotOwner {
+    uuid: string;
+    deviceType: string | undefined;
+    sanitizedBase: string;
+}
+
 /**
- * Tracks sanitised names per registry instance so that two devices whose
- * names normalise to the same string receive distinct, human-readable suffixes
- * based on their Lares4 device type.
+ * Tracks sanitised names per registry instance.
+ *
+ * Collision policy:
+ *
+ *  1. First arrival wins by default.
+ *  2. EXCEPT when a later device has *strictly higher type priority*: it
+ *     displaces the incumbent, takes the clean name itself, and the displaced
+ *     uuid is queued as a "pending rename" (see `consumePendingRenames`) so
+ *     the caller can refresh that accessory's metadata.
+ *  3. Same-priority collisions: incumbent keeps the clean name, newcomer
+ *     receives a typed suffix (` - Tapp.`, ` - Sens.`, ...). If the name
+ *     already mentions its own type, fall back to a uuid-derived 4-char tag.
  */
 export class MatterNameRegistry {
-    private readonly nameToUuid = new Map<string, string>();
+    private readonly slotOwners = new Map<string, SlotOwner>();
+    private readonly uuidToName = new Map<string, string>();
+    private readonly pendingRenames = new Map<string, string>();
+
+    resolve(uuid: string, sanitized: string, deviceType?: string): string {
+        const existingSlot = this.slotOwners.get(sanitized);
+
+        // No collision (or same uuid revisiting): take the clean name.
+        if (!existingSlot || existingSlot.uuid === uuid) {
+            return this.assign(uuid, sanitized, sanitized, deviceType);
+        }
+
+        // Collision with strictly higher priority → displace the incumbent.
+        if (priorityOf(deviceType) > priorityOf(existingSlot.deviceType)) {
+            const displacedName = this.suffixFor(existingSlot.uuid, existingSlot.sanitizedBase, existingSlot.deviceType);
+            this.uuidToName.set(existingSlot.uuid, displacedName);
+            this.pendingRenames.set(existingSlot.uuid, displacedName);
+            return this.assign(uuid, sanitized, sanitized, deviceType);
+        }
+
+        // Otherwise: the incumbent keeps the slot; we pick a suffix for the newcomer.
+        const candidate = this.suffixFor(uuid, sanitized, deviceType);
+        return this.assign(uuid, sanitized, candidate, deviceType);
+    }
 
     /**
-     * Return `sanitized` if it has not been used yet (or was used by the same
-     * uuid). Otherwise append a typed suffix (' - Sensore', ' - Tapparella',
-     * ...). If the typed suffix is unavailable or already taken, fall back to
-     * the legacy uuid-derived 4-char suffix.
-     *
-     * `deviceType` is the Lares4 device.type (zone, cover, light, ...). It is
-     * optional for backward compatibility with callers that pre-date the typed
-     * suffix; in that case the uuid fallback is used immediately on collision.
+     * Returns and clears the set of (uuid → newName) pairs that have been
+     * displaced since the last call. Callers should refresh the matter
+     * accessory metadata for each entry so the controller sees the new name.
      */
-    resolve(uuid: string, sanitized: string, deviceType?: string): string {
-        const existing = this.nameToUuid.get(sanitized);
-        if (!existing || existing === uuid) {
-            this.nameToUuid.set(sanitized, uuid);
-            return sanitized;
-        }
+    consumePendingRenames(): Map<string, string> {
+        const out = new Map(this.pendingRenames);
+        this.pendingRenames.clear();
+        return out;
+    }
 
-        const typed = buildTypedSuffix(sanitized, deviceType);
+    private assign(uuid: string, sanitizedBase: string, finalName: string, deviceType: string | undefined): string {
+        // Free the previous slot owned by this uuid, if any (re-mapping path).
+        const previous = this.uuidToName.get(uuid);
+        if (previous && previous !== finalName) {
+            const owner = this.slotOwners.get(previous);
+            if (owner && owner.uuid === uuid) this.slotOwners.delete(previous);
+        }
+        this.slotOwners.set(finalName, { uuid, deviceType, sanitizedBase });
+        this.uuidToName.set(uuid, finalName);
+        // If a pending rename was queued for this uuid and we're now resolving
+        // again, the caller is about to consume the up-to-date name directly.
+        this.pendingRenames.delete(uuid);
+        return finalName;
+    }
+
+    private suffixFor(uuid: string, base: string, deviceType: string | undefined): string {
+        const typed = buildTypedSuffix(base, deviceType);
         if (typed) {
-            const typedExisting = this.nameToUuid.get(typed);
-            if (!typedExisting || typedExisting === uuid) {
-                this.nameToUuid.set(typed, uuid);
-                return typed;
-            }
+            const existing = this.slotOwners.get(typed);
+            if (!existing || existing.uuid === uuid) return typed;
         }
-
-        const fallback = buildUuidFallbackSuffix(sanitized, uuid);
-        this.nameToUuid.set(fallback, uuid);
-        return fallback;
+        return buildUuidFallbackSuffix(base, uuid);
     }
 }

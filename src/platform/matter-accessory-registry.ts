@@ -3,7 +3,7 @@ import type { MatterAccessory } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaWebSocketClient } from '../websocket-client';
-import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } from './matter-device-mapper';
+import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor, consumePendingMatterRenames } from './matter-device-mapper';
 import { buildStateUpdates } from './matter-state-updates';
 import {
     handleMissingRegisteredAccessory,
@@ -208,7 +208,30 @@ export class MatterAccessoryRegistry {
             await this.handleRegisterFailure(device, err);
             return;
         }
+        await this.applyPendingDisplacedRenames();
         void this.completeRegistration(device.id);
+    }
+
+    /**
+     * When a higher-priority device displaces a sensor/zone that previously
+     * owned the clean name, the sanitiser queues the displaced uuid here. For
+     * each one, re-run the mapper so the displayName picks up the typed-suffix
+     * candidate, and push the metadata refresh through `refreshAccessoryMetadata`.
+     */
+    private async applyPendingDisplacedRenames(): Promise<void> {
+        const pending = consumePendingMatterRenames();
+        if (pending.size === 0) return;
+        for (const uuid of pending.keys()) {
+            const reg = this.registrations.get(uuid);
+            if (!reg) continue;
+            const device = reg.matterAccessory.context.device as KseniaDevice | undefined;
+            if (!device) continue;
+            try {
+                await this.refreshAccessoryMetadata(device, reg);
+            } catch (err) {
+                this.log.debug(`[Matter] displaced-rename refresh failed for ${uuid}: ${this.fmtErr(err)}`);
+            }
+        }
     }
 
     private async completeRegistration(uuid: string): Promise<void> {
