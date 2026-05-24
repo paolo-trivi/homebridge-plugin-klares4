@@ -4,80 +4,162 @@
  * Normalises display names for Matter / Homebridge 2 controllers without
  * touching HAP names, UUIDs, or the original klares4 device names.
  *
- * Pure functions + a stateful collision registry (one instance per registry object).
+ * The output is an *intersection* of three constraints:
+ *
+ *  - Matter spec §1.7.7.1 — nodeLabel/Basic.nodeLabel: UTF-8 string, max 32 chars.
+ *  - HAP-NodeJS `checkName` rule (Apple HomeKit naming guidance):
+ *      ^[\p{L}\p{N}][\p{L}\p{N}’ '.,-]*[\p{L}\p{N}’]$
+ *  - Empirical Alexa/Google tolerance — both controllers happily accept the
+ *    HomeKit-safe subset, so targeting HomeKit is also the safest target
+ *    for the wider Matter ecosystem.
+ *
+ * Allowlist (single source of truth, kept in sync with HAP `checkName`):
+ *   \p{L}   Unicode letters (includes Italian accents à è é ì ò ù)
+ *   \p{N}   Unicode digits
+ *   space
+ *   '       ASCII apostrophe
+ *   ’  Right single quotation mark (typographic apostrophe)
+ *   .       period
+ *   ,       comma
+ *   -       hyphen-minus
+ *
+ * Anything outside this set is replaced with a single space (then collapsed).
  */
 
-/**
- * Matter spec §1.7.7.1 (BridgedDeviceBasicInformation.nodeLabel and Basic.nodeLabel)
- * caps node-label / display-name strings at 32 characters. The Homebridge 2 Matter
- * bundle validates this constraint at register time and refuses the accessory if
- * exceeded — see real-world failure on scenario_12 / "Inserisci Tapparelle+Volumetrici"
- * (32 chars → " e " expansion → 34 chars → register rejected).
- *
- * Keep this constant authoritative: any name surfaced to Matter as displayName or
- * nodeLabel MUST be sanitised through this module.
- */
 const MAX_NAME_LENGTH = 32;
+
+const ALLOWED_MID_CHARS = /[^\p{L}\p{N}’ '.,-]/gu;
+
+// Per HomeKit rule the name MUST start with letter/digit and end with letter/digit/’.
+const BOUNDARY_LEFT = /^[^\p{L}\p{N}]+/u;
+const BOUNDARY_RIGHT = /[^\p{L}\p{N}’]+$/u;
 
 /**
  * Sanitise a device name for use as a Matter accessory `displayName`.
  *
- * Rules (applied in order):
- *  1. Replace `+` with ` e `.
- *  2. Remove parentheses / brackets but keep their content.
- *  3. Normalise typographic apostrophes / single quotes to nothing.
- *  4. Replace slashes, backslashes and other shell-like special chars with space.
- *  5. Collapse multiple whitespace to a single space.
- *  6. Trim leading/trailing whitespace.
- *  7. Truncate to MAX_NAME_LENGTH characters (trim again after truncation).
- *  8. If the result is empty, use `fallback` (default 'Device').
+ * Pipeline:
+ *  1. Replace `+` with ` e ` (human-readable expansion of "Inserisci A+B").
+ *  2. Strip parentheses/brackets but keep their content.
+ *  3. Replace every char outside the allowlist with a space.
+ *  4. Collapse whitespace, trim.
+ *  5. Trim non-allowed boundary chars (so first/last char satisfies HAP rule).
+ *  6. Truncate to MAX_NAME_LENGTH, retrim boundary on the right.
+ *  7. Empty result → `fallback` (default 'Device'), itself run through the
+ *     same boundary trim to guarantee HomeKit compliance.
  */
 export function sanitizeMatterAccessoryName(name: string, fallback = 'Device'): string {
-    if (!name || typeof name !== 'string') return fallback || 'Device';
+    const safe = clean(typeof name === 'string' ? name : '');
+    if (safe) return safe;
+    return clean(fallback) || 'Device';
+}
 
-    let s = name;
+function clean(raw: string): string {
+    let s = raw;
     s = s.replace(/\+/g, ' e ');
     s = s.replace(/[()[\]]/g, ' ');
-    // Typographic apostrophes, right/left single quotes
-    s = s.replace(/[\u2018\u2019\u201a\u201b']/g, '');
-    // Slash, backslash, pipe and similar structural chars → space
-    s = s.replace(/[/\\|<>{}*?!@#$%^&=~`]/g, ' ');
-    s = s.replace(/\s+/g, ' ');
-    s = s.trim();
-
+    s = s.replace(ALLOWED_MID_CHARS, ' ');
+    s = s.replace(/\s+/g, ' ').trim();
+    s = s.replace(BOUNDARY_LEFT, '').replace(BOUNDARY_RIGHT, '');
     if (s.length > MAX_NAME_LENGTH) {
-        s = s.slice(0, MAX_NAME_LENGTH).trim();
+        s = s.slice(0, MAX_NAME_LENGTH).replace(BOUNDARY_RIGHT, '');
     }
-
-    return s || (fallback.trim() || 'Device');
+    return s;
 }
 
 /**
- * Tracks sanitised names per registry instance so that two devices whose names
- * normalise to the same string receive distinct suffixes.
- *
- * Instantiate once per plugin boot (module-level in matter-device-mapper).
- * For tests, instantiate a fresh registry per test to avoid cross-test pollution.
+ * Italian, HomeKit-safe collision suffix per Lares4 device type.
+ * Every value uses only characters from the allowlist above.
+ */
+const TYPE_SUFFIX: Record<string, string> = {
+    zone: 'Sensore',
+    sensor: 'Sensore',
+    cover: 'Tapparella',
+    light: 'Luce',
+    thermostat: 'Termostato',
+    scenario: 'Scenario',
+    gate: 'Cancello',
+};
+
+const SUFFIX_SEPARATOR = ' - ';
+
+/**
+ * Does `name` already mention `suffix` as a whole word?
+ * Used to skip redundant collision tags like "Tapparella Studio - Tapparella".
+ */
+function nameAlreadyMentions(name: string, suffix: string): boolean {
+    const pattern = new RegExp(`(^|\\s)${suffix}(\\s|$)`, 'iu');
+    return pattern.test(name);
+}
+
+/**
+ * Build a typed-suffix candidate, honouring the 32-char cap by truncating the
+ * *name* part, never the suffix. Returns the candidate or `null` if the type
+ * suffix is unknown or the original name already mentions the type.
+ */
+function buildTypedSuffix(name: string, deviceType: string | undefined): string | null {
+    if (!deviceType) return null;
+    const suffix = TYPE_SUFFIX[deviceType];
+    if (!suffix) return null;
+    if (nameAlreadyMentions(name, suffix)) return null;
+
+    const tail = `${SUFFIX_SEPARATOR}${suffix}`;
+    const maxNameLen = MAX_NAME_LENGTH - tail.length;
+    if (maxNameLen <= 0) return null;
+    const head = name.length <= maxNameLen ? name : name.slice(0, maxNameLen).replace(BOUNDARY_RIGHT, '');
+    if (!head) return null;
+    return `${head}${tail}`;
+}
+
+/**
+ * Last-resort suffix when the typed suffix is unavailable or also collides.
+ * Uses the last 4 hex-like chars of the uuid — same shape as before for
+ * backward compatibility with installations that may already display this.
+ */
+function buildUuidFallbackSuffix(name: string, uuid: string): string {
+    const tag = uuid.replace(/-/g, '').slice(-4);
+    const tail = `${SUFFIX_SEPARATOR}${tag}`;
+    const maxNameLen = MAX_NAME_LENGTH - tail.length;
+    if (maxNameLen <= 0) return name.slice(0, MAX_NAME_LENGTH).replace(BOUNDARY_RIGHT, '');
+    const head = name.length <= maxNameLen ? name : name.slice(0, maxNameLen).replace(BOUNDARY_RIGHT, '');
+    return `${head}${tail}`;
+}
+
+/**
+ * Tracks sanitised names per registry instance so that two devices whose
+ * names normalise to the same string receive distinct, human-readable suffixes
+ * based on their Lares4 device type.
  */
 export class MatterNameRegistry {
     private readonly nameToUuid = new Map<string, string>();
 
     /**
-     * Return `sanitized` if it has not been used yet (or was used by the same uuid).
-     * Otherwise append a stable 4-char hex suffix derived from the uuid.
+     * Return `sanitized` if it has not been used yet (or was used by the same
+     * uuid). Otherwise append a typed suffix (' - Sensore', ' - Tapparella',
+     * ...). If the typed suffix is unavailable or already taken, fall back to
+     * the legacy uuid-derived 4-char suffix.
+     *
+     * `deviceType` is the Lares4 device.type (zone, cover, light, ...). It is
+     * optional for backward compatibility with callers that pre-date the typed
+     * suffix; in that case the uuid fallback is used immediately on collision.
      */
-    resolve(uuid: string, sanitized: string): string {
+    resolve(uuid: string, sanitized: string, deviceType?: string): string {
         const existing = this.nameToUuid.get(sanitized);
         if (!existing || existing === uuid) {
             this.nameToUuid.set(sanitized, uuid);
             return sanitized;
         }
-        // Collision: derive a stable suffix from the last 4 chars of the uuid.
-        const suffix = uuid.replace(/-/g, '').slice(-4);
-        const candidate = sanitized.length + 5 <= MAX_NAME_LENGTH
-            ? `${sanitized} ${suffix}`
-            : `${sanitized.slice(0, MAX_NAME_LENGTH - 5).trim()} ${suffix}`;
-        this.nameToUuid.set(candidate, uuid);
-        return candidate;
+
+        const typed = buildTypedSuffix(sanitized, deviceType);
+        if (typed) {
+            const typedExisting = this.nameToUuid.get(typed);
+            if (!typedExisting || typedExisting === uuid) {
+                this.nameToUuid.set(typed, uuid);
+                return typed;
+            }
+        }
+
+        const fallback = buildUuidFallbackSuffix(sanitized, uuid);
+        this.nameToUuid.set(fallback, uuid);
+        return fallback;
     }
 }

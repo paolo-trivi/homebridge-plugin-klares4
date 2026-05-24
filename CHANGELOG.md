@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4-rc.2] - 2026-05-24
+
+### Changed — Matter accessory name sanitisation (allowlist + typed collision suffix)
+
+- **Sanitiser switched from blocklist to HomeKit-safe allowlist.** Output is now guaranteed to satisfy the HAP-NodeJS `checkName` rule (`^[\p{L}\p{N}][\p{L}\p{N}’ '.,-]*[\p{L}\p{N}’]$`) which is the strictest of the three controllers (Apple Home, Alexa, Google Home). Characters outside the set become spaces; leading/trailing punctuation is trimmed so the result always starts with a letter/digit and ends with a letter/digit/`’`. New regression test in `test/matter-name-sanitizer.test.js` runs the HAP regex against a sample of sanitised outputs.
+- **Apostrophes preserved.** Both `'` and `’` are valid HomeKit characters and are now kept. Previously `Comando dell'Ingresso` was rewritten to `Comando dellIngresso`; it now stays `Comando dell'Ingresso`.
+- **Collision suffix is now a human-readable Italian type tag.** When two accessories sanitise to the same string the first registered keeps the clean name; the second receives ` - <Tipo>` where `<Tipo>` is derived from the Lares4 device type: `Sensore` (zone, env. sensor), `Tapparella` (cover), `Luce` (light), `Termostato` (thermostat), `Scenario`, `Cancello` (gate). Example from a real install: previously `Finestra Cucina` (cover) + `Finestra Cucina` (zone) became `Finestra Cucina` + `Finestra Cucina er_1`; now they become `Finestra Cucina` + `Finestra Cucina - Sensore`.
+- **Anti-redundancy guard.** If the sanitised name already mentions the device's own type as a whole word (e.g. two covers both called `Tapparella Studio`), the typed suffix is skipped and the legacy uuid-derived 4-char fallback is used to avoid `Tapparella Studio - Tapparella`. The fallback is also used when the device type is unknown or when even the typed candidate collides.
+- **API change (internal).** `MatterNameRegistry.resolve(uuid, sanitized, deviceType?)` now accepts an optional third argument. Callers that omit it (legacy / test convenience) get the uuid-derived fallback on collision, preserving the previous 2.1.3 behaviour.
+
+### User-visible impact
+
+Accessory `displayName`s visible in Apple Home, Alexa and Google Home will change for installations that previously hit collisions (e.g. cover + zone sharing the same Lares4 label). Custom names set by the user inside Apple Home / Alexa are preserved by those controllers and are not affected. UUIDs are unchanged, so HomeKit rooms and automations survive.
+
 ## [2.1.4-rc.1] - 2026-05-24
 
 ### Fixed — Matter scenarios visible on Alexa (and re-tappable on Apple Home)

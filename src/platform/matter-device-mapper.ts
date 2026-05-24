@@ -77,7 +77,7 @@ function baseFields(
     device: KseniaDevice,
     log?: import('homebridge').Logger,
 ): Pick<MatterAccessory, 'UUID' | 'displayName' | 'serialNumber' | 'manufacturer' | 'model' | 'firmwareRevision' | 'context'> {
-    const sanitized = matterNameRegistry.resolve(device.id, sanitizeMatterAccessoryName(device.name, device.id));
+    const sanitized = matterNameRegistry.resolve(device.id, sanitizeMatterAccessoryName(device.name, device.id), device.type);
     if (log && sanitized !== device.name) log.debug(`[Matter] Accessory name sanitized: "${device.name}" -> "${sanitized}"`);
     return {
         UUID: device.id,
