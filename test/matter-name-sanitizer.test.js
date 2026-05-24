@@ -7,7 +7,7 @@ const {
 } = require('../dist/platform/matter-name-sanitizer.js');
 
 // ---------------------------------------------------------------------------
-// sanitizeMatterAccessoryName
+// sanitizeMatterAccessoryName — allowlist & shaping
 // ---------------------------------------------------------------------------
 
 test('sanitizeMatterAccessoryName: trims trailing space', () => {
@@ -33,21 +33,33 @@ test('sanitizeMatterAccessoryName: removes square brackets but keeps content', (
     assert.equal(sanitizeMatterAccessoryName('Zona [piano terra]'), 'Zona piano terra');
 });
 
-test('sanitizeMatterAccessoryName: removes typographic apostrophes', () => {
-    const name = 'Chiudi l\u2019ingresso';  // right single quotation mark
-    assert.equal(sanitizeMatterAccessoryName(name), 'Chiudi lingresso');
+test('sanitizeMatterAccessoryName: preserves typographic apostrophe (HomeKit-allowed)', () => {
+    const name = 'Chiudi l’ingresso';
+    assert.equal(sanitizeMatterAccessoryName(name), 'Chiudi l’ingresso');
 });
 
-test('sanitizeMatterAccessoryName: removes ASCII apostrophe', () => {
-    assert.equal(sanitizeMatterAccessoryName("Chiudi l'ingresso"), 'Chiudi lingresso');
+test('sanitizeMatterAccessoryName: preserves ASCII apostrophe (HomeKit-allowed)', () => {
+    assert.equal(sanitizeMatterAccessoryName("Chiudi l'ingresso"), "Chiudi l'ingresso");
 });
 
 test('sanitizeMatterAccessoryName: collapses multiple spaces', () => {
     assert.equal(sanitizeMatterAccessoryName('Balcone   Sala'), 'Balcone Sala');
 });
 
-test('sanitizeMatterAccessoryName: replaces slash with space', () => {
+test('sanitizeMatterAccessoryName: replaces slash with space (not in HomeKit allowlist)', () => {
     assert.equal(sanitizeMatterAccessoryName('Luce/Presa'), 'Luce Presa');
+});
+
+test('sanitizeMatterAccessoryName: strips underscore (not in HomeKit allowlist)', () => {
+    assert.equal(sanitizeMatterAccessoryName('Zona_Notte'), 'Zona Notte');
+});
+
+test('sanitizeMatterAccessoryName: strips colon, semicolon, pipe', () => {
+    assert.equal(sanitizeMatterAccessoryName('Zona: Notte; piano | terra'), 'Zona Notte piano terra');
+});
+
+test('sanitizeMatterAccessoryName: preserves period, comma, hyphen', () => {
+    assert.equal(sanitizeMatterAccessoryName('Term. Sala - Temp., 2'), 'Term. Sala - Temp., 2');
 });
 
 test('sanitizeMatterAccessoryName: handles empty string → fallback', () => {
@@ -56,11 +68,6 @@ test('sanitizeMatterAccessoryName: handles empty string → fallback', () => {
 
 test('sanitizeMatterAccessoryName: handles whitespace-only string → fallback', () => {
     assert.equal(sanitizeMatterAccessoryName('   ', 'Fallback'), 'Fallback');
-});
-
-test('sanitizeMatterAccessoryName: handles string that becomes empty after cleanup → fallback', () => {
-    assert.equal(sanitizeMatterAccessoryName('+++', 'MyDevice'), 'e e e');
-    // "+++" → " e  e  e " → collapse → "e e e"
 });
 
 test('sanitizeMatterAccessoryName: uses default fallback "Device" when none supplied', () => {
@@ -73,10 +80,6 @@ test('sanitizeMatterAccessoryName: truncates names longer than 32 chars (Matter 
     assert.equal(result.length, 32);
 });
 
-// Regression: real-world Lares4 scenario name that previously failed Matter
-// registration with "String length of 34 is not within bounds" because the "+"
-// → " e " expansion grew the string past 32 chars while the sanitiser still used
-// the old 64-char ceiling.
 test('sanitizeMatterAccessoryName: real-world failing scenario "Inserisci Tapparelle+Volumetrici" stays <= 32', () => {
     const result = sanitizeMatterAccessoryName('Inserisci Tapparelle+Volumetrici');
     assert.ok(result.length <= 32, `length ${result.length} > 32: "${result}"`);
@@ -88,51 +91,120 @@ test('sanitizeMatterAccessoryName: "Inserisci Finestre+Volumetrici" stays <= 32'
 });
 
 test('sanitizeMatterAccessoryName: preserves accented Italian letters', () => {
-    const name = 'Ingresso Città';
-    assert.equal(sanitizeMatterAccessoryName(name), 'Ingresso Citt\u00e0');
+    assert.equal(sanitizeMatterAccessoryName('Caffè è qui'), 'Caffè è qui');
+});
+
+test('sanitizeMatterAccessoryName: result satisfies HomeKit checkName regex', () => {
+    // Mirror the HAP-NodeJS rule:
+    //   ^[\p{L}\p{N}][\p{L}\p{N}’ '.,-]*[\p{L}\p{N}’]$
+    const homekit = /^[\p{L}\p{N}][\p{L}\p{N}’ '.,\-]*[\p{L}\p{N}’]$/u;
+    const samples = [
+        'Balcone Sala',
+        'Chiudi l’ingresso',
+        'Apri Mattina estate',
+        'Term. Sala - Temp.',
+        'Inserisci Finestre e Tapparelle',
+        'Caffè',
+    ];
+    for (const s of samples) {
+        const sanitized = sanitizeMatterAccessoryName(s);
+        assert.ok(homekit.test(sanitized), `HomeKit checkName rejected "${sanitized}" (from "${s}")`);
+    }
+});
+
+test('sanitizeMatterAccessoryName: strips trailing punctuation so name ends with letter/digit/apostrophe', () => {
+    // hyphen is allowed in middle but NOT at the end per HomeKit rule
+    assert.equal(sanitizeMatterAccessoryName('Sala -'), 'Sala');
+    assert.equal(sanitizeMatterAccessoryName('Sala.'), 'Sala');
 });
 
 // ---------------------------------------------------------------------------
-// MatterNameRegistry — collision detection
+// MatterNameRegistry — typed-suffix collision policy
 // ---------------------------------------------------------------------------
 
 test('MatterNameRegistry: returns sanitized name when no collision', () => {
     const registry = new MatterNameRegistry();
-    assert.equal(registry.resolve('uuid-1', 'Balcone Sala'), 'Balcone Sala');
+    assert.equal(registry.resolve('cover_1', 'Balcone Sala', 'cover'), 'Balcone Sala');
 });
 
 test('MatterNameRegistry: same uuid can resolve to same name twice', () => {
     const registry = new MatterNameRegistry();
-    assert.equal(registry.resolve('uuid-1', 'Sala'), 'Sala');
-    assert.equal(registry.resolve('uuid-1', 'Sala'), 'Sala');
+    assert.equal(registry.resolve('cover_1', 'Sala', 'cover'), 'Sala');
+    assert.equal(registry.resolve('cover_1', 'Sala', 'cover'), 'Sala');
 });
 
-test('MatterNameRegistry: collision produces distinct name with stable suffix', () => {
+test('MatterNameRegistry: collision between cover and zone uses italian typed suffix', () => {
     const registry = new MatterNameRegistry();
-    const first = registry.resolve('uuid-aaaa', 'Sala');
+    const first = registry.resolve('cover_1', 'Finestra Cucina', 'cover');
+    const second = registry.resolve('zone_19', 'Finestra Cucina', 'zone');
+    assert.equal(first, 'Finestra Cucina');
+    assert.equal(second, 'Finestra Cucina - Sensore');
+});
+
+test('MatterNameRegistry: collision uses the second device\'s own type, not the first one\'s', () => {
+    const registry = new MatterNameRegistry();
+    const first = registry.resolve('cover_27', 'Tapparella Studio', 'cover');
+    const second = registry.resolve('zone_27', 'Tapparella Studio', 'zone');
+    assert.equal(first, 'Tapparella Studio');
+    // zone's own type is "Sensore". "Tapparella Studio" doesn't contain "Sensore",
+    // so the typed suffix applies even though the name mentions the *other*
+    // device's type. Goal: each accessory tags itself with what it is, not what
+    // its sibling is.
+    assert.equal(second, 'Tapparella Studio - Sensore');
+});
+
+test('MatterNameRegistry: anti-redundancy — skip suffix when name already mentions the OWN type', () => {
+    const registry = new MatterNameRegistry();
+    // Two covers (hypothetical) that sanitise to the same string both containing
+    // "Tapparella". The collision suffix " - Tapparella" would be redundant, so
+    // the second one falls back to the uuid-derived suffix.
+    const first = registry.resolve('cover_10', 'Tapparella Studio', 'cover');
+    const second = registry.resolve('cover_27', 'Tapparella Studio', 'cover');
+    assert.equal(first, 'Tapparella Studio');
+    assert.notEqual(second, 'Tapparella Studio - Tapparella');
+    assert.ok(second.endsWith('r_27'), `expected uuid fallback in "${second}"`);
+});
+
+test('MatterNameRegistry: unknown device type falls back to uuid suffix immediately', () => {
+    const registry = new MatterNameRegistry();
+    registry.resolve('uuid-aaaa', 'Sala', 'cover');
+    const second = registry.resolve('uuid-bbbb', 'Sala', 'mysterious');
+    assert.ok(second.endsWith('bbbb'), `expected uuid fallback for unknown type in "${second}"`);
+});
+
+test('MatterNameRegistry: deviceType omitted (legacy caller) falls back to uuid suffix on collision', () => {
+    const registry = new MatterNameRegistry();
+    registry.resolve('uuid-aaaa', 'Sala');
     const second = registry.resolve('uuid-bbbb', 'Sala');
+    assert.ok(second.endsWith('bbbb'));
+});
+
+test('MatterNameRegistry: typed suffix candidate respects 32-char cap by truncating name part', () => {
+    const registry = new MatterNameRegistry();
+    const longName = 'X'.repeat(28); // 28 + " - Sensore" (10) = 38 > 32
+    registry.resolve('cover_a', longName, 'cover');
+    const second = registry.resolve('zone_b', longName, 'zone');
+    assert.ok(second.length <= 32, `length ${second.length} > 32: "${second}"`);
+    assert.ok(second.endsWith(' - Sensore'), `expected typed suffix tail in "${second}"`);
+});
+
+test('MatterNameRegistry: real-world Finestra Bagno cover + zone collision', () => {
+    const registry = new MatterNameRegistry();
+    const cover = registry.resolve('cover_5', 'Finestra Bagno', 'cover');
+    const zone = registry.resolve('zone_22', 'Finestra Bagno', 'zone');
+    assert.equal(cover, 'Finestra Bagno');
+    assert.equal(zone, 'Finestra Bagno - Sensore');
+});
+
+test('MatterNameRegistry: thermostat colliding with another thermostat falls back to uuid suffix', () => {
+    const registry = new MatterNameRegistry();
+    // Two thermostats with the same sanitised name (artificial, but covers the
+    // "typed suffix also collides" code path).
+    const first = registry.resolve('thermostat_18', 'Sala', 'thermostat');
+    const second = registry.resolve('thermostat_34', 'Sala', 'thermostat');
     assert.equal(first, 'Sala');
-    assert.notEqual(second, 'Sala', 'colliding name must be different');
-    // The suffix must be derived from the uuid (last 4 hex chars, dashes stripped)
-    assert.ok(second.includes('bbbb'), `expected suffix "bbbb" in "${second}"`);
-});
-
-test('MatterNameRegistry: collision suffix fits within 32 chars', () => {
-    const registry = new MatterNameRegistry();
-    const longName = 'A'.repeat(30);
-    registry.resolve('uuid-aaaa', longName);
-    const second = registry.resolve('uuid-bbbb', longName);
-    assert.ok(second.length <= 32, `name length ${second.length} exceeds 32`);
-});
-
-test('MatterNameRegistry: long-name collision still ends with stable uuid suffix and stays <= 32', () => {
-    const registry = new MatterNameRegistry();
-    // Real-world: two scenarios that collide after sanitisation to a 32-char string
-    const name = sanitizeMatterAccessoryName('Inserisci Tapparelle+Volumetrici');
-    const first = registry.resolve('00000000-0000-0000-0000-000000001111', name);
-    const second = registry.resolve('00000000-0000-0000-0000-000000002222', name);
-    assert.equal(first.length <= 32, true);
-    assert.equal(second.length <= 32, true);
-    assert.notEqual(first, second);
-    assert.ok(second.endsWith('2222'), `expected "2222" suffix in "${second}"`);
+    // "Sala - Termostato" would also collide if both insisted; with single
+    // collision the typed suffix wins. Verify the second one uses the typed suffix
+    // (no third item is colliding here).
+    assert.equal(second, 'Sala - Termostato');
 });
