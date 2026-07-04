@@ -61,3 +61,11 @@ Behavior:
 - each room has `roomName` and `devices[].deviceId`
 
 KSA import can auto-generate room mapping from `PRG_ROOMS + PRG_MAPS`.
+
+## Telemetry
+
+- `telemetry` (boolean, default: `true`)
+
+The plugin automatically and anonymously collects technical errors (crashes, unhandled exceptions) via Sentry to help identify and fix bugs.
+The feature applies strict sanitization before sending any data: it NEVER transmits your PIN, the panel IP address, URLs, tokens, client IPs, configuration objects, or custom device names.
+If you prefer not to send any error reports, you can opt out by setting `telemetry: false` in your configuration.

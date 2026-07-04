@@ -513,6 +513,12 @@
                 "minimum": 10000,
                 "maximum": 1800000,
                 "description": "Durata della cattura di debug in millisecondi (default 60000 = 60s). Aumentare a 300000 (5 min) o 600000 (10 min) su setup Matter-only se Apple Home impiega minuti a tornare responsive dopo il riavvio del child bridge."
+            },
+            "telemetry": {
+                "title": "Telemetria / Segnalazione Errori",
+                "type": "boolean",
+                "default": true,
+                "description": "Invia errori tecnici anonimi in automatico (Sentry) per aiutare a migliorare il plugin. Nessun IP, PIN, o nome dispositivo viene inviato."
             }
         },
         "required": [
@@ -1097,6 +1103,11 @@
                         {
                             "type": "help",
                             "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Strumento diagnostico completo</strong><p style='margin:8px 0 8px 0;'>Genera un file di supporto con:</p><ul style='margin:0 0 8px 18px;padding:0;'><li>messaggi WebSocket RAW (60 secondi)</li><li>lista dispositivi rilevati</li><li>snapshot di stati e comandi principali</li></ul><p style='margin:0;'><strong>Importante:</strong> durante la cattura prova le entita che non funzionano dall'app Ksenia, cosi il trace include il comportamento reale del pannello.</p></div>"
+                        },
+                        {
+                            "key": "telemetry",
+                            "title": "Abilita Telemetria",
+                            "description": "Segnalazione anonima degli errori al team di sviluppo"
                         },
                         {
                             "key": "generateDebugFile",

@@ -1,6 +1,6 @@
 {
     "name": "homebridge-plugin-klares4",
-    "version": "2.1.4-rc.3",
+    "version": "2.1.4-rc.4",
     "description": "Plugin completo per sistemi Ksenia Lares4 - Zone, Luci, Tapparelle, Termostati, Sensori",
     "main": "dist/index.js",
     "scripts": {
@@ -33,6 +33,7 @@
         "homebridge": "^1.6.0 || ^2.0.0-beta.0"
     },
     "dependencies": {
+        "@sentry/node": "^10.63.0",
         "mqtt": "^5.3.4",
         "ws": "^8.14.2"
     },

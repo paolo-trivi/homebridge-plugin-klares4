@@ -171,6 +171,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `domusThermostat`   | object   | enabled/freshness defaults | DOMUS thermostat mapping, manual overrides, freshness fallback |
 | `ksaImport`         | object   | disabled     | Import KSA backup metadata for thermostat routing, room mapping and optional config apply |
 | `debug`             | boolean  | false        | Detailed logging                |
+| `telemetry`         | boolean  | true         | Anonymous error reporting       |
 | `excludeZones`      | string[] | []           | Zones to exclude                |
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
 | `excludeSensors`    | string[] | []           | Sensors to exclude              |
@@ -299,6 +300,17 @@ Enable debug logging for detailed diagnostics:
 ```json
 {
 	"debug": true
+}
+```
+
+#### Telemetry
+
+By default, the plugin anonymously reports technical errors to the developer via Sentry. This helps identify and fix bugs faster. Strict sanitization ensures your PIN, panel IP, tokens, client IP, configuration and custom device names are **never** transmitted. 
+If you prefer not to send error reports, you can opt out by adding:
+
+```json
+{
+	"telemetry": false
 }
 ```
 
@@ -525,6 +537,7 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `domusThermostat`   | object   | default attivi | Mapping termostati DOMUS, override manuali e fallback freshness |
 | `ksaImport`         | object   | disabilitato | Import metadata da backup KSA per routing termostati, room mapping e apply opzionale |
 | `debug`             | boolean  | false        | Logging dettagliato             |
+| `telemetry`         | boolean  | true         | Segnalazione anonima errori     |
 | `excludeZones`      | string[] | []           | Zone da escludere               |
 | `excludeOutputs`    | string[] | []           | Output da escludere             |
 | `excludeSensors`    | string[] | []           | Sensori da escludere            |
@@ -653,6 +666,17 @@ Abilita il debug logging per diagnosi dettagliate:
 ```json
 {
 	"debug": true
+}
+```
+
+#### Telemetry
+
+Di default, il plugin segnala anonimamente gli errori tecnici allo sviluppatore tramite Sentry. Questo aiuta a identificare e risolvere i bug più velocemente. Una rigida sanitizzazione garantisce che PIN, IP della centrale, token, IP del client, configurazione e nomi personalizzati dei dispositivi non vengano **mai** trasmessi.
+Se preferisci non inviare segnalazioni di errore, puoi disattivare la funzione aggiungendo:
+
+```json
+{
+	"telemetry": false
 }
 ```
 

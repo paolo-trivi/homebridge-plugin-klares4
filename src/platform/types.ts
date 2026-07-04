@@ -62,6 +62,8 @@ export interface Lares4Config extends PlatformConfig {
      * — otherwise the capture window closes before you can reproduce the issue from HomeKit.
      */
     debugCaptureDurationMs?: number;
+    /** Opt-out anonymous error reporting via Sentry. Default true. */
+    telemetry?: boolean;
 }
 
 export interface DeviceListItem {

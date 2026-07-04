@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4-rc.4] - 2026-07-04
+
+### Added
+- **Telemetry**: Opt-out anonymous error reporting via Sentry to help track unhandled exceptions and bugs. Includes strict sanitization to never transmit sensitive data like PINs, IP addresses, URLs, custom device names, and configuration. Default is enabled (`telemetry: true`). Can be disabled via the plugin settings.
+
 ## [2.1.4-rc.3] - 2026-05-24
 
 ### Changed — Matter name collisions: priority-based + abbreviated suffix

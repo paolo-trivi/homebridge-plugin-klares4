@@ -10,7 +10,9 @@ import type {
 
 import { getEffectiveLogLevel } from '../log-levels';
 import { MqttBridge } from '../mqtt-bridge';
+import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { PLATFORM_NAME, PLUGIN_NAME } from '../settings';
+import { initTelemetry, captureError, closeTelemetry } from '../telemetry';
 import type { KseniaDevice } from '../types';
 import { KseniaWebSocketClient } from '../websocket-client';
 import { DebugCaptureManager } from '../debug-capture';
@@ -99,6 +101,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             return;
         }
 
+        initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW);
+
         this.log.debug('Platform initialization completed:', this.config.name);
 
         this.api.on('didFinishLaunching', (): void => {
@@ -108,6 +112,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                     'Failed to initialize Lares4:',
                     error instanceof Error ? error.message : String(error),
                 );
+                captureError(error, { context: 'didFinishLaunching' });
             });
         });
         this.api.on('shutdown', (): void => {
@@ -198,6 +203,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 'Lares4 initialization error:',
                 error instanceof Error ? error.message : String(error),
             );
+            captureError(error, { context: 'initializeLares4' });
         }
     }
 
@@ -214,6 +220,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.wsClient?.disconnect();
             this.mqttBridge?.disconnect();
         });
+        closeTelemetry();
     }
 
     private handleDeviceDiscovered(device: KseniaDevice): void {
