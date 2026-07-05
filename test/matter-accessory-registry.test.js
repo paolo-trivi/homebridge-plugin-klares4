@@ -372,7 +372,7 @@ test('failed device: no further attempts, no log spam', async () => {
     assert.equal(registered.length, callsAfterFail, 'no further register attempts after failure');
 });
 
-test('prune: unregisters devices no longer present in discovery cycle', async () => {
+test('prune: a single incomplete discovery cycle does NOT unregister a missing accessory', async () => {
     const { api, unregistered } = makeApi();
     const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
     registry.startDiscoveryCycle();
@@ -380,11 +380,128 @@ test('prune: unregisters devices no longer present in discovery cycle', async ()
     await registry.addOrUpdateAccessory(lightDevice('light_b'));
     await delay(200); // settle both
 
-    // New cycle — only light_a is rediscovered
+    // New cycle — only light_a is rediscovered (light_b missing for the first time)
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(lightDevice('light_a'));
     await registry.pruneStaleAccessories();
 
-    assert.deepEqual(unregistered, ['light_b']);
+    assert.deepEqual(unregistered, [], 'a single missing cycle must never trigger unregister');
+    assert.equal(registry.getStatus('light_b'), 'registered', 'accessory must remain registered after one missing cycle');
+});
+
+test('prune: stays skipped while missing cycles remain below the threshold', async () => {
+    const { api, unregistered } = makeApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(lightDevice('light_a'));
+    await registry.addOrUpdateAccessory(lightDevice('light_b'));
+    await delay(200);
+
+    // Two more consecutive cycles where light_b is missing (threshold is 3).
+    for (let i = 0; i < 2; i++) {
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_a'));
+        await registry.pruneStaleAccessories();
+    }
+
+    assert.deepEqual(unregistered, [], 'below-threshold missing cycles must not unregister');
+    assert.equal(registry.getStatus('light_b'), 'registered');
+});
+
+test('prune: unregisters only after N consecutive complete cycles where the device is missing', async () => {
+    const { api, unregistered } = makeApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(lightDevice('light_a'));
+    await registry.addOrUpdateAccessory(lightDevice('light_b'));
+    await delay(200);
+
+    // Three consecutive cycles where light_b is missing — this must cross the threshold.
+    for (let i = 0; i < 3; i++) {
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_a'));
+        await registry.pruneStaleAccessories();
+    }
+
+    assert.deepEqual(unregistered, ['light_b'], 'unregister must fire exactly once, after the threshold is crossed');
     assert.equal(registry.getStatus('light_b'), undefined);
+
+    // A further cycle must not unregister it again (it's already gone).
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(lightDevice('light_a'));
+    await registry.pruneStaleAccessories();
+    assert.deepEqual(unregistered, ['light_b'], 'no duplicate unregister calls for an already-removed accessory');
+});
+
+test('prune: missing-cycle counter resets when the device reappears before the threshold', async () => {
+    const { api, unregistered } = makeApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(lightDevice('light_a'));
+    await registry.addOrUpdateAccessory(lightDevice('light_b'));
+    await delay(200);
+
+    // light_b missing for 2 cycles (below the threshold of 3)...
+    for (let i = 0; i < 2; i++) {
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_a'));
+        await registry.pruneStaleAccessories();
+    }
+    assert.deepEqual(unregistered, []);
+
+    // ...then reappears.
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(lightDevice('light_a'));
+    await registry.addOrUpdateAccessory(lightDevice('light_b'));
+    await registry.pruneStaleAccessories();
+    assert.deepEqual(unregistered, [], 'reappearance before threshold must not unregister');
+
+    // Now it goes missing again for 2 more cycles — if the counter had NOT reset,
+    // this would already total 4 missing cycles and cross the threshold.
+    for (let i = 0; i < 2; i++) {
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_a'));
+        await registry.pruneStaleAccessories();
+    }
+    assert.deepEqual(unregistered, [], 'missing-cycle counter must have reset on reappearance');
+    assert.equal(registry.getStatus('light_b'), 'registered');
+});
+
+test('two simulated boots: same device keeps UUID/serialNumber/displayName stable, no unregister, state still flows', async () => {
+    // Two boots = two independent MatterAccessoryRegistry instances sharing the
+    // same storagePath (mirrors a real Homebridge restart: a fresh plugin
+    // instance, Homebridge's own accessory cache replayed via
+    // configureCachedAccessory, then a fresh WS discovery cycle).
+    const storagePath = tmpStorage();
+    const device = lightDevice('light_boot');
+
+    const boot1 = makeApi();
+    const registry1 = new MatterAccessoryRegistry({ api: boot1.api, log: silentLog(), getWsClient: () => undefined, storagePath });
+    registry1.startDiscoveryCycle();
+    await registry1.addOrUpdateAccessory(device);
+    await delay(200);
+    assert.equal(registry1.getStatus('light_boot'), 'registered');
+    const firstRegistration = boot1.registered[0];
+
+    const boot2 = makeApi();
+    const registry2 = new MatterAccessoryRegistry({ api: boot2.api, log: silentLog(), getWsClient: () => undefined, storagePath });
+    registry2.configureCachedAccessory({ UUID: 'light_boot', displayName: firstRegistration.displayName });
+    registry2.startDiscoveryCycle();
+    await registry2.addOrUpdateAccessory(device);
+    await delay(200);
+
+    assert.equal(registry2.getStatus('light_boot'), 'registered');
+    const secondRegistration = boot2.registered[0];
+    assert.equal(secondRegistration.UUID, firstRegistration.UUID, 'UUID must survive across boots');
+    assert.equal(secondRegistration.serialNumber, firstRegistration.serialNumber, 'serialNumber must survive across boots');
+    assert.equal(secondRegistration.displayName, firstRegistration.displayName, 'displayName must survive across boots');
+    assert.equal(boot2.unregistered.length, 0, 'a fresh boot rehydrating a known device must never unregister it');
+
+    await registry2.pruneStaleAccessories();
+    assert.equal(boot2.unregistered.length, 0, 'prune right after rehydration must not remove it');
+
+    boot2.updates.length = 0;
+    await registry2.updateAccessoryState({ ...device, status: { on: false, dimmable: false } });
+    await delay(1200);
+    assert.ok(boot2.updates.some((u) => u.uuid === 'light_boot'), 'state updates must still be accepted after rehydration');
 });
