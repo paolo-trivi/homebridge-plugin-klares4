@@ -215,3 +215,74 @@ test('MatterNameRegistry: re-resolving the displaced uuid clears its pending ent
     assert.equal(renamed, 'Sala - Sens.');
     assert.equal(reg.consumePendingRenames().size, 0);
 });
+
+// ---------------------------------------------------------------------------
+// MatterNameRegistry — deterministic resolution regardless of arrival order
+// ---------------------------------------------------------------------------
+
+function resolveAll(order) {
+    const reg = new MatterNameRegistry();
+    const results = new Map();
+    for (const [uuid, name, type] of order) {
+        results.set(uuid, reg.resolve(uuid, name, type));
+    }
+    // Apply pending displacement renames so the map reflects the final,
+    // steady-state uuid -> displayName mapping (not transient first-call results).
+    for (const [uuid, newName] of reg.consumePendingRenames()) {
+        results.set(uuid, newName);
+    }
+    return results;
+}
+
+test('MatterNameRegistry: same-priority duplicate names resolve deterministically regardless of arrival order', () => {
+    const devices = [
+        ['cover_5', 'Finestra Bagno', 'cover'],
+        ['cover_9', 'Finestra Bagno', 'cover'],
+    ];
+
+    const forward = resolveAll(devices);
+    const reversed = resolveAll([...devices].reverse());
+
+    // Smaller device.id always keeps the clean name, larger always gets the suffix —
+    // independent of which one was discovered/resolved first.
+    assert.equal(forward.get('cover_5'), 'Finestra Bagno');
+    assert.equal(forward.get('cover_9'), 'Finestra Bagno - Tapp.');
+    assert.deepEqual([...forward.entries()].sort(), [...reversed.entries()].sort(),
+        'same input set resolved in a different order must converge to the same uuid -> displayName mapping');
+});
+
+test('MatterNameRegistry: three-way same-priority collision always gives the clean name to the smallest uuid, with no duplicate names', () => {
+    const devices = [
+        ['zone_30', 'Finestra Cucina', 'zone'],
+        ['zone_12', 'Finestra Cucina', 'zone'],
+        ['zone_5', 'Finestra Cucina', 'zone'],
+    ];
+    const permutations = [
+        devices,
+        [devices[1], devices[0], devices[2]],
+        [devices[2], devices[1], devices[0]],
+        [devices[2], devices[0], devices[1]],
+    ];
+
+    for (const order of permutations) {
+        const mapping = resolveAll(order);
+        // Lexicographically smallest uuid ("zone_12" < "zone_30" < "zone_5") must
+        // always own the clean name, regardless of processing order.
+        assert.equal(mapping.get('zone_12'), 'Finestra Cucina');
+        // No two devices may ever end up sharing the exact same final displayName.
+        const names = [...mapping.values()];
+        assert.equal(new Set(names).size, names.length, `expected unique names, got ${JSON.stringify(names)}`);
+    }
+});
+
+test('MatterNameRegistry: steady-state re-resolution produces no further pending renames', () => {
+    const reg = new MatterNameRegistry();
+    reg.resolve('cover_9', 'Finestra Bagno', 'cover');
+    reg.resolve('cover_5', 'Finestra Bagno', 'cover'); // displaces cover_9 (smaller uuid wins)
+    assert.equal(reg.consumePendingRenames().size, 1, 'first pass produces exactly one displacement rename');
+
+    // Re-resolving the exact same set/order again is a steady state: no further churn.
+    reg.resolve('cover_9', 'Finestra Bagno', 'cover');
+    reg.resolve('cover_5', 'Finestra Bagno', 'cover');
+    assert.equal(reg.consumePendingRenames().size, 0, 'steady-state re-resolution must not produce further renames');
+});
