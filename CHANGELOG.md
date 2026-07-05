@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4-rc.6] - 2026-07-05
+
+### Fixed — Deterministic voice-command names on any Matter controller
+
+Voice assistants (Alexa, Siri, Google) resolve utterances by the **exact, unique device name**. On the reference production install (Homebridge 2.1.0, Matter-only child bridge, 109 endpoints) the rc.5 topology summary showed `metadataChanged=6` on *every* boot: the six cover/zone homonym pairs (Finestra Bagno, Finestra Bagno Matrimoniale, Finestra Cameretta, Finestra Cucina, Finestra Matrimoniale, Finestra Studio) were registered clean-name-first by the zone, then renamed *after* registration by the displaced-rename mechanism — leaving a window on every boot where **two devices carried the same name** and Alexa/Siri could cache/match the contact sensor instead of the cover ("il dispositivo non risponde"). Fixed by moving name resolution *before* registration:
+
+- **Two-phase name resolution (new `matter-name-map.ts`, `matter-name-service.ts`, `matter-name-store.ts`, `matter-name-finalizer.ts`).** At `onInitialSyncComplete`, the final uuid → displayName map for the *whole* device set is computed in a single deterministic batch (priority: cover/light/thermostat/gate/scenario > zone/sensor; stable `device.id` tie-break; typed suffix ` - Sens.`/` - Tapp.`/…; uuid tag as last resort, lengthened until unique). Name slots are matched **case-insensitively** — by construction the map can never contain two equal voice names.
+- **Persisted name-map.** The batch result is stored in `klares4-matter-names.json` (Homebridge storage path, same pattern as the thermostat fallback store) and reloaded at construction: from the second boot on, **every accessory registers with its final name from the very first `registerPlatformAccessories` call**, regardless of the order ZONES/MULTI_TYPES arrive in. The six homonym zones now register directly as `Finestra <X> - Sens.`; the cover owns `Finestra <X>` from the first instant, on every boot.
+- **Targeted refresh only on real panel changes.** After each sync the computed map is diffed against what was actually registered (`registeredDisplayName`, tracked at register time): only genuine panel-side additions/renames trigger a refresh — implemented as a same-UUID unregister+register, the pattern already proven by the stale-endpoint recovery path (Homebridge 2's `matter.updatePlatformAccessories` drops live endpoints and is still never called; rooms/automations survive because the endpoint identity is UUID-derived). If the map is unchanged, the store is not rewritten.
+- **Displaced-rename demoted to internal fallback.** `MatterAccessoryRegistry` no longer drains `consumePendingMatterRenames` after each register; the incremental `MatterNameRegistry` (seeded from the persisted map so it can never hand out an already-owned name) only covers devices not in the map yet — first boot ever, or devices newly added on the panel — and the batch finalize supersedes it at the next sync.
+- **Acceptance criteria, verifiable from the summary log:** second consecutive boot with no panel changes → `metadataChanged=0`; regression-tested end-to-end on a two-boot simulation and on the real 109-endpoint dataset (`test/fixtures/klares4-devices.json`, extracted from the production debug capture): zero duplicate final names case-insensitively, `light_12` → "Studio", `light_11` → "Lavanderia", `cover_6` → "Finestra Matrimoniale" — the exact names behind "accendi lo studio", "accendi la lavanderia", "chiudi finestra matrimoniale".
+
+### Fixed — Name hygiene at the source (HAP + Matter)
+
+- **`DES` normalised at parse time** (`normalizeDeviceName` in `device-state-projector.ts`, applied in output/zone/scenario parsers): trim + collapse of internal whitespace runs. The panel ships labels like `"Balcone Sala "` (trailing space) which used to leak into HAP names, MQTT payloads and the Matter sanitiser. Domain names are now born clean; `device.id`/UUIDs are never derived from names and are unchanged.
+- **HAP displayNames sanitised against the HAP-NodeJS `checkName` rule** (new shared core `src/display-name.ts`, 64-char budget; the Matter sanitiser reuses the same allowlist with its 32-char budget so both ecosystems derive the *same words* from the same label). Applied at accessory creation, on cache restore and in all seven accessory handlers' `Name` characteristic — this removes the boot-time "invalid 'Name' characteristic" HAP warnings for `'Balcone Sala '`, `'Inserisci Finestre+Tapparelle'`, `'Apri Mattina (estate)'` & co., cached accessories included.
+
+### Added — Voice-namespace guard
+
+- The end-of-sync summary now logs the complete final `name → uuid` table and emits an explicit **WARN for any pair of final names equal case-insensitively** — which cannot happen by construction; if it ever appears it is a name-map bug worth reporting.
+
+### Added — Selective Matter exposure by type (`matterExposure`)
+
+- New optional config object `matterExposure` (`zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats`, all default `true`, exposed in the Homebridge UI under "Esclusioni Dispositivi"). Disabling a type hides it from Matter controllers **only** — HAP accessories and the MQTT bridge keep publishing everything. Voice-first installations can drop the 39 contact zones from Alexa, halving the voice namespace and removing every near-collision.
+- Endpoints of a disabled type are removed via the normal conservative prune: absent for 3 consecutive discovery cycles → clean unregister (rc.5 `MatterPruneTracker` discipline). This also covers endpoints that only exist in the Matter cache from a previous session (type disabled between restarts) via the cached-device snapshot now kept by `configureMatterAccessory`.
+- The eligibility gate is enforced inside `MatterAccessoryRegistry` on **both** entry points (`addOrUpdateAccessory` *and* `updateAccessoryState`) — this also closes a pre-existing leak where a device excluded via `excludeZones`/`excludeOutputs`/… could sneak back into Matter through its first status update after boot.
+
+### Documentation
+
+- README: new **"Voice commands (Alexa / Siri / Google)"** section — how exact-name matching works, why the panel labels are already the source of truth, the one-time room setup required per controller (room membership is not conveyed via Matter), why custom aliases belong in the controller apps, and the `matterExposure` recommendation for voice-first installs.
+- README: new **"Updating the plugin (important)"** runbook — always update in place; never uninstall/reinstall or regenerate the Matter child bridge (it regenerates the bridge username/Matter storage and destroys every pairing — production incident of 2026-07-05).
+
+### Tests
+
+- **215/215 passing (34 new).** New suites: `matter-name-map.test.js` (batch determinism across 35 discovery-order permutations, priority/tie-break rules, case-insensitive uniqueness, uuid-tag lengthening, and the full 109-endpoint production fixture with the six documented cover/zone collisions), `matter-name-service.test.js` (persistence round-trip, reload-before-finalize resolution in any order, no-rewrite on identical map, incremental fallback never colliding with seeded names, corrupt-store tolerance), `display-name.test.js` (HAP `checkName` compliance for all production offenders, 64 vs 32 char budgets). Extended: `matter-accessory-registry.test.js` (first-boot collision resolved at finalize; second boot registers final names immediately with `metadataChanged=0` and `unregistered=0` asserted from the cycle summary; order-flip boot; `matterExposure` gating on both entry points; 3-cycle prune of disabled types, cached-zombie case included), `websocket-device-state-projector.test.js` (DES trim/collapse at parse, id stability, typed placeholder fallback).
+
+### Compatibility
+
+- UUIDs, serial numbers and Matter part identities are unchanged for all existing devices; no changes to `_bridge`/commissioning/Matter storage; config keys are additive (`matterExposure`); MQTT topic shapes untouched. The only user-visible name changes are the removal of stray whitespace and, on installations with label collisions, suffixed *sensor* names now applied from the first registration instead of after it.
+
 ## [2.1.4-rc.5] - 2026-07-05
 
 ### Fixed — Matter/Alexa topology churn (conservative discovery)

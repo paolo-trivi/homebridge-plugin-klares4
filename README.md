@@ -49,6 +49,37 @@ The plugin includes Matter-specific reliability code that has been tested in rea
 
 No extra configuration is required: enable Matter in Homebridge and pair the bridge with your preferred ecosystem.
 
+## Voice commands (Alexa / Siri / Google)
+
+Voice assistants resolve utterances by the **exact, unique device name**: "accendi lo studio" works reliably only if exactly one device is named *Studio*. This plugin is built around that rule:
+
+- **Names come from the panel and are the source of truth.** The label you configured in the Lares4 (`DES`) is what you pronounce — the plugin never invents names, it only cleans them (trims stray spaces, replaces characters HomeKit rejects like `+` and parentheses: `Inserisci Finestre+Tapparelle` → `Inserisci Finestre e Tapparelle`).
+- **The controllable device always owns the clean name.** When a cover and a security zone share the same label (common for windows: the *Finestra Studio* cover and the *Finestra Studio* contact zone), the cover/light/thermostat keeps the clean name and the passive sensor gets a ` - Sens.` suffix — so "chiudi finestra studio" always reaches the cover, never the contact sensor.
+- **Names are deterministic and stable across reboots.** The final name for every device is computed in one batch when discovery completes and persisted to `klares4-matter-names.json` in the Homebridge storage folder. From then on every accessory registers with its final name from the very first instant of every boot, regardless of discovery order — controllers never see a rename, so their cached voice targets stay valid. The end-of-sync log prints the full `name → uuid` table and warns loudly if two devices ever ended up with the same name (which the map prevents by construction).
+- **Room commands need a one-time room setup in the controller.** "Accendi lo studio" as a *room* command (all lights in the room) requires assigning devices to rooms inside Apple Home / Alexa / Google Home — room membership is not conveyed via Matter. Do it once per controller; it survives reboots because device identities (UUID/serial) never change.
+- **Custom aliases are a controller feature.** Matter has no alias concept: if you want "la finestra grande" to mean `Finestra Matrimoniale`, define the alias in the Alexa/Google/Apple app.
+
+### Voice-first installations: trim the namespace with `matterExposure`
+
+On a 100+ endpoint bridge the voice namespace gets crowded — 39 contact zones with names like *Finestra Studio - Sens.* sit vocally close to the covers you actually command. If you don't need them on voice assistants, hide entire device types from Matter (HomeKit/HAP and the MQTT bridge are unaffected):
+
+```json
+"matterExposure": {
+  "zones": false,
+  "sensors": false
+}
+```
+
+Available keys: `zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats` (all default `true`). Endpoints of a type you disable are removed automatically after 3 consecutive discovery cycles (the same conservative prune discipline that protects against transient discovery glitches).
+
+## Updating the plugin (important)
+
+**Always update in place** (Homebridge UI → Plugins → Update, or `npm update -g homebridge-plugin-klares4`).
+
+**Never uninstall/reinstall the plugin and never delete or regenerate the Matter child bridge** to "fix" an issue: doing so regenerates the bridge username and the Matter storage, which destroys the commissioned fabrics — every controller (Apple Home, Alexa, Google) sees a brand-new bridge and you have to re-pair and rebuild rooms/automations from scratch. This is not theoretical; it happened in a production installation on 2026-07-05.
+
+In-place updates are safe by design: accessory UUIDs, serial numbers and Matter endpoint identities are stable across versions, and the plugin re-registers the same accessories on every boot precisely so that pairings, rooms and automations survive.
+
 ## Compatibility
 
 Tested with **Ksenia Lares 4.0** central units (firmware exposing the `KS_WSOCK` WebSocket subprotocol on the panel's local IP, with a valid system PIN). If your specific Lares 4.0 model works or has issues, please open an issue so the compatibility list can grow.
@@ -175,6 +206,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `excludeZones`      | string[] | []           | Zones to exclude                |
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
 | `excludeSensors`    | string[] | []           | Sensors to exclude              |
+| `matterExposure`    | object   | all `true`   | Per-type Matter exposure switches (`zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats`) — Matter side only, see [Voice commands](#voice-commands-alexa--siri--google) |
 | `customNames`       | object   | {}           | Custom names                    |
 
 ### Supported Accessory Types
