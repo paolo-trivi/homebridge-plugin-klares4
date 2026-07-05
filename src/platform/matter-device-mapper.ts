@@ -23,11 +23,11 @@ import { buildThermostatHandlers } from './matter-thermostat-handlers';
 const matterNameRegistry = new MatterNameRegistry();
 
 /**
- * Drain the typed-suffix collision queue. When a high-priority device (cover,
- * light, thermostat, gate, scenario) displaces a previously-registered
- * sensor/zone that was sharing the same sanitised name, the displaced uuid is
- * queued here so the platform registry can refresh its matter metadata with
- * the new ' - Sens.' / ' - <Tipo>' suffix.
+ * Drain the typed-suffix collision queue of the module-level fallback
+ * registry. Legacy escape hatch: since 2.1.4-rc.6 the authoritative naming
+ * source is the batch name-map (`MatterNameService`, injected via
+ * `MapperDeps.resolveDisplayName`), and `MatterAccessoryRegistry` refreshes
+ * renamed accessories from the finalize diff instead of this queue.
  */
 export function consumePendingMatterRenames(): Map<string, string> {
     return matterNameRegistry.consumePendingRenames();
@@ -70,6 +70,12 @@ interface MapperDeps {
      * when omitted (kept for unit-test convenience).
      */
     thermostatEchoTracker?: MatterThermostatEchoTracker;
+    /**
+     * Authoritative displayName resolver (the batch name-map owned by
+     * `MatterNameService`). When omitted (unit tests, legacy callers) the
+     * mapper falls back to the module-level incremental registry.
+     */
+    resolveDisplayName?: (device: KseniaDevice) => string;
 }
 
 const DEFAULT_MOMENTARY_AUTO_OFF_MS = 500;
@@ -86,10 +92,12 @@ function scheduleMomentaryAutoOff(uuid: string, deps: MapperDeps): void {
 
 function baseFields(
     device: KseniaDevice,
-    log?: import('homebridge').Logger,
+    deps: MapperDeps,
 ): Pick<MatterAccessory, 'UUID' | 'displayName' | 'serialNumber' | 'manufacturer' | 'model' | 'firmwareRevision' | 'context'> {
-    const sanitized = matterNameRegistry.resolve(device.id, sanitizeMatterAccessoryName(device.name, device.id), device.type);
-    if (log && sanitized !== device.name) log.debug(`[Matter] Accessory name sanitized: "${device.name}" -> "${sanitized}"`);
+    const sanitized = deps.resolveDisplayName
+        ? deps.resolveDisplayName(device)
+        : matterNameRegistry.resolve(device.id, sanitizeMatterAccessoryName(device.name, device.id), device.type);
+    if (sanitized !== device.name) deps.log.debug(`[Matter] Accessory name sanitized: "${device.name}" -> "${sanitized}"`);
     return {
         UUID: device.id,
         displayName: sanitized,
@@ -99,6 +107,18 @@ function baseFields(
         firmwareRevision: PLUGIN_VERSION,
         context: { device },
     };
+}
+
+/**
+ * Identity/metadata comparison used to decide whether a re-mapped accessory
+ * warrants a metadata refresh (and the `metadataChanged` cycle stat).
+ */
+export function hasAccessoryMetadataChanged(previous: MatterAccessory, next: MatterAccessory): boolean {
+    return previous.displayName !== next.displayName
+        || previous.manufacturer !== next.manufacturer
+        || previous.model !== next.model
+        || previous.serialNumber !== next.serialNumber
+        || previous.firmwareRevision !== next.firmwareRevision;
 }
 
 function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
@@ -137,7 +157,7 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
     }
 
     return {
-        ...baseFields(device, deps.log),
+        ...baseFields(device, deps),
         deviceType: isDimmable
             ? api.matter!.deviceTypes.DimmableLight
             : api.matter!.deviceTypes.OnOffLight,
@@ -153,7 +173,7 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
     const matterPos = Math.round((100 - pos) * 100);
 
     return {
-        ...baseFields(device, deps.log),
+        ...baseFields(device, deps),
         deviceType: api.matter!.deviceTypes.WindowCovering,
         clusters: {
             windowCovering: {
@@ -179,7 +199,7 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
     const supportsCooling = thermostatSupportsCooling(device);
 
     return {
-        ...baseFields(device, log),
+        ...baseFields(device, deps),
         deviceType: api.matter!.deviceTypes.Thermostat,
         clusters: {
             thermostat: { ...base, ...schemaInvariants } as Record<string, unknown>,
@@ -201,7 +221,7 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
 export function mapThermostatAsTemperatureSensor(device: KseniaThermostat, deps: MapperDeps): MatterAccessory {
     const currentC = device.currentTemperature ?? 21;
     return {
-        ...baseFields(device, deps.log),
+        ...baseFields(device, deps),
         deviceType: deps.api.matter!.deviceTypes.TemperatureSensor,
         clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(currentC)) } },
     };
@@ -209,7 +229,7 @@ export function mapThermostatAsTemperatureSensor(device: KseniaThermostat, deps:
 
 function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | undefined {
     const { api } = deps;
-    const bf = baseFields(device, deps.log);
+    const bf = baseFields(device, deps);
     const val = device.status.value;
     switch (device.status.sensorType) {
         case 'temperature': return { ...bf, deviceType: api.matter!.deviceTypes.TemperatureSensor, clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(val)) } } };
@@ -222,7 +242,7 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
 }
 
 function mapZone(device: KseniaZone, deps: MapperDeps): MatterAccessory {
-    return { ...baseFields(device, deps.log), deviceType: deps.api.matter!.deviceTypes.ContactSensor, clusters: { booleanState: { stateValue: !device.status.open } } };
+    return { ...baseFields(device, deps), deviceType: deps.api.matter!.deviceTypes.ContactSensor, clusters: { booleanState: { stateValue: !device.status.open } } };
 }
 
 function mapMomentarySwitch(device: KseniaDevice, trigger: () => Promise<void>, deps: MapperDeps): MatterAccessory {
@@ -232,7 +252,7 @@ function mapMomentarySwitch(device: KseniaDevice, trigger: () => Promise<void>, 
     // scenarios invisible. OnOffOutlet is a controllable server device that every ecosystem
     // (Apple Home, Alexa, Google) exposes as a tappable plug.
     return {
-        ...baseFields(device, deps.log),
+        ...baseFields(device, deps),
         deviceType: deps.api.matter!.deviceTypes.OnOffOutlet,
         clusters: { onOff: { onOff: false } },
         handlers: { onOff: {

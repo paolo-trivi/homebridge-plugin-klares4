@@ -57,7 +57,7 @@ Screenshot*
 
 # Config files
 config.json 
-klares4-devices.json
+/klares4-devices.json
 CLAUDE.md
 CONTEXT.md
 log.txt

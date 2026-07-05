@@ -26,7 +26,7 @@ import { KsaImportService } from './ksa-import-service';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
 import type { AccessoryHandler, Lares4Config } from './types';
 
-export type { AccessoryHandler, Lares4Config, DeviceListItem, DevicesList } from './types';
+export type { AccessoryHandler, Lares4Config, MatterExposureConfig, DeviceListItem, DevicesList } from './types';
 
 export class Lares4Platform implements DynamicPlatformPlugin {
     public readonly Service: typeof Service;
@@ -86,6 +86,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             getWsClient: () => this.wsClient,
             storagePath: this.api.user.storagePath(),
             momentaryAutoOffMs: this.config?.scenarioAutoOffDelay,
+            isDeviceExposed: (device: KseniaDevice): boolean => this.isMatterEligible(device),
         });
 
         if (!config) {
@@ -207,12 +208,31 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         }
     }
 
+    /**
+     * Matter-side eligibility: config exclusions (quiet check) + per-type
+     * `matterExposure` opt-out. HAP and MQTT paths are NOT affected by this.
+     */
+    private isMatterEligible(device: KseniaDevice): boolean {
+        return !this.discoveryService.isDeviceExcluded(device)
+            && this.discoveryService.isMatterTypeExposed(device.type);
+    }
+
     private handleInitialSyncComplete(): void {
-        this.log.info('Initial synchronization completed, pruning stale accessories...');
+        this.log.info('Initial synchronization completed, finalizing Matter name-map and pruning stale accessories...');
         this.accessoryRegistry.pruneStaleAccessories();
-        this.matterRegistry.pruneStaleAccessories().catch((err: unknown) => {
-            this.log.warn('[Matter] Prune error:', err instanceof Error ? err.message : String(err));
-        });
+        // Two-phase naming, phase 2: with the full device set known, batch-compute
+        // the authoritative name-map, persist it and refresh outliers — then prune.
+        const eligibleDevices = [...this.discoveredDevices.values()]
+            .filter((device: KseniaDevice): boolean => this.isMatterEligible(device));
+        this.matterRegistry
+            .finalizeNameMap(eligibleDevices)
+            .catch((err: unknown) => {
+                this.log.warn('[Matter] Name-map finalize error:', err instanceof Error ? err.message : String(err));
+            })
+            .then(() => this.matterRegistry.pruneStaleAccessories())
+            .catch((err: unknown) => {
+                this.log.warn('[Matter] Prune error:', err instanceof Error ? err.message : String(err));
+            });
     }
 
     private cleanupConnections(): void {

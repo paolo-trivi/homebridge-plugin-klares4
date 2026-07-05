@@ -1,5 +1,6 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
+import type { KseniaDevice } from '../types';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterFallbackStore } from './matter-fallback-store';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
@@ -29,6 +30,10 @@ export interface MatterPruneDeps {
     registrations: Map<string, MatterRegistration>;
     activeDiscoveredUUIDs: Set<string>;
     cachedUUIDs: Set<string>;
+    /** Cached accessory device snapshots (uuid → device), from configureMatterAccessory. */
+    cachedDevices?: Map<string, KseniaDevice>;
+    /** Matter-side eligibility (exclusions + matterExposure); undefined = everything exposed. */
+    isDeviceExposed?: (device: KseniaDevice) => boolean;
     thermostatFallbackUUIDs: Set<string>;
     fallbackStore: MatterFallbackStore;
     thermostatEchoTracker: MatterThermostatEchoTracker;
@@ -124,12 +129,16 @@ export class MatterPruneTracker {
      * Runs one prune pass over `deps.registrations`: accessories absent from
      * `activeDiscoveredUUIDs` are only unregistered once they've crossed
      * `MATTER_PRUNE_STALE_THRESHOLD_CYCLES` consecutive misses (see class doc).
+     *
+     * A second pass covers *cached-only* endpoints (registered in a previous
+     * session, never re-registered in this one) whose device type has since
+     * been disabled via `matterExposure`: they follow the same
+     * missing-cycles discipline before being unregistered for good.
+     *
      * Ends with a compact topology-churn summary log line.
      */
     async runPruneCycle(deps: MatterPruneDeps): Promise<void> {
-        let missingCandidates = 0;
-        let pruneSkipped = 0;
-        let unregisteredCount = 0;
+        const counters = { missingCandidates: 0, pruneSkipped: 0, unregisteredCount: 0 };
 
         for (const [uuid, reg] of deps.registrations) {
             if (reg.status !== 'registered') continue;
@@ -137,35 +146,56 @@ export class MatterPruneTracker {
                 this.recordSeen(uuid, reg.displayName);
                 continue;
             }
+            await this.pruneCandidate(uuid, reg.displayName, deps, counters);
+        }
 
-            missingCandidates += 1;
-            if (!this.recordMissing(uuid, reg.displayName)) {
-                pruneSkipped += 1;
-                continue;
-            }
-
-            try {
-                await deps.api.matter!.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
-                    { UUID: uuid } as MatterAccessory,
-                ]);
-                deps.registrations.delete(uuid);
-                deps.cachedUUIDs.delete(uuid);
-                deps.thermostatFallbackUUIDs.delete(uuid);
-                deps.fallbackStore.remove(uuid);
-                deps.thermostatEchoTracker.clear(uuid);
-                this.clearMissing(uuid);
-                unregisteredCount += 1;
-            } catch (err) {
-                this.log.warn(`[Matter] Failed to unregister ${uuid}: ${deps.fmtErr(err)}`);
+        // Cached-only endpoints of exposure-disabled types (config changed
+        // between sessions). Only config-driven absences are handled here —
+        // cached devices that are merely missing from discovery keep the
+        // conservative "wait for a registration to go stale" behaviour.
+        if (deps.cachedDevices && deps.isDeviceExposed) {
+            for (const [uuid, device] of deps.cachedDevices) {
+                if (deps.registrations.has(uuid)) continue;
+                if (deps.isDeviceExposed(device)) continue;
+                await this.pruneCandidate(uuid, device.name, deps, counters);
             }
         }
 
         this.logCycleSummary(
             deps.activeDiscoveredUUIDs.size,
             deps.registrations.size,
-            missingCandidates,
-            pruneSkipped,
-            unregisteredCount,
+            counters.missingCandidates,
+            counters.pruneSkipped,
+            counters.unregisteredCount,
         );
+    }
+
+    private async pruneCandidate(
+        uuid: string,
+        displayName: string,
+        deps: MatterPruneDeps,
+        counters: { missingCandidates: number; pruneSkipped: number; unregisteredCount: number },
+    ): Promise<void> {
+        counters.missingCandidates += 1;
+        if (!this.recordMissing(uuid, displayName)) {
+            counters.pruneSkipped += 1;
+            return;
+        }
+
+        try {
+            await deps.api.matter!.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
+                { UUID: uuid } as MatterAccessory,
+            ]);
+            deps.registrations.delete(uuid);
+            deps.cachedUUIDs.delete(uuid);
+            deps.cachedDevices?.delete(uuid);
+            deps.thermostatFallbackUUIDs.delete(uuid);
+            deps.fallbackStore.remove(uuid);
+            deps.thermostatEchoTracker.clear(uuid);
+            this.clearMissing(uuid);
+            counters.unregisteredCount += 1;
+        } catch (err) {
+            this.log.warn(`[Matter] Failed to unregister ${uuid}: ${deps.fmtErr(err)}`);
+        }
     }
 }

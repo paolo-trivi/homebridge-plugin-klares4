@@ -20,6 +20,24 @@ export interface PendingMatterStateUpdate {
 }
 
 /**
+ * Merge the device's current state into a pending-update queue, deduping by
+ * (clusterName, partId) so only the latest payload per cluster survives.
+ */
+export function mergeStateUpdates(
+    pending: PendingMatterStateUpdate[],
+    device: KseniaDevice,
+    thermostatAsFallback: boolean,
+): void {
+    for (const update of buildStateUpdates(device, thermostatAsFallback)) {
+        const idx = pending.findIndex(
+            (p) => p.clusterName === update.clusterName && p.partId === update.partId,
+        );
+        if (idx >= 0) pending[idx] = update;
+        else pending.push(update);
+    }
+}
+
+/**
  * Build the cluster-level updates representing the device's current state.
  *
  * @param device  Lares4 device snapshot

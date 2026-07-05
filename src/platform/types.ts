@@ -18,6 +18,21 @@ export type AccessoryHandler =
     | ThermostatAccessory
     | ScenarioAccessory;
 
+/**
+ * Per-type Matter exposure switches. `false` hides that whole Lares4 device
+ * type from Matter controllers (Alexa/Google/Apple via Matter); HAP and the
+ * MQTT bridge are unaffected. Missing keys default to exposed.
+ */
+export interface MatterExposureConfig {
+    zones?: boolean;
+    sensors?: boolean;
+    scenarios?: boolean;
+    lights?: boolean;
+    covers?: boolean;
+    gates?: boolean;
+    thermostats?: boolean;
+}
+
 export interface Lares4Config extends PlatformConfig {
     ip?: string;
     sender?: string;
@@ -35,6 +50,7 @@ export interface Lares4Config extends PlatformConfig {
     excludeOutputs?: string[];
     excludeSensors?: string[];
     excludeScenarios?: string[];
+    matterExposure?: MatterExposureConfig;
     customNames?: {
         zones?: Record<string, string>;
         outputs?: Record<string, string>;

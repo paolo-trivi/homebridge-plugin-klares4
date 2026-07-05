@@ -19,6 +19,13 @@ export interface MatterRegistration {
     lastError?: string;
     recoveryAttempts: number;
     pendingStateUpdates: PendingMatterStateUpdate[];
+    /**
+     * displayName last pushed to matter.js via `registerPlatformAccessories`.
+     * This is the name the live endpoint (and the controllers) actually hold —
+     * unlike `matterAccessory.displayName`, which in-memory re-mapping may
+     * update without any push. The name-map finalize pass diffs against this.
+     */
+    registeredDisplayName?: string;
 }
 
 interface RecoveryDeps {
@@ -31,6 +38,13 @@ interface RecoveryDeps {
     thermostatFallbackEnabled: boolean;
     momentaryAutoOffMs?: number;
     onFallbackPersist?: (uuid: string) => void;
+    resolveDisplayName?: (device: KseniaDevice) => string;
+}
+
+/** True when the registration currently maps to the TemperatureSensor fallback shape. */
+export function isFallbackTemperatureSensor(reg: MatterRegistration): boolean {
+    const clusters = reg.matterAccessory.clusters ?? {};
+    return 'temperatureMeasurement' in clusters && !('thermostat' in clusters);
 }
 
 export async function isMatterAccessoryQueryable(
@@ -105,6 +119,7 @@ export async function handleMissingRegisteredAccessory(
                 }
             }
             await deps.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [reg.matterAccessory]);
+            reg.registeredDisplayName = reg.matterAccessory.displayName;
             deps.scheduleComplete(reg.uuid);
             return;
         } catch (err) {
@@ -122,18 +137,20 @@ export async function handleMissingRegisteredAccessory(
 export async function registerFallbackAccessory(
     device: KseniaThermostat,
     reg: MatterRegistration,
-    deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'momentaryAutoOffMs' | 'onFallbackPersist'>,
+    deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'momentaryAutoOffMs' | 'onFallbackPersist' | 'resolveDisplayName'>,
 ): Promise<void> {
     const fallback = mapThermostatAsTemperatureSensor(device, {
         api: deps.api,
         log: deps.log,
         getWsClient: deps.getWsClient,
         momentaryAutoOffMs: deps.momentaryAutoOffMs,
+        resolveDisplayName: deps.resolveDisplayName,
     });
     await deps.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [fallback]);
     deps.thermostatFallbackUUIDs.add(device.id);
     deps.onFallbackPersist?.(device.id);
     reg.matterAccessory = fallback;
+    reg.registeredDisplayName = fallback.displayName;
     reg.status = 'pending';
     reg.recoveryAttempts = 0;
     reg.pendingStateUpdates = buildStateUpdates(device, true);

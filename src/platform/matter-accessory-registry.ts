@@ -3,10 +3,11 @@ import type { MatterAccessory } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaWebSocketClient } from '../websocket-client';
-import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor, consumePendingMatterRenames } from './matter-device-mapper';
-import { buildStateUpdates } from './matter-state-updates';
+import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor, hasAccessoryMetadataChanged } from './matter-device-mapper';
+import { buildStateUpdates, mergeStateUpdates } from './matter-state-updates';
 import {
     handleMissingRegisteredAccessory,
+    isFallbackTemperatureSensor,
     registerFallbackAccessory,
     type MatterRegistration,
 } from './matter-registration-recovery';
@@ -15,6 +16,8 @@ import { MatterFallbackStore } from './matter-fallback-store';
 import { probeUntilQueryable } from './matter-register-probe';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { MatterPruneTracker } from './matter-prune-tracker';
+import { MatterNameService } from './matter-name-service';
+import { finalizeMatterNameMap } from './matter-name-finalizer';
 
 /**
  * Whether to fall back to a Matter TemperatureSensor when registering a real
@@ -30,6 +33,13 @@ export interface MatterRegistryDeps {
     getWsClient: () => KseniaWebSocketClient | undefined;
     storagePath: string;
     momentaryAutoOffMs?: number;
+    /**
+     * Matter-side eligibility filter (config exclusions + `matterExposure`
+     * per-type opt-out). Devices failing it are never registered and their
+     * previously-registered/cached endpoints are pruned via the normal
+     * 3-consecutive-cycles discipline. When omitted, everything is exposed.
+     */
+    isDeviceExposed?: (device: KseniaDevice) => boolean;
 }
 
 export class MatterAccessoryRegistry {
@@ -37,7 +47,9 @@ export class MatterAccessoryRegistry {
     private readonly log: Logger;
     private readonly getWsClient: () => KseniaWebSocketClient | undefined;
     private readonly momentaryAutoOffMs?: number;
+    private readonly isDeviceExposed?: (device: KseniaDevice) => boolean;
     private readonly cachedUUIDs: Set<string> = new Set();
+    private readonly cachedDevices: Map<string, KseniaDevice> = new Map();
     private readonly registrations: Map<string, MatterRegistration> = new Map();
     private readonly stateUpdateQueue: MatterStateUpdateQueue;
     private activeDiscoveredUUIDs: Set<string> = new Set();
@@ -45,14 +57,17 @@ export class MatterAccessoryRegistry {
     private readonly fallbackStore: MatterFallbackStore;
     private readonly thermostatEchoTracker = new MatterThermostatEchoTracker();
     private readonly pruneTracker: MatterPruneTracker;
+    private readonly nameService: MatterNameService;
 
     constructor(deps: MatterRegistryDeps) {
         this.api = deps.api;
         this.log = deps.log;
         this.getWsClient = deps.getWsClient;
         this.momentaryAutoOffMs = deps.momentaryAutoOffMs;
+        this.isDeviceExposed = deps.isDeviceExposed;
         this.fallbackStore = new MatterFallbackStore(deps.storagePath, deps.log);
         this.pruneTracker = new MatterPruneTracker(this.log);
+        this.nameService = new MatterNameService(deps.storagePath, deps.log);
         for (const uuid of this.fallbackStore.load()) this.thermostatFallbackUUIDs.add(uuid);
 
         this.stateUpdateQueue = new MatterStateUpdateQueue(
@@ -76,6 +91,11 @@ export class MatterAccessoryRegistry {
 
     public configureCachedAccessory(accessory: MatterAccessory): void {
         this.cachedUUIDs.add(accessory.UUID);
+        // Keep the cached device snapshot: it lets the prune pass identify (and
+        // eventually unregister) endpoints whose type was disabled via
+        // `matterExposure` after they were registered in a previous session.
+        const device = accessory.context?.device as KseniaDevice | undefined;
+        if (device?.id && device.type) this.cachedDevices.set(accessory.UUID, device);
         this.log.debug(`[Matter] Cached accessory: ${accessory.displayName} (${accessory.UUID})`);
     }
 
@@ -86,6 +106,10 @@ export class MatterAccessoryRegistry {
 
     public async addOrUpdateAccessory(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
+        if (this.isDeviceExposed && !this.isDeviceExposed(device)) {
+            this.log.debug(`[Matter] not exposed (config): ${device.name} (${device.type}, uuid=${device.id})`);
+            return;
+        }
         this.activeDiscoveredUUIDs.add(device.id);
 
         const existing = this.registrations.get(device.id);
@@ -95,7 +119,7 @@ export class MatterAccessoryRegistry {
                     this.enqueueStateFor(device);
                     return;
                 case 'registered':
-                    await this.refreshAccessoryMetadata(device, existing);
+                    this.refreshAccessoryMetadata(device, existing);
                     this.enqueueStateFor(device);
                     this.stateUpdateQueue.scheduleFlush(device.id);
                     return;
@@ -110,6 +134,7 @@ export class MatterAccessoryRegistry {
 
     public async updateAccessoryState(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
+        if (this.isDeviceExposed && !this.isDeviceExposed(device)) return;
         const existing = this.registrations.get(device.id);
         if (!existing) {
             await this.registerAccessory(device);
@@ -120,6 +145,23 @@ export class MatterAccessoryRegistry {
         this.stateUpdateQueue.scheduleFlush(device.id);
     }
 
+    /**
+     * Two-phase naming, phase 2 — called by the platform at initial-sync
+     * complete. See `matter-name-finalizer.ts` for the mechanism.
+     */
+    public async finalizeNameMap(devices: KseniaDevice[]): Promise<void> {
+        if (!this.api.matter) return;
+        await finalizeMatterNameMap(devices, {
+            api: this.api,
+            log: this.log,
+            nameService: this.nameService,
+            registrations: this.registrations,
+            recordMetadataChanged: () => this.pruneTracker.recordMetadataChanged(),
+            registerRenamed: (device) => this.registerAccessory(device, true),
+            fmtErr: (err) => this.fmtErr(err),
+        });
+    }
+
     public async pruneStaleAccessories(): Promise<void> {
         if (!this.api.matter) return;
         await this.pruneTracker.runPruneCycle({
@@ -127,6 +169,8 @@ export class MatterAccessoryRegistry {
             registrations: this.registrations,
             activeDiscoveredUUIDs: this.activeDiscoveredUUIDs,
             cachedUUIDs: this.cachedUUIDs,
+            cachedDevices: this.cachedDevices,
+            isDeviceExposed: this.isDeviceExposed,
             thermostatFallbackUUIDs: this.thermostatFallbackUUIDs,
             fallbackStore: this.fallbackStore,
             thermostatEchoTracker: this.thermostatEchoTracker,
@@ -149,10 +193,11 @@ export class MatterAccessoryRegistry {
             getWsClient: this.getWsClient,
             momentaryAutoOffMs: this.momentaryAutoOffMs,
             thermostatEchoTracker: this.thermostatEchoTracker,
+            resolveDisplayName: (device: KseniaDevice) => this.nameService.resolveName(device),
         };
     }
 
-    private async registerAccessory(device: KseniaDevice): Promise<void> {
+    private async registerAccessory(device: KseniaDevice, isRename = false): Promise<void> {
         const persistedFallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
         const matterAccessory = persistedFallback
             ? mapThermostatAsTemperatureSensor(device as KseniaThermostat, this.mapperDeps())
@@ -171,8 +216,10 @@ export class MatterAccessoryRegistry {
         this.registrations.set(device.id, reg);
 
         const fromCache = this.cachedUUIDs.has(device.id);
-        if (fromCache) this.pruneTracker.recordCachedRestore();
-        else this.pruneTracker.recordNewlyRegistered();
+        if (!isRename) {
+            if (fromCache) this.pruneTracker.recordCachedRestore();
+            else this.pruneTracker.recordNewlyRegistered();
+        }
         // Include the *post-sanitisation* displayName + length so register failures
         // can be diagnosed without re-deriving the sanitiser output: the original
         // `device.name` may exceed Matter's 32-char nodeLabel limit while the
@@ -184,7 +231,7 @@ export class MatterAccessoryRegistry {
         this.log.info(
             `[Matter] register requested: ${device.name}${nameAnnotation} `
             + `(${device.type}, uuid=${device.id})`
-            + `${fromCache ? ' [cache restore]' : ''}${persistedFallback ? ' [fallback]' : ''}`,
+            + `${fromCache ? ' [cache restore]' : ''}${persistedFallback ? ' [fallback]' : ''}${isRename ? ' [rename]' : ''}`,
         );
         // We must always call registerPlatformAccessories — the MatterServer keeps
         // a runtime accessory map that is populated only on register. The Homebridge
@@ -203,34 +250,12 @@ export class MatterAccessoryRegistry {
                 if (tc) this.thermostatEchoTracker.recordPushed(device.id, tc);
             }
             await this.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [matterAccessory]);
+            reg.registeredDisplayName = matterAccessory.displayName;
         } catch (err) {
             await this.handleRegisterFailure(device, err);
             return;
         }
-        await this.applyPendingDisplacedRenames();
         void this.completeRegistration(device.id);
-    }
-
-    /**
-     * When a higher-priority device displaces a sensor/zone that previously
-     * owned the clean name, the sanitiser queues the displaced uuid here. For
-     * each one, re-run the mapper so the displayName picks up the typed-suffix
-     * candidate, and push the metadata refresh through `refreshAccessoryMetadata`.
-     */
-    private async applyPendingDisplacedRenames(): Promise<void> {
-        const pending = consumePendingMatterRenames();
-        if (pending.size === 0) return;
-        for (const uuid of pending.keys()) {
-            const reg = this.registrations.get(uuid);
-            if (!reg) continue;
-            const device = reg.matterAccessory.context.device as KseniaDevice | undefined;
-            if (!device) continue;
-            try {
-                await this.refreshAccessoryMetadata(device, reg);
-            } catch (err) {
-                this.log.debug(`[Matter] displaced-rename refresh failed for ${uuid}: ${this.fmtErr(err)}`);
-            }
-        }
     }
 
     private async completeRegistration(uuid: string): Promise<void> {
@@ -246,17 +271,12 @@ export class MatterAccessoryRegistry {
         reg.status = 'registered';
         reg.registeredAt = Date.now();
         // After successful register as real Thermostat, drop any stale fallback marker.
-        if (reg.deviceType === 'thermostat' && !this.isFallbackAccessory(reg)) {
+        if (reg.deviceType === 'thermostat' && !isFallbackTemperatureSensor(reg)) {
             if (this.thermostatFallbackUUIDs.delete(uuid)) this.fallbackStore.remove(uuid);
         }
         this.stateUpdateQueue.markReadyAfterBootstrap(reg);
         this.log.info(`[Matter] registered: ${reg.displayName}`);
         this.stateUpdateQueue.scheduleFlush(uuid);
-    }
-
-    private isFallbackAccessory(reg: MatterRegistration): boolean {
-        const clusters = reg.matterAccessory.clusters ?? {};
-        return 'temperatureMeasurement' in clusters && !('thermostat' in clusters);
     }
 
     private async handleRegisterFailure(device: KseniaDevice, err: unknown): Promise<void> {
@@ -287,36 +307,22 @@ export class MatterAccessoryRegistry {
         if (!reg) return;
         reg.matterAccessory.context.device = device;
         const fallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
-        for (const u of buildStateUpdates(device, fallback)) {
-            const idx = reg.pendingStateUpdates.findIndex(
-                (p) => p.clusterName === u.clusterName && p.partId === u.partId,
-            );
-            if (idx >= 0) reg.pendingStateUpdates[idx] = u;
-            else reg.pendingStateUpdates.push(u);
-        }
+        mergeStateUpdates(reg.pendingStateUpdates, device, fallback);
     }
 
-    private async refreshAccessoryMetadata(device: KseniaDevice, reg: MatterRegistration): Promise<void> {
+    private refreshAccessoryMetadata(device: KseniaDevice, reg: MatterRegistration): void {
         const fallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
         const matterAccessory = fallback
             ? mapThermostatAsTemperatureSensor(device as KseniaThermostat, this.mapperDeps())
             : deviceToMatterAccessory(device, this.mapperDeps());
         if (!matterAccessory) return;
-        if (!this.hasMetadataChanged(reg.matterAccessory, matterAccessory)) {
+        if (!hasAccessoryMetadataChanged(reg.matterAccessory, matterAccessory)) {
             this.pruneTracker.recordMetadataUnchanged();
             return;
         }
         this.pruneTracker.recordMetadataChanged();
         reg.matterAccessory = matterAccessory;
         reg.displayName = matterAccessory.displayName;
-    }
-
-    private hasMetadataChanged(previous: MatterAccessory, next: MatterAccessory): boolean {
-        return previous.displayName !== next.displayName
-            || previous.manufacturer !== next.manufacturer
-            || previous.model !== next.model
-            || previous.serialNumber !== next.serialNumber
-            || previous.firmwareRevision !== next.firmwareRevision;
     }
 
     private fmtErr(err: unknown): string {
@@ -334,6 +340,7 @@ export class MatterAccessoryRegistry {
             thermostatFallbackEnabled: MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR,
             momentaryAutoOffMs: this.momentaryAutoOffMs,
             onFallbackPersist: (uuid) => this.fallbackStore.add(uuid),
+            resolveDisplayName: (device: KseniaDevice) => this.nameService.resolveName(device),
         };
     }
 }

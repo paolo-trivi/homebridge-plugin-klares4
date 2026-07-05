@@ -1,7 +1,18 @@
 import type { Logger } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import { isOutputLikeDevice, stripDevicePrefix } from '../device-id';
-import type { Lares4Config } from './types';
+import type { Lares4Config, MatterExposureConfig } from './types';
+
+/** Lares4 device.type → matterExposure config key. */
+const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
+    zone: 'zones',
+    sensor: 'sensors',
+    scenario: 'scenarios',
+    light: 'lights',
+    cover: 'covers',
+    gate: 'gates',
+    thermostat: 'thermostats',
+};
 
 export class DiscoveryService {
     constructor(
@@ -13,30 +24,41 @@ export class DiscoveryService {
         return stripDevicePrefix(deviceId);
     }
 
-    public shouldExcludeDevice(device: KseniaDevice): boolean {
+    /**
+     * Quiet variant of `shouldExcludeDevice`: same config rules, no logging.
+     * Safe to call on hot paths (per-status-update Matter eligibility checks).
+     */
+    public isDeviceExcluded(device: KseniaDevice): boolean {
         const id = this.getNormalizedId(device.id);
 
-        if (device.type === 'zone' && this.config.excludeZones?.includes(id)) {
-            this.log.info(`Zone excluded: ${device.name} (ID: ${id})`);
-            return true;
-        }
-
-        if (isOutputLikeDevice(device) && this.config.excludeOutputs?.includes(id)) {
-            this.log.info(`Output excluded: ${device.name} (ID: ${id})`);
-            return true;
-        }
-
-        if (device.type === 'sensor' && this.config.excludeSensors?.includes(id)) {
-            this.log.info(`Sensor excluded: ${device.name} (ID: ${id})`);
-            return true;
-        }
-
-        if (device.type === 'scenario' && this.config.excludeScenarios?.includes(id)) {
-            this.log.info(`Scenario excluded: ${device.name} (ID: ${id})`);
-            return true;
-        }
-
+        if (device.type === 'zone') return this.config.excludeZones?.includes(id) ?? false;
+        if (isOutputLikeDevice(device)) return this.config.excludeOutputs?.includes(id) ?? false;
+        if (device.type === 'sensor') return this.config.excludeSensors?.includes(id) ?? false;
+        if (device.type === 'scenario') return this.config.excludeScenarios?.includes(id) ?? false;
         return false;
+    }
+
+    public shouldExcludeDevice(device: KseniaDevice): boolean {
+        if (!this.isDeviceExcluded(device)) return false;
+
+        const id = this.getNormalizedId(device.id);
+        const label = device.type === 'zone' ? 'Zone'
+            : isOutputLikeDevice(device) ? 'Output'
+                : device.type === 'sensor' ? 'Sensor'
+                    : 'Scenario';
+        this.log.info(`${label} excluded: ${device.name} (ID: ${id})`);
+        return true;
+    }
+
+    /**
+     * Per-type Matter exposure (`matterExposure` config). Default: everything
+     * exposed. Affects ONLY the Matter side — HAP accessories and the MQTT
+     * bridge keep publishing every device.
+     */
+    public isMatterTypeExposed(deviceType: string): boolean {
+        const key = MATTER_EXPOSURE_KEYS[deviceType];
+        if (!key) return true;
+        return this.config.matterExposure?.[key] !== false;
     }
 
     public getCustomName(device: KseniaDevice): string | undefined {

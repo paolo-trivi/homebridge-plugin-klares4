@@ -505,3 +505,218 @@ test('two simulated boots: same device keeps UUID/serialNumber/displayName stabl
     await delay(1200);
     assert.ok(boot2.updates.some((u) => u.uuid === 'light_boot'), 'state updates must still be accepted after rehydration');
 });
+
+// ---------------------------------------------------------------------------
+// Two-phase name-map: deterministic voice names across boots (2.1.4-rc.6)
+// ---------------------------------------------------------------------------
+
+function zoneDevice(id, name) {
+    return {
+        id,
+        type: 'zone',
+        name,
+        description: '',
+        status: { armed: false, bypassed: false, fault: false, open: false },
+    };
+}
+
+function coverDevice(id, name) {
+    return {
+        id,
+        type: 'cover',
+        name,
+        description: '',
+        status: { position: 0, state: 'stopped' },
+    };
+}
+
+function capturingLog() {
+    const lines = [];
+    return {
+        lines,
+        log: {
+            info: (...a) => lines.push(a.join(' ')),
+            warn: (...a) => lines.push(a.join(' ')),
+            debug: () => {},
+            error: (...a) => lines.push(a.join(' ')),
+        },
+    };
+}
+
+test('name-map: first boot resolves the cover/zone collision at finalize; second boot registers final names immediately with zero metadata churn', async () => {
+    const storagePath = tmpStorage();
+    const zone = zoneDevice('zone_19', 'Finestra Cucina');
+    const cover = coverDevice('cover_1', 'Finestra Cucina');
+
+    // ---- Boot 1 (no persisted map yet): ZONES arrive before MULTI_TYPES ----
+    const boot1 = makeApi();
+    const registry1 = new MatterAccessoryRegistry({ api: boot1.api, log: silentLog(), getWsClient: () => undefined, storagePath });
+    registry1.startDiscoveryCycle();
+    await registry1.addOrUpdateAccessory(zone);
+    await registry1.addOrUpdateAccessory(cover);
+    await delay(200);
+
+    // Incremental fallback: the zone grabbed the clean name first.
+    assert.equal(boot1.registered[0].displayName, 'Finestra Cucina');
+    assert.equal(boot1.registered[1].displayName, 'Finestra Cucina');
+
+    // Sync complete → batch name-map + targeted refresh of the outlier zone.
+    await registry1.finalizeNameMap([zone, cover]);
+    await delay(200);
+    assert.deepEqual(boot1.unregistered, ['zone_19'], 'only the renamed zone is re-registered');
+    const renamed = boot1.registered[2];
+    assert.equal(renamed.UUID, 'zone_19');
+    assert.equal(renamed.displayName, 'Finestra Cucina - Sens.');
+    assert.equal(registry1.getStatus('zone_19'), 'registered');
+
+    // ---- Boot 2 (map persisted): same discovery order, fresh process ----
+    const boot2 = makeApi();
+    const { lines, log } = capturingLog();
+    const registry2 = new MatterAccessoryRegistry({ api: boot2.api, log, getWsClient: () => undefined, storagePath });
+    registry2.startDiscoveryCycle();
+    await registry2.addOrUpdateAccessory(zone);
+    await registry2.addOrUpdateAccessory(cover);
+    await delay(200);
+
+    assert.equal(boot2.registered[0].displayName, 'Finestra Cucina - Sens.',
+        'zone must register with its final suffixed name from the FIRST register call');
+    assert.equal(boot2.registered[1].displayName, 'Finestra Cucina',
+        'cover owns the clean voice name from the first instant');
+
+    // Re-discovery pass (production re-emits devices during the same sync).
+    await registry2.addOrUpdateAccessory(zone);
+    await registry2.addOrUpdateAccessory(cover);
+
+    await registry2.finalizeNameMap([zone, cover]);
+    await delay(200);
+    assert.equal(boot2.unregistered.length, 0, 'steady state: no renames, no unregisters');
+    assert.equal(boot2.registered.length, 2, 'steady state: no extra register calls');
+
+    await registry2.pruneStaleAccessories();
+    const summary = lines.find((l) => l.includes('cycle #'));
+    assert.ok(summary, 'cycle summary must be logged');
+    assert.match(summary, /metadataChanged=0/, `expected zero metadata churn, got: ${summary}`);
+    assert.match(summary, /unregistered=0/, `expected zero unregisters, got: ${summary}`);
+    assert.match(summary, /metadataUnchanged=2/, `re-discovery must be recognised as unchanged, got: ${summary}`);
+
+    // Acceptance: final name table is logged with the WARN-guard clean.
+    assert.ok(lines.some((l) => l.includes('final name-map')), 'name table must be in the end-of-sync summary');
+    assert.ok(!lines.some((l) => l.includes('DUPLICATE display name')), 'no duplicate names may survive');
+});
+
+test('name-map: discovery order does not matter once the map is persisted (covers-first boot after zones-first boot)', async () => {
+    const storagePath = tmpStorage();
+    const zone = zoneDevice('zone_18', 'Finestra Studio');
+    const cover = coverDevice('cover_4', 'Finestra Studio');
+
+    const boot1 = makeApi();
+    const registry1 = new MatterAccessoryRegistry({ api: boot1.api, log: silentLog(), getWsClient: () => undefined, storagePath });
+    registry1.startDiscoveryCycle();
+    await registry1.addOrUpdateAccessory(zone);
+    await registry1.addOrUpdateAccessory(cover);
+    await delay(200);
+    await registry1.finalizeNameMap([zone, cover]);
+    await delay(200);
+
+    // Boot 2 flips the arrival order — the map must make it irrelevant.
+    const boot2 = makeApi();
+    const registry2 = new MatterAccessoryRegistry({ api: boot2.api, log: silentLog(), getWsClient: () => undefined, storagePath });
+    registry2.startDiscoveryCycle();
+    await registry2.addOrUpdateAccessory(cover);
+    await registry2.addOrUpdateAccessory(zone);
+    await delay(200);
+
+    const byUuid = Object.fromEntries(boot2.registered.map((r) => [r.UUID, r.displayName]));
+    assert.equal(byUuid.cover_4, 'Finestra Studio');
+    assert.equal(byUuid.zone_18, 'Finestra Studio - Sens.');
+    assert.equal(boot2.unregistered.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// matterExposure: per-type opt-out + prune discipline (2.1.4-rc.6)
+// ---------------------------------------------------------------------------
+
+test('matterExposure: disabled type is never registered, and status updates cannot sneak it back in', async () => {
+    const { api, registered } = makeApi();
+    const registry = new MatterAccessoryRegistry({
+        api,
+        log: silentLog(),
+        getWsClient: () => undefined,
+        storagePath: tmpStorage(),
+        isDeviceExposed: (device) => device.type !== 'zone',
+    });
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(zoneDevice('zone_1', 'Finestra Bagno'));
+    await registry.addOrUpdateAccessory(lightDevice('light_1'));
+    await delay(200);
+
+    assert.equal(registered.length, 1, 'only the exposed light registers');
+    assert.equal(registered[0].UUID, 'light_1');
+    assert.equal(registry.getStatus('zone_1'), undefined);
+
+    // The status-update path must be gated too (no register-on-update leak).
+    await registry.updateAccessoryState(zoneDevice('zone_1', 'Finestra Bagno'));
+    assert.equal(registered.length, 1, 'updateAccessoryState must not register a non-exposed device');
+});
+
+test('matterExposure: a registered type disabled later is pruned after 3 consecutive sync cycles', async () => {
+    const { api, unregistered } = makeApi();
+    let zonesExposed = true;
+    const registry = new MatterAccessoryRegistry({
+        api,
+        log: silentLog(),
+        getWsClient: () => undefined,
+        storagePath: tmpStorage(),
+        isDeviceExposed: (device) => device.type !== 'zone' || zonesExposed,
+    });
+    const zone = zoneDevice('zone_1', 'Finestra Bagno');
+
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(zone);
+    await registry.addOrUpdateAccessory(lightDevice('light_1'));
+    await delay(200);
+    assert.equal(registry.getStatus('zone_1'), 'registered');
+
+    // User disables zones in matterExposure.
+    zonesExposed = false;
+
+    for (let cycle = 1; cycle <= 3; cycle++) {
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(zone); // discovered but gated
+        await registry.addOrUpdateAccessory(lightDevice('light_1'));
+        await registry.pruneStaleAccessories();
+        if (cycle < 3) {
+            assert.deepEqual(unregistered, [], `cycle ${cycle}: below threshold, no unregister yet`);
+        }
+    }
+
+    assert.deepEqual(unregistered, ['zone_1'], 'third consecutive cycle unregisters the disabled zone');
+    assert.equal(registry.getStatus('zone_1'), undefined);
+    assert.equal(registry.getStatus('light_1'), 'registered', 'exposed devices are untouched');
+});
+
+test('matterExposure: cached-only endpoints of a disabled type (config changed across restarts) are pruned in 3 cycles', async () => {
+    const { api, registered, unregistered } = makeApi();
+    const zombie = zoneDevice('zone_9', 'Porta Garage');
+    const registry = new MatterAccessoryRegistry({
+        api,
+        log: silentLog(),
+        getWsClient: () => undefined,
+        storagePath: tmpStorage(),
+        isDeviceExposed: (device) => device.type !== 'zone',
+    });
+    // Previous session registered the zone; this session only sees it in cache.
+    registry.configureCachedAccessory({ UUID: 'zone_9', displayName: 'Porta Garage', context: { device: zombie } });
+
+    for (let cycle = 1; cycle <= 3; cycle++) {
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_1'));
+        await registry.pruneStaleAccessories();
+        if (cycle < 3) {
+            assert.deepEqual(unregistered, [], `cycle ${cycle}: below threshold, cached zombie kept`);
+        }
+    }
+
+    assert.deepEqual(unregistered, ['zone_9'], 'cached-only disabled-type endpoint removed on the third cycle');
+    assert.ok(registered.every((r) => r.UUID !== 'zone_9'), 'the zombie was never re-registered');
+});

@@ -187,6 +187,47 @@
                 },
                 "default": []
             },
+            "matterExposure": {
+                "title": "Esposizione Matter per tipo",
+                "type": "object",
+                "properties": {
+                    "zones": {
+                        "title": "Zone (sensori contatto)",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "sensors": {
+                        "title": "Sensori ambientali",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "scenarios": {
+                        "title": "Scenari",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "lights": {
+                        "title": "Luci",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "covers": {
+                        "title": "Tapparelle / Cover",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "gates": {
+                        "title": "Cancelli",
+                        "type": "boolean",
+                        "default": true
+                    },
+                    "thermostats": {
+                        "title": "Termostati",
+                        "type": "boolean",
+                        "default": true
+                    }
+                }
+            },
             "customNames": {
                 "type": "object",
                 "properties": {
@@ -753,11 +794,11 @@
                 }
             ]
         },
-                {
-                    "type": "section",
-                    "title": "Esclusioni Dispositivi",
-                    "expandable": true,
-                    "expanded": false,
+        {
+            "type": "section",
+            "title": "Esclusioni Dispositivi",
+            "expandable": true,
+            "expanded": false,
             "items": [
                 {
                     "type": "help",
@@ -820,6 +861,46 @@
                             "key": "excludeScenarios[]",
                             "notitle": true,
                             "placeholder": "ID numerico (es: 3)"
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Esposizione Matter (per tipo)",
+                    "expandable": true,
+                    "expanded": false,
+                    "items": [
+                        {
+                            "type": "help",
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Solo lato Matter</strong><p style='margin:8px 0 0 0;'>Disattiva interi tipi di dispositivo sui controller Matter (Alexa, Google Home, Apple Home via Matter) senza toccare HomeKit/HAP né il bridge MQTT. Utile per installazioni voice-first: escludere le 39 zone contatto dimezza il namespace vocale e azzera le ambiguità sui nomi. Gli endpoint già registrati vengono rimossi automaticamente dopo 3 cicli di sincronizzazione consecutivi.</p></div>"
+                        },
+                        {
+                            "key": "matterExposure.zones",
+                            "type": "checkbox"
+                        },
+                        {
+                            "key": "matterExposure.sensors",
+                            "type": "checkbox"
+                        },
+                        {
+                            "key": "matterExposure.scenarios",
+                            "type": "checkbox"
+                        },
+                        {
+                            "key": "matterExposure.lights",
+                            "type": "checkbox"
+                        },
+                        {
+                            "key": "matterExposure.covers",
+                            "type": "checkbox"
+                        },
+                        {
+                            "key": "matterExposure.gates",
+                            "type": "checkbox"
+                        },
+                        {
+                            "key": "matterExposure.thermostats",
+                            "type": "checkbox"
                         }
                     ]
                 }
