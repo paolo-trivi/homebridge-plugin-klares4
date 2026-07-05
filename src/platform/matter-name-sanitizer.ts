@@ -141,14 +141,20 @@ interface SlotOwner {
  *
  * Collision policy:
  *
- *  1. First arrival wins by default.
- *  2. EXCEPT when a later device has *strictly higher type priority*: it
- *     displaces the incumbent, takes the clean name itself, and the displaced
- *     uuid is queued as a "pending rename" (see `consumePendingRenames`) so
- *     the caller can refresh that accessory's metadata.
- *  3. Same-priority collisions: incumbent keeps the clean name, newcomer
- *     receives a typed suffix (` - Tapp.`, ` - Sens.`, ...). If the name
- *     already mentions its own type, fall back to a uuid-derived 4-char tag.
+ *  1. Higher type priority always wins the clean name: a later-arriving
+ *     device with *strictly higher type priority* displaces the incumbent,
+ *     takes the clean name itself, and the displaced uuid is queued as a
+ *     "pending rename" (see `consumePendingRenames`) so the caller can
+ *     refresh that accessory's metadata.
+ *  2. Same-priority collisions are resolved by a stable tiebreak on
+ *     `device.id` (lexicographically smaller uuid keeps/gets the clean
+ *     name), NOT by arrival order — arrival order depends on WS/array
+ *     ordering and boot timing, which must never affect the final name a
+ *     Matter/Alexa controller sees. The loser receives a typed suffix
+ *     (` - Tapp.`, ` - Sens.`, ...); if the name already mentions its own
+ *     type, fall back to a uuid-derived 4-char tag. This makes the same set
+ *     of devices resolve to the same uuid -> displayName mapping regardless
+ *     of the order they're discovered/re-mapped in.
  */
 export class MatterNameRegistry {
     private readonly slotOwners = new Map<string, SlotOwner>();
@@ -163,9 +169,24 @@ export class MatterNameRegistry {
             return this.assign(uuid, sanitized, sanitized, deviceType);
         }
 
-        // Collision with strictly higher priority → displace the incumbent.
-        if (priorityOf(deviceType) > priorityOf(existingSlot.deviceType)) {
+        // Collision: strictly higher priority displaces the incumbent outright.
+        // A same-priority tie is broken by a stable uuid comparison instead of
+        // arrival order, so the outcome never depends on discovery/boot timing.
+        const incomingPriority = priorityOf(deviceType);
+        const existingPriority = priorityOf(existingSlot.deviceType);
+        const displaces = incomingPriority > existingPriority
+            || (incomingPriority === existingPriority && uuid < existingSlot.uuid);
+
+        if (displaces) {
             const displacedName = this.suffixFor(existingSlot.uuid, existingSlot.sanitizedBase, existingSlot.deviceType);
+            // Register the displaced uuid's new slot so a *third* colliding
+            // device (same-priority tie, e.g. three identically-named sensors)
+            // sees it as taken and doesn't independently pick the same suffix.
+            this.slotOwners.set(displacedName, {
+                uuid: existingSlot.uuid,
+                deviceType: existingSlot.deviceType,
+                sanitizedBase: existingSlot.sanitizedBase,
+            });
             this.uuidToName.set(existingSlot.uuid, displacedName);
             this.pendingRenames.set(existingSlot.uuid, displacedName);
             return this.assign(uuid, sanitized, sanitized, deviceType);
