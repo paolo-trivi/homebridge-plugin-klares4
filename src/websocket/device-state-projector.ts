@@ -9,6 +9,18 @@ import { createDefaultThermostatState } from '../thermostat-state';
 
 export type ProjectedOutputType = 'light' | 'cover' | 'gate' | 'thermostat';
 
+/**
+ * Normalise a raw Lares4 `DES` label at parse time: trim and collapse
+ * internal whitespace runs. The panel ships labels like `"Balcone Sala "`
+ * (trailing space) which would otherwise leak into HAP names (triggering
+ * HAP-NodeJS `checkName` warnings), MQTT payloads and the Matter sanitiser.
+ * Domain names must be born clean; ids/UUIDs are never derived from names.
+ */
+export function normalizeDeviceName(raw: string | undefined): string {
+    if (typeof raw !== 'string') return '';
+    return raw.replace(/\s+/g, ' ').trim();
+}
+
 export function determineOutputType(category: string, mode?: string): ProjectedOutputType {
     const catUpper = category.toUpperCase();
 
@@ -83,13 +95,14 @@ export function parseOutputDevice(
     const category = outputData.CAT ?? outputData.TYPE ?? '';
     const systemId = outputData.ID;
     const outputType = outputTypeMemory.resolve(systemId, category, outputData.MOD);
+    const label = normalizeDeviceName(outputData.DES);
 
     if (outputType === 'light') {
         return {
             id: `light_${systemId}`,
             type: 'light',
-            name: outputData.DES || `Light ${systemId}`,
-            description: outputData.DES || '',
+            name: label || `Light ${systemId}`,
+            description: label,
             status: {
                 on: false,
                 brightness: undefined,
@@ -102,8 +115,8 @@ export function parseOutputDevice(
         return {
             id: `cover_${systemId}`,
             type: 'cover',
-            name: outputData.DES || `Cover ${systemId}`,
-            description: outputData.DES || '',
+            name: label || `Cover ${systemId}`,
+            description: label,
             status: {
                 position: 0,
                 state: 'stopped',
@@ -115,8 +128,8 @@ export function parseOutputDevice(
         return {
             id: `gate_${systemId}`,
             type: 'gate',
-            name: outputData.DES || `Gate ${systemId}`,
-            description: outputData.DES || '',
+            name: label || `Gate ${systemId}`,
+            description: label,
             status: {
                 on: false,
             },
@@ -127,8 +140,8 @@ export function parseOutputDevice(
     return {
         id: `thermostat_${systemId}`,
         type: 'thermostat',
-        name: outputData.DES || `Thermostat ${systemId}`,
-        description: outputData.DES || '',
+        name: label || `Thermostat ${systemId}`,
+        description: label,
         ...thermostatState,
     };
 }

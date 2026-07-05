@@ -2,6 +2,7 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { Lares4Platform, Lares4Config } from '../platform';
 import type { KseniaCover } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
+import { sanitizeHapDisplayName } from '../display-name';
 
 /**
  * Cover Accessory Handler
@@ -43,7 +44,7 @@ export class CoverAccessory {
             this.accessory.getService(this.platform.Service.WindowCovering) ??
             this.accessory.addService(this.platform.Service.WindowCovering);
 
-        this.service.setCharacteristic(this.platform.Characteristic.Name, this.device.name);
+        this.service.setCharacteristic(this.platform.Characteristic.Name, sanitizeHapDisplayName(this.device.name, this.device.id));
 
         this.service
             .getCharacteristic(this.platform.Characteristic.CurrentPosition)

@@ -3,6 +3,7 @@ import type { Service, PlatformAccessory, CharacteristicValue } from 'homebridge
 import type { Lares4Platform, Lares4Config } from '../platform';
 import type { KseniaScenario } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
+import { sanitizeHapDisplayName } from '../display-name';
 
 /**
  * Scenario Accessory Handler
@@ -38,7 +39,7 @@ export class ScenarioAccessory {
             this.accessory.getService(this.platform.Service.Switch) ??
             this.accessory.addService(this.platform.Service.Switch);
 
-        this.service.setCharacteristic(this.platform.Characteristic.Name, device.name);
+        this.service.setCharacteristic(this.platform.Characteristic.Name, sanitizeHapDisplayName(device.name, device.id));
 
         this.service
             .getCharacteristic(this.platform.Characteristic.On)

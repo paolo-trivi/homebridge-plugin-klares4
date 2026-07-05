@@ -13,26 +13,14 @@
  *    HomeKit-safe subset, so targeting HomeKit is also the safest target
  *    for the wider Matter ecosystem.
  *
- * Allowlist (single source of truth, kept in sync with HAP `checkName`):
- *   \p{L}   Unicode letters (includes Italian accents à è é ì ò ù)
- *   \p{N}   Unicode digits
- *   space
- *   '       ASCII apostrophe
- *   ’  Right single quotation mark (typographic apostrophe)
- *   .       period
- *   ,       comma
- *   -       hyphen-minus
- *
- * Anything outside this set is replaced with a single space (then collapsed).
+ * The character allowlist lives in `src/display-name.ts` (shared with the HAP
+ * naming path); this module owns the Matter-specific 32-char budget, the
+ * collision suffix table and the collision-resolution registry.
  */
 
+import { cleanDisplayName, truncateDisplayName } from '../display-name';
+
 const MAX_NAME_LENGTH = 32;
-
-const ALLOWED_MID_CHARS = /[^\p{L}\p{N}’ '.,-]/gu;
-
-// Per HomeKit rule the name MUST start with letter/digit and end with letter/digit/’.
-const BOUNDARY_LEFT = /^[^\p{L}\p{N}]+/u;
-const BOUNDARY_RIGHT = /[^\p{L}\p{N}’]+$/u;
 
 /**
  * Sanitise a device name for use as a Matter accessory `displayName`.
@@ -44,16 +32,7 @@ export function sanitizeMatterAccessoryName(name: string, fallback = 'Device'): 
 }
 
 function clean(raw: string): string {
-    let s = raw;
-    s = s.replace(/\+/g, ' e ');
-    s = s.replace(/[()[\]]/g, ' ');
-    s = s.replace(ALLOWED_MID_CHARS, ' ');
-    s = s.replace(/\s+/g, ' ').trim();
-    s = s.replace(BOUNDARY_LEFT, '').replace(BOUNDARY_RIGHT, '');
-    if (s.length > MAX_NAME_LENGTH) {
-        s = s.slice(0, MAX_NAME_LENGTH).replace(BOUNDARY_RIGHT, '');
-    }
-    return s;
+    return cleanDisplayName(raw, MAX_NAME_LENGTH);
 }
 
 /**
@@ -89,7 +68,7 @@ const TYPE_PRIORITY: Record<string, number> = {
     sensor: 1,
 };
 
-function priorityOf(deviceType: string | undefined): number {
+export function priorityOf(deviceType: string | undefined): number {
     if (!deviceType) return 0;
     return TYPE_PRIORITY[deviceType] ?? 0;
 }
@@ -107,7 +86,7 @@ function nameAlreadyMentions(name: string, suffix: string): boolean {
     return pattern.test(name);
 }
 
-function buildTypedSuffix(name: string, deviceType: string | undefined): string | null {
+export function buildTypedSuffix(name: string, deviceType: string | undefined): string | null {
     if (!deviceType) return null;
     const suffix = TYPE_SUFFIX[deviceType];
     if (!suffix) return null;
@@ -116,17 +95,17 @@ function buildTypedSuffix(name: string, deviceType: string | undefined): string 
     const tail = `${SUFFIX_SEPARATOR}${suffix}`;
     const maxNameLen = MAX_NAME_LENGTH - tail.length;
     if (maxNameLen <= 0) return null;
-    const head = name.length <= maxNameLen ? name : name.slice(0, maxNameLen).replace(BOUNDARY_RIGHT, '');
+    const head = truncateDisplayName(name, maxNameLen);
     if (!head) return null;
     return `${head}${tail}`;
 }
 
-function buildUuidFallbackSuffix(name: string, uuid: string): string {
-    const tag = uuid.replace(/-/g, '').slice(-4);
+export function buildUuidFallbackSuffix(name: string, uuid: string, tagLength = 4): string {
+    const tag = uuid.replace(/-/g, '').slice(-tagLength);
     const tail = `${SUFFIX_SEPARATOR}${tag}`;
     const maxNameLen = MAX_NAME_LENGTH - tail.length;
-    if (maxNameLen <= 0) return name.slice(0, MAX_NAME_LENGTH).replace(BOUNDARY_RIGHT, '');
-    const head = name.length <= maxNameLen ? name : name.slice(0, maxNameLen).replace(BOUNDARY_RIGHT, '');
+    if (maxNameLen <= 0) return truncateDisplayName(name, MAX_NAME_LENGTH);
+    const head = truncateDisplayName(name, maxNameLen);
     return `${head}${tail}`;
 }
 
@@ -155,11 +134,33 @@ interface SlotOwner {
  *     type, fall back to a uuid-derived 4-char tag. This makes the same set
  *     of devices resolve to the same uuid -> displayName mapping regardless
  *     of the order they're discovered/re-mapped in.
+ *
+ * Since 2.1.4-rc.6 this incremental registry is the *fallback* path only:
+ * the authoritative uuid → displayName mapping is the batch-computed,
+ * persisted name-map (`matter-name-map.ts` / `matter-name-service.ts`).
+ * The incremental path handles devices that are not in the persisted map
+ * yet (first boot ever, devices newly added on the panel).
  */
 export class MatterNameRegistry {
     private readonly slotOwners = new Map<string, SlotOwner>();
     private readonly uuidToName = new Map<string, string>();
     private readonly pendingRenames = new Map<string, string>();
+
+    /**
+     * Pre-assign a uuid → name mapping loaded from the persisted name-map.
+     * Trusted input: no collision resolution is applied, the seeded slot is
+     * simply marked as taken so later incremental `resolve` calls for *new*
+     * devices see it and pick a suffix (or displace it by priority).
+     */
+    seed(uuid: string, finalName: string, sanitizedBase: string, deviceType?: string): void {
+        this.slotOwners.set(finalName, { uuid, deviceType, sanitizedBase });
+        this.uuidToName.set(uuid, finalName);
+    }
+
+    /** Current assigned display name for a uuid, if any (seeded or resolved). */
+    currentNameOf(uuid: string): string | undefined {
+        return this.uuidToName.get(uuid);
+    }
 
     resolve(uuid: string, sanitized: string, deviceType?: string): string {
         const existingSlot = this.slotOwners.get(sanitized);

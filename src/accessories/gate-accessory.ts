@@ -2,6 +2,7 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { Lares4Platform } from '../platform';
 import type { KseniaGate } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
+import { sanitizeHapDisplayName } from '../display-name';
 
 /**
  * Gate Accessory Handler
@@ -37,7 +38,7 @@ export class GateAccessory {
             this.accessory.getService(this.platform.Service.Switch) ??
             this.accessory.addService(this.platform.Service.Switch);
 
-        this.service.setCharacteristic(this.platform.Characteristic.Name, this.device.name);
+        this.service.setCharacteristic(this.platform.Characteristic.Name, sanitizeHapDisplayName(this.device.name, this.device.id));
 
         this.service
             .getCharacteristic(this.platform.Characteristic.On)

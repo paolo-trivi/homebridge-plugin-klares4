@@ -105,3 +105,45 @@ test('numeric parsing and cover mapping clamp values safely', () => {
   assert.equal(mapCoverState('STOP', '10', '90'), 'opening');
   assert.equal(mapCoverState('STOP', '90', '10'), 'closing');
 });
+
+// ---------------------------------------------------------------------------
+// normalizeDeviceName — DES hygiene at parse time (2.1.4-rc.6)
+// ---------------------------------------------------------------------------
+
+const { normalizeDeviceName } = require('../dist/websocket/device-state-projector.js');
+const { parseZoneData, parseScenarioData } = require('../dist/websocket-client/device-parsers.js');
+
+test('normalizeDeviceName trims and collapses whitespace', () => {
+  assert.equal(normalizeDeviceName('Balcone Sala '), 'Balcone Sala');
+  assert.equal(normalizeDeviceName('  Finestra   Studio  '), 'Finestra Studio');
+  assert.equal(normalizeDeviceName('Luce\tCucina'), 'Luce Cucina');
+  assert.equal(normalizeDeviceName(undefined), '');
+  assert.equal(normalizeDeviceName('   '), '');
+});
+
+test('parseOutputDevice: DES with trailing space is born clean (name and description)', () => {
+  const cover = parseOutputDevice({ ID: '3', CAT: 'ROLL', DES: 'Balcone Sala ' });
+  assert.equal(cover.id, 'cover_3', 'id must NOT change — UUIDs never derive from names');
+  assert.equal(cover.name, 'Balcone Sala');
+  assert.equal(cover.description, 'Balcone Sala');
+
+  const light = parseOutputDevice({ ID: '12', CAT: 'LIGHT', DES: '  Studio ' });
+  assert.equal(light.id, 'light_12');
+  assert.equal(light.name, 'Studio');
+});
+
+test('parseOutputDevice: empty/whitespace-only DES falls back to the typed placeholder', () => {
+  const light = parseOutputDevice({ ID: '7', CAT: 'LIGHT', DES: '   ' });
+  assert.equal(light.name, 'Light 7');
+  assert.equal(light.description, '');
+});
+
+test('parseZoneData / parseScenarioData: DES normalised at parse', () => {
+  const zone = parseZoneData({ ID: '24', DES: ' Finestra  Matrimoniale ', STATUS: '0' });
+  assert.equal(zone.id, 'zone_24');
+  assert.equal(zone.name, 'Finestra Matrimoniale');
+  assert.equal(zone.description, 'Finestra Matrimoniale');
+
+  const scenario = parseScenarioData({ ID: '15', DES: 'Apri Mattina (estate) ' });
+  assert.equal(scenario.name, 'Apri Mattina (estate)', 'parse only trims/collapses — display sanitisation happens per-ecosystem');
+});

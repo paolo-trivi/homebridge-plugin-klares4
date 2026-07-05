@@ -2,6 +2,7 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { Lares4Platform } from '../platform';
 import type { KseniaSensor } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
+import { sanitizeHapDisplayName } from '../display-name';
 
 /**
  * Sensor Accessory Handler
@@ -35,7 +36,7 @@ export class SensorAccessory {
         }
 
         this.service = this.createSensorService();
-        this.service.setCharacteristic(this.platform.Characteristic.Name, this.device.name);
+        this.service.setCharacteristic(this.platform.Characteristic.Name, sanitizeHapDisplayName(this.device.name, this.device.id));
     }
 
     private createSensorService(): Service {

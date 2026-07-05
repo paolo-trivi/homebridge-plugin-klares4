@@ -2,6 +2,7 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { Lares4Platform, Lares4Config } from '../platform';
 import type { KseniaThermostat } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
+import { sanitizeHapDisplayName } from '../display-name';
 import {
     deriveHomeKitCurrentState,
     domainModeToHomeKitTarget,
@@ -44,7 +45,7 @@ export class ThermostatAccessory {
             this.accessory.getService(this.platform.Service.Thermostat) ??
             this.accessory.addService(this.platform.Service.Thermostat);
 
-        this.service.setCharacteristic(this.platform.Characteristic.Name, this.device.name);
+        this.service.setCharacteristic(this.platform.Characteristic.Name, sanitizeHapDisplayName(this.device.name, this.device.id));
 
         this.service
             .getCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState)

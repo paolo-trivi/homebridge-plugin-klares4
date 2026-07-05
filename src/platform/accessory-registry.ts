@@ -1,4 +1,5 @@
 import type { API, Logger, PlatformAccessory } from 'homebridge';
+import { sanitizeHapDisplayName } from '../display-name';
 import type { KseniaDevice } from '../types';
 import type { AccessoryHandler } from './types';
 
@@ -56,6 +57,12 @@ export class AccessoryRegistry {
         if (existingAccessory) {
             this.options.log.info('Restoring existing accessory from cache:', device.name);
             existingAccessory.context.device = device;
+            // Re-align cached displayNames created before the HAP name sanitiser
+            // (e.g. "Balcone Sala " with trailing space) — UUID is untouched.
+            const cleanName = sanitizeHapDisplayName(device.name, device.id);
+            if (existingAccessory.displayName !== cleanName) {
+                existingAccessory.displayName = cleanName;
+            }
             const existingHandler = this.options.accessoryHandlers.get(uuid);
             if (existingHandler) {
                 this.options.updateAccessoryHandler(existingHandler, device);
@@ -69,7 +76,12 @@ export class AccessoryRegistry {
         }
 
         this.options.log.info('Adding new accessory:', device.name);
-        const accessory = new this.options.api.platformAccessory(device.name, uuid);
+        // displayName must satisfy the HAP-NodeJS checkName rule; the raw panel
+        // label stays available in context.device.name for domain consumers.
+        const accessory = new this.options.api.platformAccessory(
+            sanitizeHapDisplayName(device.name, device.id),
+            uuid,
+        );
         accessory.context.device = device;
 
         const handler = this.options.createAccessoryHandler(accessory, device);
