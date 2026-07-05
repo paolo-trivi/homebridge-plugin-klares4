@@ -14,6 +14,7 @@ import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { MatterFallbackStore } from './matter-fallback-store';
 import { probeUntilQueryable } from './matter-register-probe';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { MatterPruneTracker } from './matter-prune-tracker';
 
 /**
  * Whether to fall back to a Matter TemperatureSensor when registering a real
@@ -43,6 +44,7 @@ export class MatterAccessoryRegistry {
     private readonly thermostatFallbackUUIDs: Set<string> = new Set();
     private readonly fallbackStore: MatterFallbackStore;
     private readonly thermostatEchoTracker = new MatterThermostatEchoTracker();
+    private readonly pruneTracker: MatterPruneTracker;
 
     constructor(deps: MatterRegistryDeps) {
         this.api = deps.api;
@@ -50,6 +52,7 @@ export class MatterAccessoryRegistry {
         this.getWsClient = deps.getWsClient;
         this.momentaryAutoOffMs = deps.momentaryAutoOffMs;
         this.fallbackStore = new MatterFallbackStore(deps.storagePath, deps.log);
+        this.pruneTracker = new MatterPruneTracker(this.log);
         for (const uuid of this.fallbackStore.load()) this.thermostatFallbackUUIDs.add(uuid);
 
         this.stateUpdateQueue = new MatterStateUpdateQueue(
@@ -78,6 +81,7 @@ export class MatterAccessoryRegistry {
 
     public startDiscoveryCycle(): void {
         this.activeDiscoveredUUIDs = new Set();
+        this.pruneTracker.startCycle();
     }
 
     public async addOrUpdateAccessory(device: KseniaDevice): Promise<void> {
@@ -118,23 +122,16 @@ export class MatterAccessoryRegistry {
 
     public async pruneStaleAccessories(): Promise<void> {
         if (!this.api.matter) return;
-        for (const [uuid, reg] of this.registrations) {
-            if (reg.status !== 'registered') continue;
-            if (this.activeDiscoveredUUIDs.has(uuid)) continue;
-            this.log.info(`[Matter] Removing stale accessory: ${reg.displayName} (${uuid})`);
-            try {
-                await this.api.matter.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
-                    { UUID: uuid } as MatterAccessory,
-                ]);
-                this.registrations.delete(uuid);
-                this.cachedUUIDs.delete(uuid);
-                this.thermostatFallbackUUIDs.delete(uuid);
-                this.fallbackStore.remove(uuid);
-                this.thermostatEchoTracker.clear(uuid);
-            } catch (err) {
-                this.log.warn(`[Matter] Failed to unregister ${uuid}: ${this.fmtErr(err)}`);
-            }
-        }
+        await this.pruneTracker.runPruneCycle({
+            api: this.api,
+            registrations: this.registrations,
+            activeDiscoveredUUIDs: this.activeDiscoveredUUIDs,
+            cachedUUIDs: this.cachedUUIDs,
+            thermostatFallbackUUIDs: this.thermostatFallbackUUIDs,
+            fallbackStore: this.fallbackStore,
+            thermostatEchoTracker: this.thermostatEchoTracker,
+            fmtErr: (err) => this.fmtErr(err),
+        });
     }
 
     public getStatus(uuid: string): MatterRegistrationStatus | undefined {
@@ -174,6 +171,8 @@ export class MatterAccessoryRegistry {
         this.registrations.set(device.id, reg);
 
         const fromCache = this.cachedUUIDs.has(device.id);
+        if (fromCache) this.pruneTracker.recordCachedRestore();
+        else this.pruneTracker.recordNewlyRegistered();
         // Include the *post-sanitisation* displayName + length so register failures
         // can be diagnosed without re-deriving the sanitiser output: the original
         // `device.name` may exceed Matter's 32-char nodeLabel limit while the
@@ -303,7 +302,11 @@ export class MatterAccessoryRegistry {
             ? mapThermostatAsTemperatureSensor(device as KseniaThermostat, this.mapperDeps())
             : deviceToMatterAccessory(device, this.mapperDeps());
         if (!matterAccessory) return;
-        if (!this.hasMetadataChanged(reg.matterAccessory, matterAccessory)) return;
+        if (!this.hasMetadataChanged(reg.matterAccessory, matterAccessory)) {
+            this.pruneTracker.recordMetadataUnchanged();
+            return;
+        }
+        this.pruneTracker.recordMetadataChanged();
         reg.matterAccessory = matterAccessory;
         reg.displayName = matterAccessory.displayName;
     }
