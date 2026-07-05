@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4-rc.5] - 2026-07-05
+
+### Fixed — Matter/Alexa topology churn (conservative discovery)
+
+Addresses a production report where, after about a month running Matter, all accessories collapsed into the default room and Alexa periodically re-discovered devices. Root causes identified via a read-only diagnosis on the live install (69 Matter child-bridge reboots, repeated Alexa re-commissioning) and fixed conservatively, without touching UUIDs, storage, or requiring any Matter/Alexa reset:
+
+- **Conservative stale pruning.** `pruneStaleAccessories` used to unregister any Matter accessory missing from a *single* discovery cycle — dangerous when a cycle is disturbed by a WS reconnect or a slow Klares4 response. A new `MatterPruneTracker` (`src/platform/matter-prune-tracker.ts`) now requires 3 consecutive missing cycles before a real unregister happens, resets the counter as soon as a device reappears, and never touches `cachedUUIDs`/fallback markers/echo-tracker state until a real unregister occurs.
+- **Deterministic Matter name collisions.** Same-priority duplicate names (e.g. two covers both labelled "Finestra Bagno") used to resolve by "first arrival wins", which depends on WS/array ordering and boot timing — exactly the kind of churn that makes a controller perceive a renamed device. Same-priority ties are now broken by a stable comparison on `device.id`, so the same set of devices always converges to the same uuid → displayName mapping regardless of discovery order.
+- **Stable output classification.** A partial/incomplete Klares4 re-poll (missing `CAT`/`MOD`) could previously flip an already-known output's classification (e.g. `gate_5` → `cover_5`), changing its `device.id`/UUID and making Matter/Alexa see a brand-new device for the same physical output. A new `OutputTypeMemory` (`src/websocket/device-state-projector.ts`) remembers the last confidently-classified type per Klares4 output id and keeps it stable across ambiguous updates.
+- **Diagnostics.** Compact per-cycle Matter topology summary log (`discovered`/`registered`/`newlyRegistered`/`cachedRestore`/`metadataChanged`/`metadataUnchanged`/`missingCandidates`/`pruneSkipped`/`unregistered`, with a `(bootstrap)` marker on the first cycle) to make future incidents diagnosable from logs alone.
+
+`registerPlatformAccessories` is still called on every boot for known accessories — this is required by the Matter runtime and is unchanged; the UUID is preserved so Apple Home rooms/automations and Matter fabrics are unaffected. 34 new tests added; full suite green.
+
 ## [2.1.4-rc.4] - 2026-07-04
 
 ### Added
