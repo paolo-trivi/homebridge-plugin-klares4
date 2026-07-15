@@ -720,3 +720,107 @@ test('matterExposure: cached-only endpoints of a disabled type (config changed a
     assert.deepEqual(unregistered, ['zone_9'], 'cached-only disabled-type endpoint removed on the third cycle');
     assert.ok(registered.every((r) => r.UUID !== 'zone_9'), 'the zombie was never re-registered');
 });
+
+// ---------------------------------------------------------------------------
+// Conservative prune hardening (2.1.4 review)
+// ---------------------------------------------------------------------------
+
+test('prune: realtime status updates keep a device alive even when discovery misses it', async () => {
+    const { api, unregistered } = makeApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(lightDevice('light_a'));
+    await registry.addOrUpdateAccessory(lightDevice('light_b'));
+    await delay(200);
+
+    // Four cycles where discovery misses light_b, but the device keeps
+    // pushing realtime state — it is alive and must never be pruned.
+    for (let i = 0; i < 4; i++) {
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_a'));
+        await registry.updateAccessoryState({ ...lightDevice('light_b'), status: { on: false, dimmable: false } });
+        await registry.pruneStaleAccessories();
+    }
+
+    assert.deepEqual(unregistered, [], 'a device pushing state updates must never be pruned');
+    assert.equal(registry.getStatus('light_b'), 'registered');
+});
+
+test('prune: missing-cycle counters persist across boots (stable setups run one cycle per boot)', async () => {
+    const storagePath = tmpStorage();
+    const zombie = zoneDevice('zone_9', 'Porta Garage');
+    let lastBoot;
+
+    // Production reality on a stable connection: ONE discovery + prune cycle
+    // per boot. Each boot is a fresh registry instance; without persisted
+    // counters the 3-cycle threshold could never be crossed across restarts.
+    for (let boot = 1; boot <= 3; boot++) {
+        const bootCtx = makeApi();
+        const registry = new MatterAccessoryRegistry({
+            api: bootCtx.api,
+            log: silentLog(),
+            getWsClient: () => undefined,
+            storagePath,
+            isDeviceExposed: (device) => device.type !== 'zone',
+        });
+        registry.configureCachedAccessory({ UUID: 'zone_9', displayName: 'Porta Garage', context: { device: zombie } });
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_1'));
+        await delay(200);
+        await registry.pruneStaleAccessories();
+        lastBoot = bootCtx;
+        if (boot < 3) {
+            assert.deepEqual(bootCtx.unregistered, [], `boot ${boot}: below threshold, cached zombie kept`);
+        }
+    }
+
+    assert.deepEqual(lastBoot.unregistered, ['zone_9'], 'third boot crosses the persisted threshold and unregisters');
+});
+
+test('prune: persisted counter is cleared when the device reappears on a later boot', async () => {
+    const storagePath = tmpStorage();
+    const zone = zoneDevice('zone_5', 'Finestra Bagno');
+    let zonesExposed = false;
+    const exposure = (device) => device.type !== 'zone' || zonesExposed;
+
+    // Boot 1+2: zone disabled → two persisted misses.
+    for (let boot = 1; boot <= 2; boot++) {
+        const bootCtx = makeApi();
+        const registry = new MatterAccessoryRegistry({
+            api: bootCtx.api, log: silentLog(), getWsClient: () => undefined, storagePath, isDeviceExposed: exposure,
+        });
+        registry.configureCachedAccessory({ UUID: 'zone_5', displayName: 'Finestra Bagno', context: { device: zone } });
+        registry.startDiscoveryCycle();
+        await registry.addOrUpdateAccessory(lightDevice('light_1'));
+        await delay(200);
+        await registry.pruneStaleAccessories();
+        assert.deepEqual(bootCtx.unregistered, [], `boot ${boot}: below threshold`);
+    }
+
+    // Boot 3: user re-enables zones → device is discovered again, counter resets.
+    zonesExposed = true;
+    const boot3 = makeApi();
+    const registry3 = new MatterAccessoryRegistry({
+        api: boot3.api, log: silentLog(), getWsClient: () => undefined, storagePath, isDeviceExposed: exposure,
+    });
+    registry3.configureCachedAccessory({ UUID: 'zone_5', displayName: 'Finestra Bagno', context: { device: zone } });
+    registry3.startDiscoveryCycle();
+    await registry3.addOrUpdateAccessory(zone);
+    await registry3.addOrUpdateAccessory(lightDevice('light_1'));
+    await delay(200);
+    await registry3.pruneStaleAccessories();
+    assert.deepEqual(boot3.unregistered, [], 'reappeared device must not be unregistered');
+
+    // Boot 4: disabled again → must start counting from 1, not resume from 2.
+    zonesExposed = false;
+    const boot4 = makeApi();
+    const registry4 = new MatterAccessoryRegistry({
+        api: boot4.api, log: silentLog(), getWsClient: () => undefined, storagePath, isDeviceExposed: exposure,
+    });
+    registry4.configureCachedAccessory({ UUID: 'zone_5', displayName: 'Finestra Bagno', context: { device: zone } });
+    registry4.startDiscoveryCycle();
+    await registry4.addOrUpdateAccessory(lightDevice('light_1'));
+    await delay(200);
+    await registry4.pruneStaleAccessories();
+    assert.deepEqual(boot4.unregistered, [], 'counter must have restarted after the reappearance');
+});

@@ -36,6 +36,7 @@ function createRegistryHarness() {
 
   const log = {
     info: () => undefined,
+    warn: () => undefined,
   };
 
   const registry = new AccessoryRegistry({
@@ -97,5 +98,24 @@ test('AccessoryRegistry prunes stale accessories', () => {
 
   assert.equal(accessories.has('uuid-light_1'), true);
   assert.equal(accessories.has('uuid-light_2'), false);
+  assert.deepEqual(unregistered, ['uuid-light_2']);
+});
+
+test('AccessoryRegistry skips prune entirely when discovery returned no devices', () => {
+  const { registry, accessories, handlers, active, unregistered } = createRegistryHarness();
+  accessories.set('uuid-light_1', new FakeAccessory('Luce', 'uuid-light_1'));
+  accessories.set('uuid-light_2', new FakeAccessory('Luce2', 'uuid-light_2'));
+  handlers.set('uuid-light_1', { id: 'handler1' });
+  handlers.set('uuid-light_2', { id: 'handler2' });
+  // active set intentionally empty: failed/partial sync
+
+  registry.pruneStaleAccessories();
+
+  assert.equal(accessories.size, 2, 'no accessory may be removed on an empty sync');
+  assert.deepEqual(unregistered, []);
+
+  // Once discovery works again, prune behaves normally.
+  active.add('uuid-light_1');
+  registry.pruneStaleAccessories();
   assert.deepEqual(unregistered, ['uuid-light_2']);
 });

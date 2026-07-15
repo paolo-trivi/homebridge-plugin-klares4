@@ -1,9 +1,18 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaDevice } from '../types';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterFallbackStore } from './matter-fallback-store';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+
+const COUNTER_STORE_FILENAME = 'klares4-matter-prune.json';
+
+interface CounterStoreShape {
+    version: 1;
+    missing: Record<string, number>;
+}
 
 /**
  * Minimum number of consecutive discovery cycles an accessory must be absent
@@ -51,8 +60,53 @@ export class MatterPruneTracker {
     private readonly missingCycleCounts = new Map<string, number>();
     private cycleNumber = 0;
     private stats: MatterCycleStats = emptyStats();
+    private readonly counterFilePath?: string;
+    private countersDirty = false;
 
-    constructor(private readonly log: Logger) {}
+    /**
+     * When `storagePath` is provided the missing-cycle counters persist across
+     * restarts (`klares4-matter-prune.json`). Without persistence a stable
+     * setup runs exactly ONE prune cycle per boot, the in-memory counter
+     * restarts from zero every time and the 3-consecutive-cycles threshold is
+     * never crossed — so a genuinely stale endpoint (device removed from the
+     * panel, type disabled via `matterExposure`) would survive forever.
+     */
+    constructor(private readonly log: Logger, storagePath?: string) {
+        if (storagePath) {
+            this.counterFilePath = path.join(storagePath, COUNTER_STORE_FILENAME);
+            this.loadCounters();
+        }
+    }
+
+    private loadCounters(): void {
+        if (!this.counterFilePath) return;
+        try {
+            if (!fs.existsSync(this.counterFilePath)) return;
+            const parsed = JSON.parse(fs.readFileSync(this.counterFilePath, 'utf8')) as Partial<CounterStoreShape>;
+            if (!parsed.missing || typeof parsed.missing !== 'object') return;
+            for (const [uuid, count] of Object.entries(parsed.missing)) {
+                if (typeof count === 'number' && Number.isInteger(count) && count > 0) {
+                    this.missingCycleCounts.set(uuid, count);
+                }
+            }
+        } catch (err) {
+            this.log.warn(`[Matter] Could not load prune-counter store (${this.counterFilePath}): ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    private saveCountersIfDirty(): void {
+        if (!this.counterFilePath || !this.countersDirty) return;
+        this.countersDirty = false;
+        try {
+            const payload: CounterStoreShape = {
+                version: 1,
+                missing: Object.fromEntries([...this.missingCycleCounts.entries()].sort(([a], [b]) => (a < b ? -1 : 1))),
+            };
+            fs.writeFileSync(this.counterFilePath, JSON.stringify(payload, null, 2), 'utf8');
+        } catch (err) {
+            this.log.warn(`[Matter] Could not write prune-counter store (${this.counterFilePath}): ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
 
     /** Marks the start of a new discovery cycle and resets per-cycle counters. */
     startCycle(): void {
@@ -83,6 +137,7 @@ export class MatterPruneTracker {
     /** Device seen in the current cycle: clears its missing-cycle counter, if any. */
     recordSeen(uuid: string, displayName: string): void {
         if (this.missingCycleCounts.delete(uuid)) {
+            this.countersDirty = true;
             this.log.debug(`[Matter] Missing-cycle counter reset for ${displayName} (${uuid}) — device reappeared`);
         }
     }
@@ -94,6 +149,7 @@ export class MatterPruneTracker {
     recordMissing(uuid: string, displayName: string): boolean {
         const missedCycles = (this.missingCycleCounts.get(uuid) ?? 0) + 1;
         this.missingCycleCounts.set(uuid, missedCycles);
+        this.countersDirty = true;
 
         if (missedCycles < MATTER_PRUNE_STALE_THRESHOLD_CYCLES) {
             this.log.info(
@@ -112,7 +168,9 @@ export class MatterPruneTracker {
 
     /** Clears the missing-cycle counter after a real unregister. */
     clearMissing(uuid: string): void {
-        this.missingCycleCounts.delete(uuid);
+        if (this.missingCycleCounts.delete(uuid)) {
+            this.countersDirty = true;
+        }
     }
 
     logCycleSummary(discovered: number, registered: number, missingCandidates: number, pruneSkipped: number, unregistered: number): void {
@@ -160,6 +218,8 @@ export class MatterPruneTracker {
                 await this.pruneCandidate(uuid, device.name, deps, counters);
             }
         }
+
+        this.saveCountersIfDirty();
 
         this.logCycleSummary(
             deps.activeDiscoveredUUIDs.size,
