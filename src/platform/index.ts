@@ -102,7 +102,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             return;
         }
 
-        initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW);
+        initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW, [
+            this.config.ip,
+            this.config.pin,
+            this.config.sender,
+        ].filter((v): v is string => typeof v === 'string'));
 
         this.log.debug('Platform initialization completed:', this.config.name);
 
