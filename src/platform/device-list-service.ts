@@ -16,35 +16,36 @@ interface DeviceListServiceOptions {
     lifecycleService: PlatformLifecycleService;
 }
 
+const DEVICES_FILE_WRITE_DEBOUNCE_MS = 1000;
+
 export class DeviceListService {
     private readonly devicesFilePath: string;
+    private writeTimer?: NodeJS.Timeout;
+    private pendingList?: DevicesList;
 
     constructor(private readonly options: DeviceListServiceOptions) {
         this.devicesFilePath = path.join(options.storagePath, 'klares4-devices.json');
     }
 
+    /**
+     * Called once per discovered device during a sync — the list is rebuilt
+     * cheaply every time, but the file write (and the summary) are debounced
+     * so a boot with N devices produces one write, not N racing writes.
+     */
     public saveDevicesList(discoveredDevices: Iterable<KseniaDevice>): void {
         try {
-            const devicesList = this.buildDevicesList(discoveredDevices);
-            const serializedDevices = JSON.stringify(devicesList, null, 2);
+            this.pendingList = this.buildDevicesList(discoveredDevices);
 
-            void fs.promises
-                .writeFile(this.devicesFilePath, serializedDevices, 'utf8')
-                .then((): void => {
-                    const count =
-                        devicesList.outputs.length +
-                        devicesList.zones.length +
-                        devicesList.sensors.length +
-                        devicesList.scenarios.length;
-                    this.options.log.debug(`Devices list saved: ${count} devices`);
-                })
-                .catch((error: unknown): void => {
-                    this.options.log.error(
-                        'Error saving devices list:',
-                        error instanceof Error ? error.message : String(error),
-                    );
-                });
+            if (this.writeTimer) {
+                clearTimeout(this.writeTimer);
+            }
+            this.writeTimer = setTimeout((): void => {
+                this.writeTimer = undefined;
+                this.flushPendingWrite();
+            }, DEVICES_FILE_WRITE_DEBOUNCE_MS);
+            this.writeTimer.unref?.();
 
+            const devicesList = this.pendingList;
             const summaryDelay = this.options.config.devicesSummaryDelay ?? 2000;
             this.options.lifecycleService.scheduleSummary((): void => {
                 this.printDevicesSummary(devicesList);
@@ -55,6 +56,32 @@ export class DeviceListService {
                 error instanceof Error ? error.message : String(error),
             );
         }
+    }
+
+    private flushPendingWrite(): void {
+        const devicesList = this.pendingList;
+        if (!devicesList) {
+            return;
+        }
+        this.pendingList = undefined;
+        const serializedDevices = JSON.stringify(devicesList, null, 2);
+
+        void fs.promises
+            .writeFile(this.devicesFilePath, serializedDevices, 'utf8')
+            .then((): void => {
+                const count =
+                    devicesList.outputs.length +
+                    devicesList.zones.length +
+                    devicesList.sensors.length +
+                    devicesList.scenarios.length;
+                this.options.log.debug(`Devices list saved: ${count} devices`);
+            })
+            .catch((error: unknown): void => {
+                this.options.log.error(
+                    'Error saving devices list:',
+                    error instanceof Error ? error.message : String(error),
+                );
+            });
     }
 
     private buildDevicesList(discoveredDevices: Iterable<KseniaDevice>): DevicesList {
