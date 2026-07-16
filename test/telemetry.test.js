@@ -153,3 +153,60 @@ test('closeTelemetry is safe to call when not initialized', () => {
   _resetForTesting();
   closeTelemetry(); // should not throw
 });
+
+// ---------------------------------------------------------------------------
+// value-level scrubbing (panel IP/host must never leave the process)
+// ---------------------------------------------------------------------------
+
+test('sanitizeEventData scrubs IPs and URLs from error messages', () => {
+  _resetForTesting();
+  const event = {
+    message: 'Connecting to wss://192.168.1.10:443/KseniaWsock failed',
+    exception: { values: [
+      { type: 'Error', value: 'connect ECONNREFUSED 192.168.1.10:443' },
+      { type: 'Error', value: 'plain error without addresses' },
+    ] },
+  };
+  const result = sanitizeEventData(event);
+  assert.ok(!result.message.includes('192.168.1.10'), `message still leaks the IP: ${result.message}`);
+  assert.equal(result.exception.values[0].value, 'connect ECONNREFUSED [ip]');
+  assert.equal(result.exception.values[1].value, 'plain error without addresses');
+});
+
+test('sanitizeEventData scrubs configured sensitive values (panel host, PIN)', () => {
+  _resetForTesting();
+  initTelemetry(false, '1.0.0', ['lares.local', '123456']);
+  const event = {
+    exception: { values: [{ type: 'Error', value: 'getaddrinfo ENOTFOUND lares.local (pin 123456)' }] },
+  };
+  const result = sanitizeEventData(event);
+  assert.ok(!result.exception.values[0].value.includes('lares.local'));
+  assert.ok(!result.exception.values[0].value.includes('123456'));
+  _resetForTesting();
+});
+
+test('sanitizeEventData removes server_name (machine hostname)', () => {
+  const event = { server_name: 'raspberrypi.lan', message: 'x' };
+  const result = sanitizeEventData(event);
+  assert.equal(result.server_name, undefined);
+});
+
+test('sanitizeEventData scrubs string values in extra and breadcrumb messages', () => {
+  _resetForTesting();
+  const event = {
+    extra: { detail: 'ws error at 10.0.0.7:80' },
+    breadcrumbs: [{ message: 'opened wss://10.0.0.7/KseniaWsock' }],
+  };
+  const result = sanitizeEventData(event);
+  assert.equal(result.extra.detail, 'ws error at [ip]');
+  assert.ok(!result.breadcrumbs[0].message.includes('10.0.0.7'));
+});
+
+test('sanitizeEventData strips compound sensitive keys (ipAddress, hostname, deviceName)', () => {
+  const event = { extra: { ipAddress: '10.0.0.9', hostname: 'lares.lan', deviceName: 'Camera', step: 'x' } };
+  const result = sanitizeEventData(event);
+  assert.equal(result.extra.ipAddress, undefined);
+  assert.equal(result.extra.hostname, undefined);
+  assert.equal(result.extra.deviceName, undefined);
+  assert.equal(result.extra.step, 'x');
+});

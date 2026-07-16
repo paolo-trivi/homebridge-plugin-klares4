@@ -66,7 +66,7 @@ export class MatterAccessoryRegistry {
         this.momentaryAutoOffMs = deps.momentaryAutoOffMs;
         this.isDeviceExposed = deps.isDeviceExposed;
         this.fallbackStore = new MatterFallbackStore(deps.storagePath, deps.log);
-        this.pruneTracker = new MatterPruneTracker(this.log);
+        this.pruneTracker = new MatterPruneTracker(this.log, deps.storagePath);
         this.nameService = new MatterNameService(deps.storagePath, deps.log);
         for (const uuid of this.fallbackStore.load()) this.thermostatFallbackUUIDs.add(uuid);
 
@@ -135,6 +135,9 @@ export class MatterAccessoryRegistry {
     public async updateAccessoryState(device: KseniaDevice): Promise<void> {
         if (!this.api.matter) return;
         if (this.isDeviceExposed && !this.isDeviceExposed(device)) return;
+        // A device pushing realtime state is alive by definition: mark it seen
+        // so a partial discovery can't count it towards the stale-prune threshold.
+        this.activeDiscoveredUUIDs.add(device.id);
         const existing = this.registrations.get(device.id);
         if (!existing) {
             await this.registerAccessory(device);

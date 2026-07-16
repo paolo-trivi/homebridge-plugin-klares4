@@ -286,3 +286,15 @@ test('MatterNameRegistry: steady-state re-resolution produces no further pending
     reg.resolve('cover_5', 'Finestra Bagno', 'cover');
     assert.equal(reg.consumePendingRenames().size, 0, 'steady-state re-resolution must not produce further renames');
 });
+
+test('MatterNameRegistry: collision detection is case-insensitive (voice namespace)', () => {
+    const reg = new MatterNameRegistry();
+    reg.resolve('cover_1', 'Finestra Studio', 'cover');
+    const z = reg.resolve('zone_2', 'finestra studio', 'zone');
+    assert.equal(z, 'finestra studio - Sens.', 'case-different duplicate must be suffixed like the batch map');
+
+    const reg2 = new MatterNameRegistry();
+    reg2.seed('light_5', 'Studio', 'Studio', 'light');
+    const other = reg2.resolve('zone_9', 'STUDIO', 'zone');
+    assert.notEqual(other.toLowerCase(), 'studio', 'seeded slot must be honoured case-insensitively');
+});

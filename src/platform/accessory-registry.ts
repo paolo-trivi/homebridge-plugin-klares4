@@ -111,6 +111,16 @@ export class AccessoryRegistry {
     }
 
     public pruneStaleAccessories(): void {
+        // Safety net: a sync that discovered NOTHING is a failed/partial sync
+        // (WS glitch, panel busy), not a panel with zero devices. Removing every
+        // cached accessory here would wipe HomeKit rooms/automations for the
+        // whole bridge — skip and let the next complete sync prune for real.
+        if (this.options.activeDiscoveredUUIDs.size === 0 && this.options.accessories.size > 0) {
+            this.options.log.warn(
+                'Skipping accessory prune: discovery returned no devices (partial or failed sync)',
+            );
+            return;
+        }
         for (const [uuid, accessory] of this.options.accessories) {
             if (!this.options.activeDiscoveredUUIDs.has(uuid)) {
                 this.removeAccessory(accessory);

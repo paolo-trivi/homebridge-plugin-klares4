@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Telemetry: value-level PII scrubbing (Sentry)
+
+- `beforeSend` now scrubs **values**, not just keys: IPv4 addresses (with optional port) and `ws(s)://`/`http(s)://` URLs are redacted from `event.message`, every `exception.values[].value`, breadcrumb messages/data and string values in `extra`/`contexts`. Network errors like `connect ECONNREFUSED <panel-ip>:443` no longer leak the panel address — the README promise ("no IP is ever transmitted") now holds for error texts too.
+- The exact config-derived secrets (`ip`, `pin`, `sender`) are passed to `initTelemetry` and redacted verbatim (case-insensitive) from every outgoing text field — this also covers hostname-based setups (`getaddrinfo ENOTFOUND lares.local`).
+- `server_name` (the machine hostname Sentry attaches by default) is removed from every event.
+- Key-based scrubbing extended to compound keys (`ipAddress`, `hostname`, `deviceName`, `roomName`).
+- Docblock fixed: `initTelemetry` now documents the actual opt-out semantics (default enabled, `telemetry: false` disables) instead of claiming opt-in.
+
+### Fixed — Matter prune discipline effective across restarts
+
+- **Persisted missing-cycle counters** (`klares4-matter-prune.json`): on a stable connection the plugin runs exactly one discovery+prune cycle per boot, so the in-memory 3-consecutive-cycles counter could never cross the threshold across restarts — a type disabled via `matterExposure` (or a genuinely stale cached endpoint) survived forever. Counters now persist and are cleared as soon as the device reappears; the discipline is unchanged (still 3 consecutive cycles), it just counts for real across boots.
+- **Realtime state keeps a device alive**: `updateAccessoryState` now marks the device as seen in the current discovery cycle, so an accessory that keeps pushing status updates can never become a stale-prune candidate because of a partial discovery — closing a potential churn loop (unregister at threshold → re-register on the next status update).
+- **HAP-side prune safety net**: `pruneStaleAccessories` (HAP bridge) skips the pass entirely when the sync discovered *zero* devices — a failed/partial sync can no longer wipe every cached HomeKit accessory (rooms/automations) in one shot.
+
+### Fixed — Matter name registry: case-insensitive slots
+
+- The incremental `MatterNameRegistry` (fallback path for devices not in the persisted map) matched name slots **case-sensitively**, while the authoritative batch map is case-insensitive — a case-different duplicate ("finestra studio" vs seeded "Finestra Studio") could briefly hold two equal voice names until the next finalize. Slot keys are now lowercased, aligning both paths.
+- Typed-suffix roots are regex-escaped in `nameAlreadyMentions` (robustness for future suffix entries containing metacharacters).
+
+### Fixed — Name hygiene: DOMUS sensors
+
+- The DOMUS sensor triple (`… - Temperatura` / `… - Umidita` / `… - Luminosita`) built its base name from the raw `DES`, bypassing the rc.6 parse-time normalisation — trailing/multiple spaces could re-enter HAP/MQTT names via `BUS_HAS`. Now normalised like every other parser.
+
+### Changed — Boot I/O
+
+- `klares4-devices.json` was rewritten once per discovered device (N racing async writes per sync, ~109 on the reference install). Writes are now debounced (1 s after the last discovery event): one write per sync, startup summary timing unchanged.
+
+### Tests
+
+- **225/225 passing (10 new):** telemetry value-scrubbing (IP/URL redaction, config-derived secrets, `server_name`, compound keys), case-insensitive registry slots, status-updates-keep-alive prune guard, persisted prune counters across three simulated boots (including counter reset on reappearance), HAP empty-sync prune guard.
+
 ## [2.1.4-rc.6] - 2026-07-05
 
 ### Fixed — Deterministic voice-command names on any Matter controller

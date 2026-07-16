@@ -81,7 +81,7 @@ function nameAlreadyMentions(name: string, suffix: string): boolean {
     // recognised as already mentioning "Tapp.", and "Termostato Sala" as
     // already mentioning "Term.". Avoids redundant " - Tapp." / " - Term."
     // tags on names that already describe their own type.
-    const root = suffix.replace(/\.$/, '');
+    const root = suffix.replace(/\.$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pattern = new RegExp(`\\b${root}`, 'iu');
     return pattern.test(name);
 }
@@ -142,9 +142,18 @@ interface SlotOwner {
  * yet (first boot ever, devices newly added on the panel).
  */
 export class MatterNameRegistry {
+    /**
+     * Keyed by *lowercased* display name: voice assistants resolve utterances
+     * case-insensitively, so the collision namespace must be case-insensitive
+     * too — same rule as the batch map (`computeMatterNameMap`).
+     */
     private readonly slotOwners = new Map<string, SlotOwner>();
     private readonly uuidToName = new Map<string, string>();
     private readonly pendingRenames = new Map<string, string>();
+
+    private slotKey(name: string): string {
+        return name.toLowerCase();
+    }
 
     /**
      * Pre-assign a uuid → name mapping loaded from the persisted name-map.
@@ -153,7 +162,7 @@ export class MatterNameRegistry {
      * devices see it and pick a suffix (or displace it by priority).
      */
     seed(uuid: string, finalName: string, sanitizedBase: string, deviceType?: string): void {
-        this.slotOwners.set(finalName, { uuid, deviceType, sanitizedBase });
+        this.slotOwners.set(this.slotKey(finalName), { uuid, deviceType, sanitizedBase });
         this.uuidToName.set(uuid, finalName);
     }
 
@@ -163,7 +172,7 @@ export class MatterNameRegistry {
     }
 
     resolve(uuid: string, sanitized: string, deviceType?: string): string {
-        const existingSlot = this.slotOwners.get(sanitized);
+        const existingSlot = this.slotOwners.get(this.slotKey(sanitized));
 
         // No collision (or same uuid revisiting): take the clean name.
         if (!existingSlot || existingSlot.uuid === uuid) {
@@ -183,7 +192,7 @@ export class MatterNameRegistry {
             // Register the displaced uuid's new slot so a *third* colliding
             // device (same-priority tie, e.g. three identically-named sensors)
             // sees it as taken and doesn't independently pick the same suffix.
-            this.slotOwners.set(displacedName, {
+            this.slotOwners.set(this.slotKey(displacedName), {
                 uuid: existingSlot.uuid,
                 deviceType: existingSlot.deviceType,
                 sanitizedBase: existingSlot.sanitizedBase,
@@ -212,11 +221,11 @@ export class MatterNameRegistry {
     private assign(uuid: string, sanitizedBase: string, finalName: string, deviceType: string | undefined): string {
         // Free the previous slot owned by this uuid, if any (re-mapping path).
         const previous = this.uuidToName.get(uuid);
-        if (previous && previous !== finalName) {
-            const owner = this.slotOwners.get(previous);
-            if (owner && owner.uuid === uuid) this.slotOwners.delete(previous);
+        if (previous && this.slotKey(previous) !== this.slotKey(finalName)) {
+            const owner = this.slotOwners.get(this.slotKey(previous));
+            if (owner && owner.uuid === uuid) this.slotOwners.delete(this.slotKey(previous));
         }
-        this.slotOwners.set(finalName, { uuid, deviceType, sanitizedBase });
+        this.slotOwners.set(this.slotKey(finalName), { uuid, deviceType, sanitizedBase });
         this.uuidToName.set(uuid, finalName);
         // If a pending rename was queued for this uuid and we're now resolving
         // again, the caller is about to consume the up-to-date name directly.
@@ -227,7 +236,7 @@ export class MatterNameRegistry {
     private suffixFor(uuid: string, base: string, deviceType: string | undefined): string {
         const typed = buildTypedSuffix(base, deviceType);
         if (typed) {
-            const existing = this.slotOwners.get(typed);
+            const existing = this.slotOwners.get(this.slotKey(typed));
             if (!existing || existing.uuid === uuid) return typed;
         }
         return buildUuidFallbackSuffix(base, uuid);

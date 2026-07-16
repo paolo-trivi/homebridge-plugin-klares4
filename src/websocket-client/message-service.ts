@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import type { CommandService } from './command-service';
 import { determineOutputType, isIgnoredScenarioCategory, parseOutputData, parseScenarioData, parseZoneData } from './device-parsers';
+import { normalizeDeviceName } from '../websocket/device-state-projector';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
 import { ThermostatStatusUpdater } from './thermostat-status-updater';
@@ -144,7 +145,7 @@ export class MessageService {
                 payload.BUS_HAS.forEach((sensor: KseniaBusHaData): void => {
                     const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
                     this.deps.state.domusSensors.set(normalizedSensorId, { ...sensor, ID: normalizedSensorId });
-                    const baseName = sensor.DES || `Sensor ${normalizedSensorId}`;
+                    const baseName = normalizeDeviceName(sensor.DES) || `Sensor ${normalizedSensorId}`;
 
                     const tempDevice = {
                         id: `sensor_temp_${normalizedSensorId}`,
