@@ -37,16 +37,29 @@ test('DebugCaptureManager captures raw hooks and masks PIN', async () => {
 
   manager.stopCapture(fakeWsClient);
 
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // The debug file is written asynchronously: poll until it parses as
+  // complete JSON instead of relying on a fixed sleep.
+  const deadline = Date.now() + 5000;
+  let content = '';
+  while (Date.now() < deadline) {
+    const debugFiles = fs
+      .readdirSync(tempDir)
+      .filter((file) => file.startsWith('klares4-debug-') && file.endsWith('.json'));
+    if (debugFiles.length > 0) {
+      const latest = debugFiles.sort().at(-1);
+      const candidate = fs.readFileSync(path.join(tempDir, latest), 'utf8');
+      try {
+        JSON.parse(candidate);
+        content = candidate;
+        break;
+      } catch {
+        // Partial write — keep polling.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 
-  const debugFiles = fs
-    .readdirSync(tempDir)
-    .filter((file) => file.startsWith('klares4-debug-') && file.endsWith('.json'));
-
-  assert.equal(debugFiles.length > 0, true);
-
-  const latest = debugFiles.sort().at(-1);
-  const content = fs.readFileSync(path.join(tempDir, latest), 'utf8');
+  assert.equal(content.length > 0, true, 'debug file was not written within 5s');
 
   assert.equal(content.includes('***MASKED***'), true);
   assert.equal(content.includes('123456'), false);

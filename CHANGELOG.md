@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.4-rc.7] - 2026-07-16
+
 ### Fixed — Telemetry: value-level PII scrubbing (Sentry)
 
 - `beforeSend` now scrubs **values**, not just keys: IPv4 addresses (with optional port) and `ws(s)://`/`http(s)://` URLs are redacted from `event.message`, every `exception.values[].value`, breadcrumb messages/data and string values in `extra`/`contexts`. Network errors like `connect ECONNREFUSED <panel-ip>:443` no longer leak the panel address — the README promise ("no IP is ever transmitted") now holds for error texts too.
@@ -37,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - **225/225 passing (10 new):** telemetry value-scrubbing (IP/URL redaction, config-derived secrets, `server_name`, compound keys), case-insensitive registry slots, status-updates-keep-alive prune guard, persisted prune counters across three simulated boots (including counter reset on reappearance), HAP empty-sync prune guard.
+- De-flaked `debug-capture-hook.test.js`: the debug file is written asynchronously, so the test now polls until the JSON parses (up to 5 s) instead of sleeping a fixed 50 ms — under full-suite load the old sleep could read a partial file.
 
 ## [2.1.4-rc.6] - 2026-07-05
 
