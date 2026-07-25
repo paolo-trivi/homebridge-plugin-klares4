@@ -7,7 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.4-rc.7] - 2026-07-16
+## [2.1.4] - 2026-07-25
+
+Stable release of the **`2.1.4-rc.1` … `2.1.4-rc.7`** cycle, running in
+production for over a week on a Matter-only child bridge with no regressions.
+Aggregates the fixes shipped over the seven release candidates below;
+per-rc detail is preserved further down for archival reference.
+
+### Fixed — Matter/Alexa topology stability (production-critical)
+
+- **Conservative stale pruning, now durable across restarts.** `pruneStaleAccessories` no longer unregisters a Matter accessory after a single missing discovery cycle — a new `MatterPruneTracker` requires 3 consecutive missing cycles, and the counters are **persisted** (`klares4-matter-prune.json`) so the discipline holds across boots too, not just within one. Realtime status updates mark a device as seen in the current cycle, so an accessory that keeps pushing state can never be pruned by a partial discovery. The HAP-side pruner additionally refuses to run when a sync discovers zero devices, so a failed/partial sync can no longer wipe every cached HomeKit accessory in one shot.
+- **Deterministic voice-command names.** Two-phase batch name resolution (`matter-name-map.ts` / `matter-name-service.ts`) computes the final `uuid → displayName` map for the *whole* device set before any registration happens, replacing the old "register clean, rename after" mechanism that left a window on every boot where two devices shared the same name — the root cause of Alexa/Siri sometimes resolving the wrong accessory ("il dispositivo non risponde"). The map is persisted to `klares4-matter-names.json` and reloaded at construction, so from the second boot on every accessory registers with its final name immediately. Name-slot matching is case-insensitive end-to-end, including the incremental fallback path used for devices not yet in the map.
+- **Stable output classification.** A new `OutputTypeMemory` remembers the last confidently-classified type per Klares4 output id, so a partial/ambiguous re-poll (missing `CAT`/`MOD`) can no longer flip an already-known output's type — and therefore its `device.id`/UUID — making Matter/Alexa perceive a brand-new device for the same physical output.
+- **Diagnostics.** Compact per-cycle Matter topology summary log (`discovered`/`registered`/`newlyRegistered`/`cachedRestore`/`metadataChanged`/`metadataUnchanged`/`missingCandidates`/`pruneSkipped`/`unregistered`) plus an explicit end-of-sync WARN for any pair of final names equal case-insensitively (which cannot happen by construction) make future incidents diagnosable from logs alone.
+
+### Changed — Matter accessory naming & collisions
+
+- **Sanitiser switched from blocklist to HomeKit-safe allowlist**, guaranteeing HAP-NodeJS `checkName` compliance across Apple Home, Alexa and Google Home; apostrophes (`'`/`’`) are preserved.
+- **Priority-based collision resolution.** Controllable device types (cover/light/thermostat/gate/scenario) now win the clean name over zone/sensor on collision, with a stable `device.id` tie-break so the same device set always converges to the same names regardless of discovery order — e.g. `Finestra Cucina` (cover) keeps the clean label, `Finestra Cucina` (zone) becomes `Finestra Cucina - Sens.`.
+- **Abbreviated, anti-redundant collision suffixes** (` - Sens.`, ` - Tapp.`, ` - Luce`, ` - Term.`, ` - Scenario`, ` - Cancello`) avoid the mid-word truncation and self-referential suffixes (`Tapparella Studio - Tapparella`) seen in earlier candidates.
+- **Name hygiene at the source.** `DES` is trimmed/whitespace-collapsed at parse time for outputs, zones, scenarios and the DOMUS sensor triple (`… - Temperatura` / `… - Umidita` / `… - Luminosita`), so stray panel whitespace never leaks into HAP names, MQTT payloads or the Matter sanitiser.
+
+### Fixed — Matter scenarios invisible on Alexa
+
+- Scenarios/gates were registered as Matter `OnOffSwitch` (a spec-defined client device), which Alexa silently drops and which left Apple Home's cluster latched "ON" after one tap. Switched to `OnOffOutlet` (`OnOffPlugInUnit`) — scenarios now appear under **Plugs** in Alexa and remain re-tappable in Apple Home via the existing momentary auto-off.
+
+### Added — Opt-out telemetry (Sentry), with value-level PII scrubbing
+
+- Anonymous error reporting (`telemetry: true` by default, disable via config) to help track unhandled exceptions and bugs.
+- `beforeSend` scrubs both keys and **values**: IPv4 addresses, `ws(s)://`/`http(s)://` URLs, the exact config-derived secrets (`ip`, `pin`, `sender`) and the machine `server_name` are redacted from `event.message`, exception values, breadcrumbs and `extra`/`contexts` — network errors like `connect ECONNREFUSED <panel-ip>:443` no longer leak the panel address.
+
+### Changed — Boot I/O
+
+- `klares4-devices.json` writes are now debounced (1 s after the last discovery event) instead of once per discovered device (~109 racing writes on the reference install), with startup summary timing unchanged.
+
+### Tests
+
+- **225/225 passing.** Coverage added across the cycle: Matter device-type mapping and auto-off scheduling, name-sanitiser HAP `checkName` compliance, batch name-map determinism across discovery-order permutations (incl. the full 109-endpoint production fixture), persisted prune counters across simulated boots, status-updates-keep-alive prune guard, HAP empty-sync prune guard, telemetry value-scrubbing, and DES normalisation at parse time.
+
+### Compatibility
+
+- UUIDs, serial numbers and Matter part identities are unchanged for all existing devices; no changes to `_bridge`/commissioning/Matter storage; config keys are additive (`matterExposure`, `debugCaptureDurationMs`, `telemetry`); MQTT topic shapes untouched. User-visible name changes are limited to removal of stray whitespace and, on installations with label collisions, suffixed *sensor* names now applied from the first registration instead of after it.
+
+---
+
+### Per-RC archival history
+
+#### [2.1.4-rc.7] - 2026-07-16
 
 ### Fixed — Telemetry: value-level PII scrubbing (Sentry)
 
@@ -41,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **225/225 passing (10 new):** telemetry value-scrubbing (IP/URL redaction, config-derived secrets, `server_name`, compound keys), case-insensitive registry slots, status-updates-keep-alive prune guard, persisted prune counters across three simulated boots (including counter reset on reappearance), HAP empty-sync prune guard.
 - De-flaked `debug-capture-hook.test.js`: the debug file is written asynchronously, so the test now polls until the JSON parses (up to 5 s) instead of sleeping a fixed 50 ms — under full-suite load the old sleep could read a partial file.
 
-## [2.1.4-rc.6] - 2026-07-05
+#### [2.1.4-rc.6] - 2026-07-05
 
 ### Fixed — Deterministic voice-command names on any Matter controller
 
@@ -81,7 +127,7 @@ Voice assistants (Alexa, Siri, Google) resolve utterances by the **exact, unique
 
 - UUIDs, serial numbers and Matter part identities are unchanged for all existing devices; no changes to `_bridge`/commissioning/Matter storage; config keys are additive (`matterExposure`); MQTT topic shapes untouched. The only user-visible name changes are the removal of stray whitespace and, on installations with label collisions, suffixed *sensor* names now applied from the first registration instead of after it.
 
-## [2.1.4-rc.5] - 2026-07-05
+#### [2.1.4-rc.5] - 2026-07-05
 
 ### Fixed — Matter/Alexa topology churn (conservative discovery)
 
@@ -94,12 +140,12 @@ Addresses a production report where, after about a month running Matter, all acc
 
 `registerPlatformAccessories` is still called on every boot for known accessories — this is required by the Matter runtime and is unchanged; the UUID is preserved so Apple Home rooms/automations and Matter fabrics are unaffected. 34 new tests added; full suite green.
 
-## [2.1.4-rc.4] - 2026-07-04
+#### [2.1.4-rc.4] - 2026-07-04
 
 ### Added
 - **Telemetry**: Opt-out anonymous error reporting via Sentry to help track unhandled exceptions and bugs. Includes strict sanitization to never transmit sensitive data like PINs, IP addresses, URLs, custom device names, and configuration. Default is enabled (`telemetry: true`). Can be disabled via the plugin settings.
 
-## [2.1.4-rc.3] - 2026-05-24
+#### [2.1.4-rc.3] - 2026-05-24
 
 ### Changed — Matter name collisions: priority-based + abbreviated suffix
 
@@ -112,7 +158,7 @@ Addresses a production report where, after about a month running Matter, all acc
 - New export `consumePendingMatterRenames()` in `matter-device-mapper.ts` so `MatterAccessoryRegistry` can drain displaced-name events without reaching into the module-level singleton directly.
 - `MatterNameRegistry` API additions: `consumePendingRenames()` returns and clears the pending-rename map. The `resolve` signature is unchanged.
 
-## [2.1.4-rc.2] - 2026-05-24
+#### [2.1.4-rc.2] - 2026-05-24
 
 ### Changed — Matter accessory name sanitisation (allowlist + typed collision suffix)
 
@@ -126,7 +172,7 @@ Addresses a production report where, after about a month running Matter, all acc
 
 Accessory `displayName`s visible in Apple Home, Alexa and Google Home will change for installations that previously hit collisions (e.g. cover + zone sharing the same Lares4 label). Custom names set by the user inside Apple Home / Alexa are preserved by those controllers and are not affected. UUIDs are unchanged, so HomeKit rooms and automations survive.
 
-## [2.1.4-rc.1] - 2026-05-24
+#### [2.1.4-rc.1] - 2026-05-24
 
 ### Fixed — Matter scenarios visible on Alexa (and re-tappable on Apple Home)
 
