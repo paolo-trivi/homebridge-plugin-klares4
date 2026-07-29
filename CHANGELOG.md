@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — Alexa entity confusion after a sensor disappears and comes back
+
+The 2.1.4 naming work computed the right map for a *complete* device set, but
+nothing survived a device being briefly missing. A single partial sync was
+enough to permanently swap the voice-command names of a cover and its
+namesake contact-sensor zone — "apri finestra" then reached the sensor, or
+matched nothing at all.
+
+- **Name slots are now reserved for absent devices.** `finalize` used to
+  recompute the map from the devices present in that sync and persist exactly
+  that, erasing everyone else from `klares4-matter-names.json`. A zone whose
+  cover was missing for one sync would take over the clean name and keep it.
+  Entries for absent uuids are now carried into the computation as
+  reservations (`computeMatterNameMap(devices, reservations)`), taking part in
+  the normal priority ordering — so a live `cover` still outranks a reserved
+  `zone`, but a *lower*-priority namesake can no longer claim a slot just
+  because its owner is temporarily away. Reservations carry a `lastSeen` stamp
+  and are released after 30 days, so devices genuinely deleted from the panel
+  do free their names.
+- **Displaced renames can no longer be lost.** The finalize repair pass
+  iterated the current sync's device list, while the displacement it was meant
+  to repair could involve an accessory *absent* from that list — leaving it
+  registered under a name the map had just reassigned, i.e. two live Matter
+  endpoints answering to one name. The pass now runs over everything currently
+  registered, recovering the device snapshot from `matterAccessory.context`
+  when the sync omits it.
+- **The duplicate-name guard now checks what is actually registered.** It ran
+  against the freshly computed map, which is duplicate-free by construction
+  and therefore could never catch this class of bug — the log looked clean
+  while Alexa saw two "Finestra Cucina". It now diffs `registeredDisplayName`
+  across all live endpoints, including `pending` ones (already pushed to
+  matter.js, already visible to controllers, and the ones whose rename gets
+  deferred).
+
+### Fixed — Matter pruning could remove a whole device class at once
+
+- **Partial-sync floor.** The HAP pruner has always refused to run on a sync
+  that discovered nothing; the Matter pruner had no equivalent guard and would
+  count misses against every registered endpoint. It now skips the pass when
+  discovery returns nothing, or fewer than half the endpoints already
+  registered — the shape of a WS reconnect mid-list, not of a panel that shed
+  its devices. Counters are left untouched, so a genuinely removed device is
+  still caught by the next complete sync.
+- **Honest cycle accounting.** `startDiscoveryCycle` runs once at boot while
+  the prune pass runs on every initial-sync-complete (i.e. every WS
+  reconnect), so the cycle counter never advanced and every pass logged
+  `cycle #1 (bootstrap)`. The counter now advances in the prune pass that
+  consumes it, and per-cycle stats reset there too.
+
 ## [2.1.4] - 2026-07-25
 
 Stable release of the **`2.1.4-rc.1` … `2.1.4-rc.7`** cycle, running in

@@ -23,6 +23,16 @@ interface CounterStoreShape {
  */
 export const MATTER_PRUNE_STALE_THRESHOLD_CYCLES = 3;
 
+/**
+ * A discovery cycle that returned less than this fraction of the endpoints we
+ * already have registered is a partial sync (WS reconnect mid-list, panel
+ * still answering slowly), not a panel that genuinely shed most of its
+ * devices. Counting misses from such a cycle is how a whole class of devices
+ * — every contact-sensor zone, say — walks to the stale threshold together
+ * and disappears from the controllers at once.
+ */
+const MATTER_PRUNE_MIN_DISCOVERY_RATIO = 0.5;
+
 interface MatterCycleStats {
     newlyRegistered: number;
     cachedRestore: number;
@@ -108,9 +118,13 @@ export class MatterPruneTracker {
         }
     }
 
-    /** Marks the start of a new discovery cycle and resets per-cycle counters. */
+    /**
+     * Marks the start of a new discovery cycle and resets per-cycle counters.
+     * The cycle *number* is advanced by `runPruneCycle`, which is the pass
+     * that actually consumes it — this runs only at boot, that runs on every
+     * initial-sync-complete.
+     */
     startCycle(): void {
-        this.cycleNumber += 1;
         this.stats = emptyStats();
     }
 
@@ -196,6 +210,14 @@ export class MatterPruneTracker {
      * Ends with a compact topology-churn summary log line.
      */
     async runPruneCycle(deps: MatterPruneDeps): Promise<void> {
+        // Every prune pass is a cycle. `startDiscoveryCycle` only runs at boot
+        // while this runs on every initial-sync-complete (i.e. on every WS
+        // reconnect), so counting cycles here is what keeps the cycle number —
+        // and the `[bootstrap]` marker — honest in the logs.
+        this.cycleNumber += 1;
+
+        if (this.isDegenerateCycle(deps)) return;
+
         const counters = { missingCandidates: 0, pruneSkipped: 0, unregisteredCount: 0 };
 
         for (const [uuid, reg] of deps.registrations) {
@@ -228,6 +250,39 @@ export class MatterPruneTracker {
             counters.pruneSkipped,
             counters.unregisteredCount,
         );
+        this.stats = emptyStats();
+    }
+
+    /**
+     * Safety net the HAP-side pruner has had all along
+     * (`accessory-registry.ts:pruneStaleAccessories`) and this one lacked: a
+     * discovery that returned nothing — or a small fraction of what we hold —
+     * is a failed or partial sync. Counting misses against it would march
+     * healthy devices towards the stale threshold, so skip the whole pass and
+     * let the next complete sync do the pruning. Nothing is lost: the counters
+     * are persisted, a genuinely removed device is still caught next time.
+     */
+    private isDegenerateCycle(deps: MatterPruneDeps): boolean {
+        const discovered = deps.activeDiscoveredUUIDs.size;
+        const registered = [...deps.registrations.values()].filter((r) => r.status === 'registered').length;
+        if (registered === 0) return false;
+
+        if (discovered === 0) {
+            this.log.warn(
+                `[Matter] cycle #${this.cycleNumber}: skipping prune — discovery returned no devices `
+                + `while ${registered} endpoint(s) are registered (partial or failed sync)`,
+            );
+            return true;
+        }
+        if (discovered < registered * MATTER_PRUNE_MIN_DISCOVERY_RATIO) {
+            this.log.warn(
+                `[Matter] cycle #${this.cycleNumber}: skipping prune — discovery returned only ${discovered} `
+                + `of ${registered} registered endpoint(s), below the `
+                + `${Math.round(MATTER_PRUNE_MIN_DISCOVERY_RATIO * 100)}% partial-sync floor`,
+            );
+            return true;
+        }
+        return false;
     }
 
     private async pruneCandidate(

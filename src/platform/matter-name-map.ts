@@ -32,6 +32,19 @@ export interface MatterNameMapEntry {
     /** Sanitised base name before any collision suffix. */
     base: string;
     type?: string;
+    /**
+     * Epoch ms of the last sync this uuid was actually discovered in. Absent
+     * on entries written before this field existed; treated as "just seen" on
+     * load so a first upgrade never expires anything.
+     */
+    lastSeen?: number;
+    /**
+     * True when the entry is a *reservation*: a uuid known from a previous
+     * sync but absent from the current one. It holds its name slot so a
+     * temporarily-missing device cannot have its name stolen while it is
+     * away — see `computeMatterNameMap`.
+     */
+    reserved?: boolean;
 }
 
 export interface MatterNamedDevice {
@@ -66,13 +79,40 @@ function uniqueUuidFallback(base: string, uuid: string, taken: Set<string>): str
 /**
  * Compute the deterministic uuid → displayName map for the given device set.
  * Pure function: same set in, same map out — regardless of iteration order.
+ *
+ * `reservations` are entries from the persisted map whose device did not show
+ * up in this sync. They take part in the computation as ordinary devices
+ * (using their stored base name and type) instead of being dropped, so a
+ * device that is briefly missing — a partial WS sync, a prune that removed it
+ * — cannot have its clean name taken over by a lower-priority namesake while
+ * it is away. Priority still decides: a live `cover` outranks a reserved
+ * `zone` and takes the clean name, exactly as if both were present.
+ *
+ * Reserved entries come back in the result flagged `reserved: true` so the
+ * caller can persist them without trying to re-register an absent endpoint.
  */
-export function computeMatterNameMap(devices: Iterable<MatterNamedDevice>): Map<string, MatterNameMapEntry> {
+export function computeMatterNameMap(
+    devices: Iterable<MatterNamedDevice>,
+    reservations: Iterable<MatterNameMapEntry> = [],
+): Map<string, MatterNameMapEntry> {
     const byId = new Map<string, MatterNamedDevice>();
     for (const device of devices) {
         if (device && typeof device.id === 'string' && device.id) byId.set(device.id, device);
     }
-    const sorted = [...byId.values()].sort(compareDevices);
+
+    const reservedById = new Map<string, MatterNameMapEntry>();
+    for (const entry of reservations) {
+        // A live device always resolves from its own current panel name; a
+        // reservation for it would be stale, so live wins.
+        if (!entry || !entry.uuid || byId.has(entry.uuid)) continue;
+        reservedById.set(entry.uuid, entry);
+    }
+
+    const candidates: MatterNamedDevice[] = [...byId.values()];
+    for (const entry of reservedById.values()) {
+        candidates.push({ id: entry.uuid, name: entry.base, type: entry.type });
+    }
+    const sorted = candidates.sort(compareDevices);
 
     const taken = new Set<string>();
     const out = new Map<string, MatterNameMapEntry>();
@@ -85,7 +125,17 @@ export function computeMatterNameMap(devices: Iterable<MatterNamedDevice>): Map<
         }
         if (!candidate) candidate = uniqueUuidFallback(base, device.id, taken);
         taken.add(candidate.toLowerCase());
-        out.set(device.id, { uuid: device.id, name: candidate, base, type: device.type });
+
+        const reservation = reservedById.get(device.id);
+        out.set(device.id, {
+            uuid: device.id,
+            name: candidate,
+            base,
+            type: device.type,
+            ...(reservation
+                ? { lastSeen: reservation.lastSeen, reserved: true }
+                : { lastSeen: Date.now() }),
+        });
     }
     return out;
 }
@@ -117,9 +167,14 @@ export function logNameTable(
     duplicates: DuplicateNameGroup[],
 ): void {
     const rows = [...entries].sort((a, b) => a.name.localeCompare(b.name));
-    log.info(`[Matter] final name-map (${rows.length} devices):`);
+    const live = rows.filter((r) => !r.reserved).length;
+    const reserved = rows.length - live;
+    log.info(`[Matter] final name-map (${live} devices${reserved ? `, ${reserved} reserved slots` : ''}):`);
     for (const row of rows) {
-        log.info(`   "${row.name}" -> ${row.uuid}${row.type ? ` [${row.type}]` : ''}`);
+        log.info(
+            `   "${row.name}" -> ${row.uuid}${row.type ? ` [${row.type}]` : ''}`
+            + `${row.reserved ? ' (reserved — not discovered in this sync)' : ''}`,
+        );
     }
     for (const dup of duplicates) {
         log.warn(
