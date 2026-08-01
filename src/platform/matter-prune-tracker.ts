@@ -264,20 +264,30 @@ export class MatterPruneTracker {
      */
     private isDegenerateCycle(deps: MatterPruneDeps): boolean {
         const discovered = deps.activeDiscoveredUUIDs.size;
-        const registered = [...deps.registrations.values()].filter((r) => r.status === 'registered').length;
+        // Baseline: endpoints we still *expect* discovery to report. A type the
+        // user just switched off via `matterExposure` is deliberately absent,
+        // not evidence of a broken sync — counting it here would let a config
+        // change that disables a large type (all the zones, say) look like a
+        // partial sync and block its own cleanup forever.
+        const registered = [...deps.registrations.values()].filter((reg) => {
+            if (reg.status !== 'registered') return false;
+            if (!deps.isDeviceExposed) return true;
+            const device = reg.matterAccessory.context?.device as KseniaDevice | undefined;
+            return !device || deps.isDeviceExposed(device);
+        }).length;
         if (registered === 0) return false;
 
         if (discovered === 0) {
             this.log.warn(
                 `[Matter] cycle #${this.cycleNumber}: skipping prune — discovery returned no devices `
-                + `while ${registered} endpoint(s) are registered (partial or failed sync)`,
+                + `while ${registered} exposed endpoint(s) are registered (partial or failed sync)`,
             );
             return true;
         }
         if (discovered < registered * MATTER_PRUNE_MIN_DISCOVERY_RATIO) {
             this.log.warn(
                 `[Matter] cycle #${this.cycleNumber}: skipping prune — discovery returned only ${discovered} `
-                + `of ${registered} registered endpoint(s), below the `
+                + `of ${registered} exposed registered endpoint(s), below the `
                 + `${Math.round(MATTER_PRUNE_MIN_DISCOVERY_RATIO * 100)}% partial-sync floor`,
             );
             return true;

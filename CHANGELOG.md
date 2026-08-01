@@ -49,7 +49,10 @@ matched nothing at all.
   discovery returns nothing, or fewer than half the endpoints already
   registered — the shape of a WS reconnect mid-list, not of a panel that shed
   its devices. Counters are left untouched, so a genuinely removed device is
-  still caught by the next complete sync.
+  still caught by the next complete sync. The baseline counts only endpoints
+  still *exposed*, so switching a large type off via `matterExposure` (all the
+  zones, say) reads as the config change it is rather than as a partial sync
+  that would block its own cleanup.
 - **Honest cycle accounting.** `startDiscoveryCycle` runs once at boot while
   the prune pass runs on every initial-sync-complete (i.e. every WS
   reconnect), so the cycle counter never advanced and every pass logged
