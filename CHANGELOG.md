@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.5-rc.1] - 2026-08-01
+
 ### Fixed — Alexa entity confusion after a sensor disappears and comes back
 
 The 2.1.4 naming work computed the right map for a *complete* device set, but
