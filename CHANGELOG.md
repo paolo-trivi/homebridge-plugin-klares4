@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0-rc.2] - 2026-09-12
+
+### Fixed
+
+- Matter renames work again. `unregisterPlatformAccessories` is handed a `{ UUID }` stub with no metadata and can reject while having removed the endpoint; that rejection escaped and aborted the entire name-finalize pass on the first device, so every rename queued behind it was never attempted and configured `matterOverrides` had no visible effect. The coordinator now treats a rejection as no evidence either way — local observation decides — and each device is isolated, so one failed rename leaves that endpoint on its previous name instead of cancelling the rest.
+
 ## [2.2.0-rc.1] - 2026-09-12
 
 Additive capabilities on top of `2.1.5-rc.2`: naming provenance, read-only
