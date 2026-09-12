@@ -76,21 +76,23 @@ Available keys: `zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `t
 For individual exceptions, use canonical device IDs with `matterOverrides`. These overrides affect Matter only; HAP/HomeKit and MQTT keep their existing names and exposure:
 
 ```json
-"matterOverrides": {
-  "light_12": { "name": "Studio Ceiling" },
-  "scenario_14": { "exposed": false },
-  "sensor_temp_21": { "name": "Studio Temperature", "exposed": true }
-}
+"matterOverrides": [
+  { "deviceId": "light_12", "name": "Studio Ceiling" },
+  { "deviceId": "scenario_14", "exposed": false },
+  { "deviceId": "sensor_temp_21", "name": "Studio Temperature", "exposed": true }
+]
 ```
+
+Use the array form. The Homebridge UI rebuilds `config.json` from its form model and drops object-typed keys whose properties it cannot render, so a map keyed by device ID is deleted the moment you save any unrelated setting from the UI. The map form is still accepted for backward compatibility, but it does not survive the UI.
 
 Global exclusions still win, then a per-device `exposed` value, then the category in `matterExposure`, then the backward-compatible default (`true`). Apply one rename at a time: the plugin can verify local Matter publication, but controller-side caches remain outside its control.
 
 Thermostats persisted as read-only temperature-sensor fallbacks are not retried automatically. To request one controlled retry, set a monotonically increasing generation for exactly that device:
 
 ```json
-"matterRecoveryRequests": {
-  "thermostat_18": 1
-}
+"matterRecoveryRequests": [
+  { "deviceId": "thermostat_18", "generation": 1 }
+]
 ```
 
 The generation is consumed once and persisted before the topology change. On failure or interrupted recovery, the plugin returns to the TemperatureSensor fallback. Increase the number only for a deliberate later retry; never delete the fallback store.
@@ -230,7 +232,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
 | `excludeSensors`    | string[] | []           | Sensors to exclude              |
 | `matterExposure`    | object   | all `true`   | Per-type Matter exposure switches (`zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats`) — Matter side only, see [Voice commands](#voice-commands-alexa--siri--google) |
-| `matterOverrides`   | object   | {}           | Per-device Matter-only `name` / `exposed` overrides keyed by canonical device ID |
+| `matterOverrides`   | array    | []           | Per-device Matter-only `name` / `exposed` overrides (`{ deviceId, name, exposed }`) |
 | `matterRecoveryRequests` | object | {}         | Monotonic, one-shot Matter Thermostat recovery generation keyed by `thermostat_*` ID |
 | `customNames`       | object   | {}           | Custom names                    |
 
@@ -606,7 +608,7 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `excludeOutputs`    | string[] | []           | Output da escludere             |
 | `excludeSensors`    | string[] | []           | Sensori da escludere            |
 | `matterExposure`    | object   | tutti `true` | Esposizione Matter per categoria |
-| `matterOverrides`   | object   | {}           | Override Matter-only `name` / `exposed` per ID canonico |
+| `matterOverrides`   | array    | []           | Override Matter-only `name` / `exposed` (`{ deviceId, name, exposed }`) |
 | `matterRecoveryRequests` | object | {}         | Generazione monotona one-shot per recovery di un `thermostat_*` |
 | `customNames`       | object   | {}           | Nomi personalizzati             |
 

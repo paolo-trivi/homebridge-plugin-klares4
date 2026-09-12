@@ -23,6 +23,7 @@ import { PlatformConfigFileService } from './config-file-service';
 import { DeviceListService } from './device-list-service';
 import { DiscoveryService } from './discovery-service';
 import { KsaImportService } from './ksa-import-service';
+import { normalizeMatterRecoveryRequests } from './matter-override-config';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
 import type { AccessoryHandler, Lares4Config } from './types';
 
@@ -88,7 +89,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             storagePath: this.api.user.storagePath(),
             momentaryAutoOffMs: this.config?.scenarioAutoOffDelay,
             isDeviceExposed: (device: KseniaDevice): boolean => this.isMatterEligible(device),
-            recoveryRequests: this.config.matterRecoveryRequests,
+            recoveryRequests: normalizeMatterRecoveryRequests(this.config.matterRecoveryRequests),
+            unregisterTimeoutMs: this.config.matterUnregisterTimeoutMs,
         });
 
         if (!config) {

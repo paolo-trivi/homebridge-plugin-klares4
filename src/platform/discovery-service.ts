@@ -3,10 +3,12 @@ import type { KseniaDevice } from '../types';
 import { isOutputLikeDevice, stripDevicePrefix } from '../device-id';
 import type {
     Lares4Config,
+    MatterDeviceOverride,
     MatterExposureConfig,
     ResolvedDeviceNames,
     ResolvedMatterPolicy,
 } from './types';
+import { normalizeMatterOverrides } from './matter-override-config';
 
 /** Lares4 device.type → matterExposure config key. */
 const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
@@ -20,10 +22,15 @@ const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
 };
 
 export class DiscoveryService {
+    /** Both accepted config shapes, resolved once to a map keyed by device ID. */
+    private readonly matterOverrides: Record<string, MatterDeviceOverride>;
+
     constructor(
         private readonly config: Lares4Config,
         private readonly log: Logger,
-    ) {}
+    ) {
+        this.matterOverrides = normalizeMatterOverrides(config.matterOverrides);
+    }
 
     public getNormalizedId(deviceId: string): string {
         return stripDevicePrefix(deviceId);
@@ -71,7 +78,7 @@ export class DiscoveryService {
         if (this.isDeviceExcluded(device)) {
             return { exposed: false, displayName: names.matterName, exposureSource: 'global-exclusion', names };
         }
-        const override = this.config.matterOverrides?.[device.id];
+        const override = this.matterOverrides[device.id];
         if (typeof override?.exposed === 'boolean') {
             return {
                 exposed: override.exposed,
@@ -95,7 +102,7 @@ export class DiscoveryService {
     public resolveDeviceNames(device: KseniaDevice): ResolvedDeviceNames {
         const sourceName = device.name;
         const customName = this.getCustomName(device);
-        const configuredOverride = this.config.matterOverrides?.[device.id]?.name;
+        const configuredOverride = this.matterOverrides[device.id]?.name;
         const matterOverrideName = typeof configuredOverride === 'string' && configuredOverride.trim()
             ? configuredOverride.trim()
             : undefined;

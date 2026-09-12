@@ -54,7 +54,7 @@ Behavior:
 - `excludeScenarios`
 - `customNames` for outputs, zones, sensors, scenarios
 - `matterExposure` hides whole categories from Matter only
-- `matterOverrides` applies per-device Matter-only `name` / `exposed` values keyed by canonical ID
+- `matterOverrides` applies per-device Matter-only `name` / `exposed` values; use the array form (`{ deviceId, name, exposed }`), which the Homebridge UI preserves — a map keyed by device ID is dropped when the UI rewrites config.json
 - `matterRecoveryRequests` maps a `thermostat_*` ID to a monotonic positive generation
 
 Exposure precedence is: global exclusion, per-device override, category, then the existing default (`true`). Matter overrides never alter HAP/HomeKit or MQTT.

@@ -7,19 +7,36 @@ export type MatterPublicationState =
     | 'locally-published'
     | 'failed';
 
-function timeoutFromEnvironment(): number {
-    const configured = Number(process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS);
-    return Number.isFinite(configured) && configured > 0 ? configured : 10_000;
+/**
+ * How long to wait for an unregistered endpoint to actually disappear.
+ *
+ * On Homebridge 2.x betas `unregisterPlatformAccessories` given a `{ UUID }`
+ * stub frequently removes nothing at all, so this budget is spent in full on
+ * every rename that cannot succeed — 3s keeps a whole batch tolerable while
+ * still leaving room for a slow-but-working removal. Raise it via config
+ * (`matterUnregisterTimeoutMs`) or KLARES4_MATTER_UNREGISTER_TIMEOUT_MS where
+ * removals do work but are slow.
+ */
+const DEFAULT_UNREGISTER_TIMEOUT_MS = 3_000;
+
+function resolveTimeout(configured?: number): number {
+    if (Number.isFinite(configured) && (configured as number) > 0) return configured as number;
+    const fromEnv = Number(process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS);
+    return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_UNREGISTER_TIMEOUT_MS;
 }
 
 export class MatterTopologyCoordinator {
     private tail: Promise<void> = Promise.resolve();
     private readonly states = new Map<string, MatterPublicationState>();
+    private readonly unregisterTimeoutMs: number;
 
     constructor(
         private readonly api: API,
         private readonly log: Logger,
-    ) {}
+        unregisterTimeoutMs?: number,
+    ) {
+        this.unregisterTimeoutMs = resolveTimeout(unregisterTimeoutMs);
+    }
 
     public register(accessory: MatterAccessory): Promise<void> {
         return this.enqueue(accessory.UUID, async () => {
@@ -84,7 +101,7 @@ export class MatterTopologyCoordinator {
     }
 
     private async waitUntilAbsent(uuid: string, clusterName: string): Promise<boolean> {
-        const deadline = Date.now() + timeoutFromEnvironment();
+        const deadline = Date.now() + this.unregisterTimeoutMs;
         let delay = 100;
         while (Date.now() < deadline) {
             try {

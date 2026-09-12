@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0-rc.3] - 2026-09-12
+
+### Fixed
+
+- `matterOverrides` and `matterRecoveryRequests` survive the Homebridge UI. Both were declared as free-form objects keyed by device ID — a shape the UI cannot render, so it silently dropped them whenever `config.json` was rewritten from the settings form. Saving any unrelated setting (turning off debug logging, for instance) deleted a live override block. Both keys now use an array of typed entries (`{ deviceId, name, exposed }` and `{ deviceId, generation }`) that the UI renders and round-trips; the previous map form is still accepted so existing configurations keep working.
+
+### Changed
+
+- The unregister observation budget now defaults to 3s instead of 10s and is configurable via `matterUnregisterTimeoutMs`. On Homebridge 2.x betas `unregisterPlatformAccessories` given a `{ UUID }` stub often removes nothing, so the full budget was spent on every rename that could not succeed — 18 pending renames cost three minutes of startup.
+
 ## [2.2.0-rc.2] - 2026-09-12
 
 ### Fixed

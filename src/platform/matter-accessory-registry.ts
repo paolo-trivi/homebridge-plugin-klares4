@@ -54,7 +54,7 @@ export class MatterAccessoryRegistry {
         this.fallbackStore = new MatterFallbackStore(deps.storagePath, deps.log);
         this.pruneTracker = new MatterPruneTracker(this.log, deps.storagePath);
         this.nameService = new MatterNameService(deps.storagePath, deps.log);
-        this.topologyCoordinator = new MatterTopologyCoordinator(this.api, this.log);
+        this.topologyCoordinator = new MatterTopologyCoordinator(this.api, this.log, deps.unregisterTimeoutMs);
         for (const uuid of this.fallbackStore.load()) this.thermostatFallbackUUIDs.add(uuid);
 
         this.stateUpdateQueue = new MatterStateUpdateQueue(

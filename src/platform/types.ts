@@ -8,6 +8,7 @@ import type { SensorAccessory } from '../accessories/sensor-accessory';
 import type { ThermostatAccessory } from '../accessories/thermostat-accessory';
 import type { ZoneAccessory } from '../accessories/zone-accessory';
 import type { DomusThermostatConfig, KsaImportConfig, MqttConfig, RoomMappingConfig } from '../types';
+import type { MatterOverridesConfig, MatterRecoveryRequestsConfig } from './matter-override-config';
 
 export type AccessoryHandler =
     | LightAccessory
@@ -72,8 +73,11 @@ export interface Lares4Config extends PlatformConfig {
     excludeSensors?: string[];
     excludeScenarios?: string[];
     matterExposure?: MatterExposureConfig;
-    matterOverrides?: Record<string, MatterDeviceOverride>;
-    matterRecoveryRequests?: Record<string, number>;
+    /** Map keyed by device ID, or the array form the Homebridge UI preserves. */
+    matterOverrides?: MatterOverridesConfig;
+    matterRecoveryRequests?: MatterRecoveryRequestsConfig;
+    /** Unregister observation budget in ms (default 3000). */
+    matterUnregisterTimeoutMs?: number;
     customNames?: {
         zones?: Record<string, string>;
         outputs?: Record<string, string>;

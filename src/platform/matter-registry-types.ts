@@ -12,4 +12,6 @@ export interface MatterRegistryDeps {
     momentaryAutoOffMs?: number;
     isDeviceExposed?: (device: KseniaDevice) => boolean;
     recoveryRequests?: Record<string, number>;
+    /** Overrides the unregister observation budget; see the coordinator. */
+    unregisterTimeoutMs?: number;
 }
