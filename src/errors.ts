@@ -24,6 +24,19 @@ export class ValidationKlaresError extends KlaresError {
     }
 }
 
+export class PanelCommandRejectedError extends KlaresError {
+    constructor(
+        public readonly result: string,
+        public readonly detail?: string,
+    ) {
+        super(
+            `Panel rejected command: ${result}${detail ? ` (${detail})` : ''}`,
+            'validation',
+        );
+        this.name = 'PanelCommandRejectedError';
+    }
+}
+
 export class FatalKlaresError extends KlaresError {
     constructor(message: string) {
         super(message, 'fatal');

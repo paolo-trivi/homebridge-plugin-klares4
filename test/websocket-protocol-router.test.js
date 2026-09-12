@@ -46,3 +46,21 @@ test('ProtocolRouter dispatches known commands and response callback', () => {
     'unhandled',
   ]);
 });
+
+test('ProtocolRouter forwards explicit panel failures to pending commands', () => {
+  const events = [];
+  const router = new ProtocolRouter({
+    onResponseMessage: () => events.push('response'),
+    onLoginResponse: () => undefined,
+    onReadResponse: () => undefined,
+    onRealtimeResponse: () => undefined,
+    onStatusUpdate: () => undefined,
+    onUnhandled: () => events.push('unhandled'),
+  });
+  const message = createMessage('GENERIC', 'ERROR');
+  message.PAYLOAD = { RESULT: 'FAIL', RESULT_DETAIL: 'CMD_NOT_AVAILABLE' };
+
+  router.route(message);
+
+  assert.deepEqual(events, ['response', 'unhandled']);
+});

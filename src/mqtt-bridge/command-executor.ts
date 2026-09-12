@@ -85,13 +85,13 @@ export class CommandExecutor {
             accessory.setOn(command.on).catch((error: unknown): void => {
                 this.deps.log.error('MQTT: Light command error:', toErrorMessage(error));
             });
-            this.deps.log.info(`MQTT: Light -> ${command.on ? 'ON' : 'OFF'}`);
+            this.deps.log.info(`MQTT: Light requested -> ${command.on ? 'ON' : 'OFF'}`);
         }
         if (command.brightness !== undefined && 'setBrightness' in accessory) {
             accessory.setBrightness(command.brightness).catch((error: unknown): void => {
                 this.deps.log.error('MQTT: Brightness command error:', toErrorMessage(error));
             });
-            this.deps.log.info(`MQTT: Brightness -> ${command.brightness}%`);
+            this.deps.log.info(`MQTT: Brightness requested -> ${command.brightness}%`);
         }
     }
 
@@ -100,7 +100,7 @@ export class CommandExecutor {
             accessory.setTargetPosition(command.position).catch((error: unknown): void => {
                 this.deps.log.error('MQTT: Cover command error:', toErrorMessage(error));
             });
-            this.deps.log.info(`MQTT: Cover -> ${command.position}%`);
+            this.deps.log.info(`MQTT: Cover requested -> ${command.position}%`);
         }
     }
 
@@ -109,7 +109,7 @@ export class CommandExecutor {
             accessory.setTargetTemperature(command.targetTemperature).catch((error: unknown): void => {
                 this.deps.log.error('MQTT: Thermostat temperature error:', toErrorMessage(error));
             });
-            this.deps.log.info(`MQTT: Thermostat -> ${command.targetTemperature}C`);
+            this.deps.log.info(`MQTT: Thermostat requested -> ${command.targetTemperature}C`);
         }
         if (command.mode !== undefined) {
             accessory
@@ -117,7 +117,7 @@ export class CommandExecutor {
                 .catch((error: unknown): void => {
                     this.deps.log.error('MQTT: Thermostat mode error:', toErrorMessage(error));
                 });
-            this.deps.log.info(`MQTT: Thermostat mode -> ${command.mode}`);
+            this.deps.log.info(`MQTT: Thermostat mode requested -> ${command.mode}`);
         }
     }
 
@@ -126,7 +126,7 @@ export class CommandExecutor {
             accessory.setOn(true).catch((error: unknown): void => {
                 this.deps.log.error('MQTT: Scenario command error:', toErrorMessage(error));
             });
-            this.deps.log.info('MQTT: Scenario -> Activated');
+            this.deps.log.info('MQTT: Scenario activation requested');
         }
     }
 }

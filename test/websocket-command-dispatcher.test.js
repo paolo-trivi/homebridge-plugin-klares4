@@ -70,3 +70,64 @@ test('CommandDispatcher rejects all pending commands on disconnect', async () =>
 
   await assert.rejects(pending, /Client disconnected/);
 });
+
+test('CommandDispatcher rejects an exact response with RESULT=FAIL', async () => {
+  const dispatcher = new CommandDispatcher();
+  const pending = dispatcher.registerPendingCommand('101', 500, ['WRITE_CFG_RES'], true);
+
+  dispatcher.resolvePendingCommand({
+    ID: '101',
+    CMD: 'WRITE_CFG_RES',
+    PAYLOAD_TYPE: 'CFG_ALL',
+    PAYLOAD: { RESULT: 'FAIL', RESULT_DETAIL: 'CMD_NOT_AVAILABLE' },
+  });
+
+  await assert.rejects(pending, /CMD_NOT_AVAILABLE/);
+});
+
+test('CommandDispatcher requires RESULT=OK when requested', async () => {
+  const dispatcher = new CommandDispatcher();
+  const pending = dispatcher.registerPendingCommand('102', 500, ['WRITE_CFG_RES'], true);
+
+  dispatcher.resolvePendingCommand({ ID: '102', CMD: 'WRITE_CFG_RES', PAYLOAD: {} });
+
+  await assert.rejects(pending, /did not contain RESULT=OK/);
+});
+
+test('CommandDispatcher reports exact and compatible correlation', async () => {
+  const dispatcher = new CommandDispatcher();
+  const exact = dispatcher.registerPendingCommand('103', 500, ['WRITE_RES']);
+  dispatcher.resolvePendingCommand({ ID: '103', CMD: 'WRITE_RES' });
+  assert.equal((await exact).correlation, 'exact-id');
+
+  const compatible = dispatcher.registerPendingCommand('104', 500, ['WRITE_RES']);
+  dispatcher.resolvePendingCommand({ ID: 'different', CMD: 'WRITE_RES' });
+  assert.equal((await compatible).correlation, 'single-compatible');
+});
+
+test('CommandDispatcher rejects a safely correlated generic error', async () => {
+  const dispatcher = new CommandDispatcher();
+  const pending = dispatcher.registerPendingCommand(
+    '105', 500, ['CMD_USR_RES'], true, true,
+  );
+
+  dispatcher.resolvePendingCommand({
+    ID: 'different',
+    CMD: 'GENERIC',
+    PAYLOAD_TYPE: 'ERROR',
+    PAYLOAD: { RESULT: 'FAIL', RESULT_DETAIL: 'CMD_NOT_AVAILABLE' },
+  });
+
+  await assert.rejects(pending, /CMD_NOT_AVAILABLE/);
+});
+
+test('CommandDispatcher rejects duplicate pending IDs', async () => {
+  const dispatcher = new CommandDispatcher();
+  const first = dispatcher.registerPendingCommand('106', 500, ['WRITE_RES']);
+  await assert.rejects(
+    dispatcher.registerPendingCommand('106', 500, ['WRITE_RES']),
+    /already pending/,
+  );
+  dispatcher.resolvePendingCommand({ ID: '106', CMD: 'WRITE_RES' });
+  await first;
+});

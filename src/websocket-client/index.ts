@@ -3,6 +3,7 @@ import type { Logger } from 'homebridge';
 import { LogLevel, getEffectiveLogLevel } from '../log-levels';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { ProtocolRouter } from '../websocket/protocol-router';
+import { OutputCommandConfirmationTracker } from '../websocket/output-command-confirmation';
 import { WsTransport } from '../websocket/ws-transport';
 
 import type {
@@ -25,6 +26,7 @@ export class KseniaWebSocketClient {
     private readonly state: ReturnType<typeof createInitialWebSocketClientState>;
     private readonly logLevel: LogLevel;
     private readonly commandDispatcher = new CommandDispatcher();
+    private readonly outputConfirmation = new OutputCommandConfirmationTracker();
     private readonly wsTransport: WsTransport;
     private readonly protocolRouter: ProtocolRouter;
     private readonly commandService: CommandService;
@@ -72,6 +74,9 @@ export class KseniaWebSocketClient {
             emitDeviceStatusUpdate: (device: KseniaDevice): void => {
                 this.onDeviceStatusUpdate?.(device);
             },
+            observeOutputStatus: (status): void => {
+                this.outputConfirmation.observe(status);
+            },
         });
 
         this.systemTemperatureUpdater = new SystemTemperatureUpdater({
@@ -102,6 +107,7 @@ export class KseniaWebSocketClient {
             logLevel: this.logLevel,
             options: this.options,
             commandDispatcher: this.commandDispatcher,
+            outputConfirmation: this.outputConfirmation,
             wsTransport: this.wsTransport,
             emitRawMessage: (direction, rawMessage): void => {
                 this.emitRawMessage(direction, rawMessage);
@@ -180,6 +186,7 @@ export class KseniaWebSocketClient {
                 this.onConnected?.();
             },
             onDisconnected: (): void => {
+                this.outputConfirmation.rejectAll(new Error('WebSocket disconnected'));
                 this.onDisconnected?.();
             },
             executeLogin: (): Promise<void> => this.commandService.sendLoginCommand(),

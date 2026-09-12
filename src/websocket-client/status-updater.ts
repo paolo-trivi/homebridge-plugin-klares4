@@ -29,6 +29,7 @@ interface StatusUpdaterDeps {
     logLevel: LogLevel;
     debugEnabled: boolean;
     emitDeviceStatusUpdate: (device: KseniaDevice) => void;
+    observeOutputStatus?: (status: KseniaOutputStatusRaw) => void;
 }
 
 export class StatusUpdater {
@@ -36,6 +37,7 @@ export class StatusUpdater {
 
     public updateOutputStatuses(outputs: KseniaOutputStatusRaw[]): void {
         outputs.forEach((output: KseniaOutputStatusRaw): void => {
+            this.deps.observeOutputStatus?.(output);
             this.deps.log.debug(
                 `Output update ${output.ID}: STA=${output.STA}, POS=${output.POS}, TPOS=${output.TPOS}`,
             );

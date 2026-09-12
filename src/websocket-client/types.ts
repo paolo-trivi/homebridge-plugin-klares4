@@ -62,6 +62,12 @@ export interface SendCommandOptions {
     awaitResponse?: boolean;
     timeoutMs?: number;
     responseCmds?: string[];
+    requirePositiveResult?: boolean;
+    allowGenericErrorFallback?: boolean;
+    stateConfirmation?: {
+        outputId: string;
+        matches: (status: KseniaOutputStatusRaw) => boolean;
+    };
 }
 
 export type RawMessageDirection = 'in' | 'out';

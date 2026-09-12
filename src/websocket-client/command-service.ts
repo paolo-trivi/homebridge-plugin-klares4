@@ -3,7 +3,12 @@ import type { Logger } from 'homebridge';
 import { LogLevel, maskSensitiveData } from '../log-levels';
 import { stripDevicePrefix } from '../device-id';
 import type { ThermostatMode } from '../thermostat-mode';
-import { CommandDispatcher } from '../websocket/command-dispatcher';
+import { CommandDispatcher, type CommandAcknowledgement } from '../websocket/command-dispatcher';
+import {
+    OutputCommandConfirmationTracker,
+    type OutputConfirmationHandle,
+    type StateConfirmation,
+} from '../websocket/output-command-confirmation';
 import { clampValue } from '../websocket/device-state-projector';
 import { WsTransport } from '../websocket/ws-transport';
 import { updateThermostatSeasonHint } from './thermostat-write-payload';
@@ -12,6 +17,7 @@ import { resolveThermostatCommandId } from './thermostat-command-id-resolver';
 import type { KseniaMessage, KseniaMessagePayload, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
+import { logMutationOutcome, mutationOptions } from './command-outcome';
 interface CommandServiceDeps {
     state: WebSocketClientState;
     sender: string;
@@ -20,6 +26,7 @@ interface CommandServiceDeps {
     logLevel: LogLevel;
     options: KseniaWebSocketOptions;
     commandDispatcher: CommandDispatcher;
+    outputConfirmation?: OutputCommandConfirmationTracker;
     wsTransport: WsTransport;
     emitRawMessage: (direction: RawMessageDirection, rawMessage: string) => void;
 } export class CommandService {
@@ -73,32 +80,37 @@ interface CommandServiceDeps {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemOutputId = stripDevicePrefix(lightId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(lightId, async (): Promise<void> => {
-            await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
+            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
                 ID_LOGIN: 'true',
                 PIN: 'true',
                 OUTPUT: {
                     ID: systemOutputId,
                     STA: on ? 'ON' : 'OFF',
                 },
-            });
+            }, mutationOptions(systemOutputId, (status) =>
+                status.STA.trim().toUpperCase() === (on ? 'ON' : 'OFF')));
+            logMutationOutcome(this.deps.log, 'Light', systemOutputId, on ? 'ON' : 'OFF', outcome);
         });
-        this.deps.log.info(`Light command sent: Output ${systemOutputId} -> ${on ? 'ON' : 'OFF'}`);
     }
     public async dimLight(lightId: string, brightness: number): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const safeBrightness = clampValue(Math.round(brightness), 0, 100);
         const systemOutputId = stripDevicePrefix(lightId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(lightId, async (): Promise<void> => {
-            await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
+            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
                 ID_LOGIN: 'true',
                 PIN: 'true',
                 OUTPUT: {
                     ID: systemOutputId,
                     STA: safeBrightness.toString(),
                 },
-            });
+            }, mutationOptions(systemOutputId, (status) => {
+                const position = status.POS === undefined ? undefined : Number(status.POS);
+                return position === safeBrightness
+                    || (safeBrightness === 0 && status.STA.trim().toUpperCase() === 'OFF');
+            }));
+            logMutationOutcome(this.deps.log, 'Dimmer', systemOutputId, `${safeBrightness}%`, outcome);
         });
-        this.deps.log.info(`Dimmer command sent: Output ${systemOutputId} -> ${safeBrightness}%`);
     }
     public async moveCover(coverId: string, position: number): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
@@ -106,31 +118,37 @@ interface CommandServiceDeps {
         const safePosition = clampValue(Math.round(position), 0, 100);
         const command = safePosition === 0 ? 'DOWN' : safePosition === 100 ? 'UP' : safePosition.toString();
         await this.deps.commandDispatcher.enqueueDeviceCommand(coverId, async (): Promise<void> => {
-            await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
+            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
                 ID_LOGIN: 'true',
                 PIN: 'true',
                 OUTPUT: {
                     ID: systemOutputId,
                     STA: command,
                 },
-            });
+            }, mutationOptions(systemOutputId, (status) => {
+                const target = Number(status.TPOS ?? status.POS);
+                const state = status.STA.trim().toUpperCase();
+                return target === safePosition
+                    || (safePosition === 100 && (state === 'UP' || state === 'OPEN'))
+                    || (safePosition === 0 && (state === 'DOWN' || state === 'CLOSE'));
+            }));
+            logMutationOutcome(this.deps.log, 'Cover', systemOutputId, command, outcome);
         });
-        this.deps.log.info(`Cover command sent: Output ${systemOutputId} -> ${command}`);
     }
     public async toggleGate(gateId: string): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemOutputId = stripDevicePrefix(gateId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(gateId, async (): Promise<void> => {
-            await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
+            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
                 ID_LOGIN: 'true',
                 PIN: 'true',
                 OUTPUT: {
                     ID: systemOutputId,
                     STA: 'ON',
                 },
-            });
+            }, mutationOptions());
+            logMutationOutcome(this.deps.log, 'Gate', systemOutputId, 'ON (momentary)', outcome);
         });
-        this.deps.log.info(`Gate command sent: Output ${systemOutputId} -> ON (momentary)`);
     }
     public async setThermostatMode(thermostatId: string, mode: ThermostatMode): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
@@ -150,6 +168,8 @@ interface CommandServiceDeps {
                 awaitResponse: true,
                 responseCmds: ['WRITE_CFG_RES'],
                 timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
+                requirePositiveResult: true,
+                allowGenericErrorFallback: true,
             });
             this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
         });
@@ -174,6 +194,8 @@ interface CommandServiceDeps {
                 awaitResponse: true,
                 responseCmds: ['WRITE_CFG_RES'],
                 timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
+                requirePositiveResult: true,
+                allowGenericErrorFallback: true,
             });
             this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
         });
@@ -236,27 +258,27 @@ interface CommandServiceDeps {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemScenarioId = stripDevicePrefix(scenarioId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(scenarioId, async (): Promise<void> => {
-            await this.sendKseniaCommand('CMD_USR', 'CMD_EXE_SCENARIO', {
+            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_EXE_SCENARIO', {
                 ID_LOGIN: 'true',
                 PIN: 'true',
                 SCENARIO: {
                     ID: systemScenarioId,
                 },
-            });
+            }, mutationOptions());
+            logMutationOutcome(this.deps.log, 'Scenario', systemScenarioId, 'trigger', outcome);
         });
-        this.deps.log.info(`Scenario ${systemScenarioId} executed`);
     }
     private async sendKseniaCommand(
         cmd: string,
         payloadType: string,
         payload: KseniaCommandPayload,
         options: SendCommandOptions = {},
-    ): Promise<void> {
+    ): Promise<CommandAcknowledgement | StateConfirmation | undefined> {
         if (!this.deps.state.ws || this.deps.state.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket not connected');
         }
         const processedPayload = this.buildPayload(payload);
-        const id = Math.floor(Math.random() * 100000).toString();
+        const id = this.createCommandId();
         const message: KseniaMessage = {
             SENDER: this.deps.sender,
             RECEIVER: '', CMD: cmd, ID: id, PAYLOAD_TYPE: payloadType,
@@ -268,23 +290,48 @@ interface CommandServiceDeps {
         if (!isPing && this.deps.logLevel >= LogLevel.DEBUG) {
             this.deps.log.debug(`Sending: ${maskSensitiveData(jsonMessage)}`);
         }
-        let pendingResponsePromise: Promise<void> | undefined;
+        let pendingResponsePromise: Promise<CommandAcknowledgement> | undefined;
+        let stateConfirmation: OutputConfirmationHandle | undefined;
         if (options.awaitResponse) {
             pendingResponsePromise = this.deps.commandDispatcher.registerPendingCommand(
                 id,
                 options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
                 options.responseCmds,
+                options.requirePositiveResult,
+                options.allowGenericErrorFallback,
+            );
+        }
+        if (options.stateConfirmation) {
+            if (!this.deps.outputConfirmation) {
+                throw new Error('Output confirmation tracker not initialized');
+            }
+            stateConfirmation = this.deps.outputConfirmation.register(
+                options.stateConfirmation.outputId,
+                options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
+                options.stateConfirmation.matches,
             );
         }
         try {
             await this.sendRawMessage(jsonMessage);
-            if (pendingResponsePromise) {
-                await pendingResponsePromise;
+            if (pendingResponsePromise && stateConfirmation) {
+                return await Promise.race([pendingResponsePromise, stateConfirmation.promise]);
             }
+            if (pendingResponsePromise) return await pendingResponsePromise;
+            if (stateConfirmation) return await stateConfirmation.promise;
+            return undefined;
         } catch (error: unknown) {
-            this.deps.commandDispatcher.clearPendingCommand(id);
             throw error;
+        } finally {
+            this.deps.commandDispatcher.clearPendingCommand(id);
+            stateConfirmation?.cancel();
         }
+    }
+    private createCommandId(): string {
+        for (let attempt = 0; attempt < 1000; attempt += 1) {
+            const candidate = Math.floor(Math.random() * 100000).toString();
+            if (!this.deps.commandDispatcher.hasPendingCommand(candidate)) return candidate;
+        }
+        throw new Error('Unable to allocate a unique command ID');
     }
     private buildPayload(payload: KseniaCommandPayload): KseniaCommandPayload {
         return {

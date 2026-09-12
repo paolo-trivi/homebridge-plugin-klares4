@@ -14,7 +14,11 @@ export class ProtocolRouter {
     constructor(private readonly handlers: ProtocolRouterHandlers) {}
 
     public route(message: KseniaMessage): void {
-        if (message.CMD.endsWith('_RES')) {
+        const result = message.PAYLOAD?.RESULT?.trim().toUpperCase();
+        const isExplicitFailure = message.PAYLOAD_TYPE?.toUpperCase() === 'ERROR'
+            || message.CMD.toUpperCase() === 'GENERIC'
+            || (result !== undefined && result !== 'OK');
+        if (message.CMD.endsWith('_RES') || isExplicitFailure) {
             this.handlers.onResponseMessage?.(message);
         }
 
