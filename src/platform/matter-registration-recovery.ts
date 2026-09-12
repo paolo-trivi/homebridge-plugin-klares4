@@ -1,9 +1,9 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
-import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import { mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
+import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
 
 const MATTER_REGISTER_RECOVERY_LIMIT = 2;
 
@@ -30,6 +30,7 @@ export interface MatterRegistration {
 
 interface RecoveryDeps {
     api: API;
+    topologyCoordinator: MatterTopologyCoordinator;
     log: Logger;
     thermostatFallbackUUIDs: Set<string>;
     getWsClient: () => KseniaWebSocketClient | undefined;
@@ -108,8 +109,9 @@ export async function handleMissingRegisteredAccessory(
         try {
             if (stalePurge) {
                 try {
-                    await deps.api.matter!.unregisterPlatformAccessories(
-                        PLUGIN_NAME, PLATFORM_NAME, [{ UUID: reg.uuid } as MatterAccessory],
+                    await deps.topologyCoordinator.unregister(
+                        reg.uuid,
+                        registrationProbeCluster(reg.matterAccessory),
                     );
                 } catch (unregErr) {
                     // Unregister may legitimately fail if matter.js doesn't have an
@@ -118,7 +120,7 @@ export async function handleMissingRegisteredAccessory(
                     deps.log.debug(`[Matter] stale-endpoint unregister for ${reg.displayName} (${reg.uuid}) returned: ${deps.fmtErr(unregErr)}`);
                 }
             }
-            await deps.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [reg.matterAccessory]);
+            await deps.topologyCoordinator.register(reg.matterAccessory);
             reg.registeredDisplayName = reg.matterAccessory.displayName;
             deps.scheduleComplete(reg.uuid);
             return;
@@ -137,7 +139,7 @@ export async function handleMissingRegisteredAccessory(
 export async function registerFallbackAccessory(
     device: KseniaThermostat,
     reg: MatterRegistration,
-    deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'momentaryAutoOffMs' | 'onFallbackPersist' | 'resolveDisplayName'>,
+    deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'momentaryAutoOffMs' | 'onFallbackPersist' | 'resolveDisplayName' | 'topologyCoordinator'>,
 ): Promise<void> {
     const fallback = mapThermostatAsTemperatureSensor(device, {
         api: deps.api,
@@ -146,7 +148,7 @@ export async function registerFallbackAccessory(
         momentaryAutoOffMs: deps.momentaryAutoOffMs,
         resolveDisplayName: deps.resolveDisplayName,
     });
-    await deps.api.matter!.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [fallback]);
+    await deps.topologyCoordinator.register(fallback);
     deps.thermostatFallbackUUIDs.add(device.id);
     deps.onFallbackPersist?.(device.id);
     reg.matterAccessory = fallback;

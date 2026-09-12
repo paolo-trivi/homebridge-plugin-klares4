@@ -38,6 +38,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     public mqttBridge?: MqttBridge;
 
     private readonly discoveredDevices: Map<string, KseniaDevice> = new Map();
+    private readonly matterDevices: Map<string, KseniaDevice> = new Map();
     private readonly activeDiscoveredUUIDs: Set<string> = new Set();
     private readonly accessoryRegistry: AccessoryRegistry;
     private readonly matterRegistry: MatterAccessoryRegistry;
@@ -87,6 +88,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             storagePath: this.api.user.storagePath(),
             momentaryAutoOffMs: this.config?.scenarioAutoOffDelay,
             isDeviceExposed: (device: KseniaDevice): boolean => this.isMatterEligible(device),
+            recoveryRequests: this.config.matterRecoveryRequests,
         });
 
         if (!config) {
@@ -217,8 +219,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
      * `matterExposure` opt-out. HAP and MQTT paths are NOT affected by this.
      */
     private isMatterEligible(device: KseniaDevice): boolean {
-        return !this.discoveryService.isDeviceExcluded(device)
-            && this.discoveryService.isMatterTypeExposed(device.type);
+        return this.discoveryService.resolveMatterPolicy(device).exposed;
     }
 
     private handleInitialSyncComplete(): void {
@@ -226,7 +227,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.accessoryRegistry.pruneStaleAccessories();
         // Two-phase naming, phase 2: with the full device set known, batch-compute
         // the authoritative name-map, persist it and refresh outliers — then prune.
-        const eligibleDevices = [...this.discoveredDevices.values()]
+        const eligibleDevices = [...this.matterDevices.values()]
             .filter((device: KseniaDevice): boolean => this.isMatterEligible(device));
         this.matterRegistry
             .finalizeNameMap(eligibleDevices)
@@ -256,20 +257,26 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             return;
         }
 
-        this.discoveryService.applyCustomName(device);
-        this.log.info(`Device discovered: ${device.type} - ${device.name}`);
-        this.addAccessory(device);
-        this.matterRegistry.addOrUpdateAccessory(device).catch((err: unknown) => {
-            this.log.warn(`[Matter] Registration error for ${device.name}:`, err instanceof Error ? err.message : String(err));
+        const sharedDevice = this.discoveryService.applyCustomName(device);
+        const matterDevice = this.discoveryService.applyMatterName(device);
+        this.matterDevices.set(device.id, matterDevice);
+        this.log.info(`Device discovered: ${sharedDevice.type} - ${sharedDevice.name}`);
+        this.addAccessory(sharedDevice);
+        this.matterRegistry.addOrUpdateAccessory(matterDevice).catch((err: unknown) => {
+            this.log.warn(`[Matter] Registration error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
         });
     }
 
     private handleDeviceStatusUpdate(device: KseniaDevice): void {
-        this.log.debug(`Device status update: ${device.name}`);
-        this.updateAccessory(device);
-        this.mqttBridge?.publishDeviceState(device);
-        this.matterRegistry.updateAccessoryState(device).catch((err: unknown) => {
-            this.log.debug(`[Matter] State update error for ${device.name}:`, err instanceof Error ? err.message : String(err));
+        const sharedDevice = this.discoveryService.applyCustomName(device);
+        const matterDevice = this.discoveryService.applyMatterName(device);
+        this.discoveredDevices.set(device.id, device);
+        this.matterDevices.set(device.id, matterDevice);
+        this.log.debug(`Device status update: ${sharedDevice.name}`);
+        this.updateAccessory(sharedDevice);
+        this.mqttBridge?.publishDeviceState(sharedDevice);
+        this.matterRegistry.updateAccessoryState(matterDevice).catch((err: unknown) => {
+            this.log.debug(`[Matter] State update error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
         });
     }
 

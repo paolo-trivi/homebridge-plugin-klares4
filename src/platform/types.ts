@@ -33,6 +33,27 @@ export interface MatterExposureConfig {
     thermostats?: boolean;
 }
 
+export interface MatterDeviceOverride {
+    exposed?: boolean;
+    name?: string;
+}
+
+export interface ResolvedDeviceNames {
+    sourceName: string;
+    customName?: string;
+    effectiveSharedName: string;
+    matterOverrideName?: string;
+    matterName: string;
+    nameSource: 'source' | 'custom-name' | 'matter-override';
+}
+
+export interface ResolvedMatterPolicy {
+    exposed: boolean;
+    displayName: string;
+    exposureSource: 'global-exclusion' | 'device-override' | 'category' | 'default';
+    names: ResolvedDeviceNames;
+}
+
 export interface Lares4Config extends PlatformConfig {
     ip?: string;
     sender?: string;
@@ -51,6 +72,8 @@ export interface Lares4Config extends PlatformConfig {
     excludeSensors?: string[];
     excludeScenarios?: string[];
     matterExposure?: MatterExposureConfig;
+    matterOverrides?: Record<string, MatterDeviceOverride>;
+    matterRecoveryRequests?: Record<string, number>;
     customNames?: {
         zones?: Record<string, string>;
         outputs?: Record<string, string>;

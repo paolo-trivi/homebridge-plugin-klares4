@@ -1,7 +1,12 @@
 import type { Logger } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import { isOutputLikeDevice, stripDevicePrefix } from '../device-id';
-import type { Lares4Config, MatterExposureConfig } from './types';
+import type {
+    Lares4Config,
+    MatterExposureConfig,
+    ResolvedDeviceNames,
+    ResolvedMatterPolicy,
+} from './types';
 
 /** Lares4 device.type → matterExposure config key. */
 const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
@@ -61,6 +66,50 @@ export class DiscoveryService {
         return this.config.matterExposure?.[key] !== false;
     }
 
+    public resolveMatterPolicy(device: KseniaDevice): ResolvedMatterPolicy {
+        const names = this.resolveDeviceNames(device);
+        if (this.isDeviceExcluded(device)) {
+            return { exposed: false, displayName: names.matterName, exposureSource: 'global-exclusion', names };
+        }
+        const override = this.config.matterOverrides?.[device.id];
+        if (typeof override?.exposed === 'boolean') {
+            return {
+                exposed: override.exposed,
+                displayName: names.matterName,
+                exposureSource: 'device-override',
+                names,
+            };
+        }
+        const key = MATTER_EXPOSURE_KEYS[device.type];
+        if (key && typeof this.config.matterExposure?.[key] === 'boolean') {
+            return {
+                exposed: this.config.matterExposure[key] !== false,
+                displayName: names.matterName,
+                exposureSource: 'category',
+                names,
+            };
+        }
+        return { exposed: true, displayName: names.matterName, exposureSource: 'default', names };
+    }
+
+    public resolveDeviceNames(device: KseniaDevice): ResolvedDeviceNames {
+        const sourceName = device.name;
+        const customName = this.getCustomName(device);
+        const configuredOverride = this.config.matterOverrides?.[device.id]?.name;
+        const matterOverrideName = typeof configuredOverride === 'string' && configuredOverride.trim()
+            ? configuredOverride.trim()
+            : undefined;
+        const effectiveSharedName = customName ?? sourceName;
+        return {
+            sourceName,
+            customName,
+            effectiveSharedName,
+            matterOverrideName,
+            matterName: matterOverrideName ?? effectiveSharedName,
+            nameSource: matterOverrideName ? 'matter-override' : customName ? 'custom-name' : 'source',
+        };
+    }
+
     public getCustomName(device: KseniaDevice): string | undefined {
         const id = this.getNormalizedId(device.id);
 
@@ -94,9 +143,12 @@ export class DiscoveryService {
             return device;
         }
 
-        const mutableDevice = device as { name: string; description: string };
-        mutableDevice.name = customName;
-        mutableDevice.description = customName;
-        return device;
+        return { ...device, name: customName, description: customName } as KseniaDevice;
+    }
+
+    public applyMatterName(device: KseniaDevice): KseniaDevice {
+        const displayName = this.resolveMatterPolicy(device).displayName;
+        if (displayName === device.name) return device;
+        return { ...device, name: displayName, description: displayName } as KseniaDevice;
     }
 }

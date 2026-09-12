@@ -824,3 +824,53 @@ test('prune: persisted counter is cleared when the device reappears on a later b
     await registry4.pruneStaleAccessories();
     assert.deepEqual(boot4.unregistered, [], 'counter must have restarted after the reappearance');
 });
+
+test('explicit thermostat recovery keeps the device ID and records native success', async () => {
+    const storagePath = tmpStorage();
+    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
+        thermostatAsTemperatureSensor: ['thermostat_18'],
+    }));
+    const { api, registered, unregistered } = makeApi();
+    const registry = new MatterAccessoryRegistry({
+        api,
+        log: silentLog(),
+        getWsClient: () => undefined,
+        storagePath,
+        recoveryRequests: { thermostat_18: 1 },
+    });
+
+    await registry.addOrUpdateAccessory(thermostatDevice());
+    await delay(250);
+
+    assert.deepEqual(unregistered, ['thermostat_18']);
+    assert.equal(registered[0].UUID, 'thermostat_18');
+    assert.equal(registered[0].deviceType._t, 'Thermostat');
+    const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
+    assert.equal(saved.thermostats[0].mode, 'native');
+    assert.equal(saved.thermostats[0].lastProcessedRecoveryRequest, 1);
+});
+
+test('failed explicit thermostat recovery rolls back once to TemperatureSensor', async () => {
+    const storagePath = tmpStorage();
+    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
+        thermostatAsTemperatureSensor: ['thermostat_18'],
+    }));
+    const { api, registered } = makeApi({
+        registerImpl: (accessory) => accessory.deviceType._t === 'Thermostat' ? 'throw' : undefined,
+    });
+    const registry = new MatterAccessoryRegistry({
+        api,
+        log: silentLog(),
+        getWsClient: () => undefined,
+        storagePath,
+        recoveryRequests: { thermostat_18: 1 },
+    });
+
+    await registry.addOrUpdateAccessory(thermostatDevice());
+    await delay(250);
+
+    assert.equal(registered.at(-1).deviceType._t, 'TemperatureSensor');
+    const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
+    assert.equal(saved.thermostats[0].mode, 'fallback');
+    assert.equal(saved.thermostats[0].lastProcessedRecoveryRequest, 1);
+});

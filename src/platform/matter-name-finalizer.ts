@@ -1,12 +1,13 @@
-import type { API, Logger, MatterAccessory } from 'homebridge';
+import type { Logger } from 'homebridge';
 import type { KseniaDevice } from '../types';
-import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterNameService } from './matter-name-service';
 import { logNameTable } from './matter-name-map';
+import { analyzeMatterVoiceCollisions } from './matter-voice-analyzer';
+import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
 
 export interface NameFinalizeDeps {
-    api: API;
+    topologyCoordinator: MatterTopologyCoordinator;
     log: Logger;
     nameService: MatterNameService;
     registrations: Map<string, MatterRegistration>;
@@ -35,26 +36,43 @@ export async function finalizeMatterNameMap(devices: KseniaDevice[], deps: NameF
     const { entries, duplicates, persisted } = deps.nameService.finalize(devices);
     logNameTable(deps.log, entries.values(), duplicates);
     if (persisted) deps.log.info(`[Matter] name-map updated and persisted (${entries.size} devices)`);
+    const voiceAnalysis = analyzeMatterVoiceCollisions(devices, entries);
+    const critical = voiceAnalysis.findings.filter((finding) => finding.severity === 'CRITICAL').length;
+    const high = voiceAnalysis.findings.filter((finding) => finding.severity === 'HIGH').length;
+    deps.log.info(
+        `[Matter] voice analysis: exposed=${devices.length} critical=${critical} high=${high} `
+        + `hash=${voiceAnalysis.hash}`,
+    );
+    for (const finding of voiceAnalysis.findings) {
+        deps.log.debug(
+            `[Matter] voice ${finding.severity} ${finding.leftId}/${finding.rightId}: `
+            + `${finding.score} [${finding.lexicalEvidence.join(',')}] [${finding.riskReasons.join(',')}]`,
+        );
+    }
 
-    for (const device of devices) {
-        const target = entries.get(device.id)?.name;
-        const reg = deps.registrations.get(device.id);
+    const devicesById = new Map(devices.map((device) => [device.id, device]));
+    for (const [deviceId, reg] of [...deps.registrations]) {
+        const target = entries.get(deviceId)?.name;
         if (!target || !reg || reg.registeredDisplayName === target) continue;
         if (reg.status !== 'registered') {
-            deps.log.debug(`[Matter] name refresh deferred for ${device.id} (status=${reg.status}); next register uses "${target}"`);
+            deps.log.debug(`[Matter] name refresh deferred for ${deviceId} (status=${reg.status}); next register uses "${target}"`);
+            continue;
+        }
+        const device = devicesById.get(deviceId)
+            ?? reg.matterAccessory.context?.device as KseniaDevice | undefined;
+        if (!device) {
+            deps.log.warn(`[Matter] name refresh skipped for ${deviceId}: device snapshot unavailable`);
             continue;
         }
 
-        deps.log.info(`[Matter] name refresh: "${reg.registeredDisplayName}" -> "${target}" (uuid=${device.id})`);
+        deps.log.info(`[Matter] name refresh requested: "${reg.registeredDisplayName}" -> "${target}" (uuid=${deviceId})`);
         deps.recordMetadataChanged();
-        try {
-            await deps.api.matter!.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
-                { UUID: device.id } as MatterAccessory,
-            ]);
-        } catch (err) {
-            deps.log.debug(`[Matter] pre-rename unregister for ${device.id} returned: ${deps.fmtErr(err)}`);
-        }
-        deps.registrations.delete(device.id);
+        const removed = await deps.topologyCoordinator.unregister(
+            deviceId,
+            registrationProbeCluster(reg.matterAccessory),
+        );
+        if (!removed) continue;
+        deps.registrations.delete(deviceId);
         await deps.registerRenamed(device);
     }
 }

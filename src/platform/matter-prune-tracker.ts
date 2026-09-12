@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { API, Logger, MatterAccessory } from 'homebridge';
-import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
+import type { API, Logger } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterFallbackStore } from './matter-fallback-store';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
 
 const COUNTER_STORE_FILENAME = 'klares4-matter-prune.json';
 
@@ -37,6 +37,7 @@ function emptyStats(): MatterCycleStats {
 
 export interface MatterPruneDeps {
     api: API;
+    topologyCoordinator: MatterTopologyCoordinator;
     registrations: Map<string, MatterRegistration>;
     activeDiscoveredUUIDs: Set<string>;
     cachedUUIDs: Set<string>;
@@ -270,9 +271,12 @@ export class MatterPruneTracker {
         }
 
         try {
-            await deps.api.matter!.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [
-                { UUID: uuid } as MatterAccessory,
-            ]);
+            const registration = deps.registrations.get(uuid);
+            const probeCluster = registration
+                ? registrationProbeCluster(registration.matterAccessory)
+                : 'bridgedDeviceBasicInformation';
+            const removed = await deps.topologyCoordinator.unregister(uuid, probeCluster);
+            if (!removed) return;
             deps.registrations.delete(uuid);
             deps.cachedUUIDs.delete(uuid);
             deps.cachedDevices?.delete(uuid);

@@ -228,6 +228,40 @@
                     }
                 }
             },
+            "matterOverrides": {
+                "title": "Override Matter per dispositivo",
+                "description": "Override opzionali indicizzati per device ID Klares4. Non modificano HomeKit o MQTT.",
+                "type": "object",
+                "propertyNames": {
+                    "pattern": "^(zone|light|cover|gate|thermostat|scenario|sensor_(temp|hum|light|motion|contact))_[A-Za-z0-9_-]+$"
+                },
+                "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "exposed": {
+                            "type": "boolean"
+                        },
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                        }
+                    }
+                }
+            },
+            "matterRecoveryRequests": {
+                "title": "Richieste recovery termostati Matter",
+                "description": "Mappa amministrativa device ID → generazione. Incrementare il numero richiede un solo nuovo tentativo controllato.",
+                "type": "object",
+                "propertyNames": {
+                    "pattern": "^thermostat_[A-Za-z0-9_-]+$"
+                },
+                "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            },
             "customNames": {
                 "type": "object",
                 "properties": {
@@ -901,6 +935,22 @@
                         {
                             "key": "matterExposure.thermostats",
                             "type": "checkbox"
+                        },
+                        {
+                            "key": "matterOverrides",
+                            "title": "Override per device ID",
+                            "type": "object",
+                            "description": "Esempio: { \"light_12\": { \"name\": \"Lampadario Studio\" }, \"scenario_14\": { \"exposed\": false } }. Modifica solo Matter."
+                        },
+                        {
+                            "type": "help",
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Recovery termostati</strong><p style='margin:8px 0 0 0;'>Solo per amministrazione controllata: in <code>matterRecoveryRequests</code> associa un UUID termostato a un intero positivo. Incrementare il numero autorizza un solo nuovo tentativo; in caso di errore il plugin torna automaticamente al sensore temperatura.</p></div>"
+                        },
+                        {
+                            "key": "matterRecoveryRequests",
+                            "title": "Generazioni recovery per device ID",
+                            "type": "object",
+                            "description": "Esempio: { \"thermostat_18\": 1 }. Non incrementare automaticamente ad ogni avvio."
                         }
                     ]
                 }
