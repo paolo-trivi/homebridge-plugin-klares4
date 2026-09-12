@@ -67,12 +67,22 @@ export async function finalizeMatterNameMap(devices: KseniaDevice[], deps: NameF
 
         deps.log.info(`[Matter] name refresh requested: "${reg.registeredDisplayName}" -> "${target}" (uuid=${deviceId})`);
         deps.recordMetadataChanged();
-        const removed = await deps.topologyCoordinator.unregister(
-            deviceId,
-            registrationProbeCluster(reg.matterAccessory),
-        );
-        if (!removed) continue;
-        deps.registrations.delete(deviceId);
-        await deps.registerRenamed(device);
+        // One device must never abort the rest of the batch: a rename that fails
+        // leaves that endpoint on its previous name, which stays correct and
+        // queryable, while every other pending rename still gets its turn.
+        try {
+            const removed = await deps.topologyCoordinator.unregister(
+                deviceId,
+                registrationProbeCluster(reg.matterAccessory),
+            );
+            if (!removed) {
+                deps.log.warn(`[Matter] name refresh skipped for ${deviceId}: endpoint still present after unregister`);
+                continue;
+            }
+            deps.registrations.delete(deviceId);
+            await deps.registerRenamed(device);
+        } catch (err) {
+            deps.log.warn(`[Matter] name refresh failed for ${deviceId}, keeping previous name: ${deps.fmtErr(err)}`);
+        }
     }
 }

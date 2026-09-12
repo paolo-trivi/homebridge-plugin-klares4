@@ -36,11 +36,22 @@ export class MatterTopologyCoordinator {
     public unregister(uuid: string, probeCluster: string): Promise<boolean> {
         return this.enqueue(uuid, async () => {
             this.states.set(uuid, 'requested');
-            await this.api.matter!.unregisterPlatformAccessories(
-                PLUGIN_NAME,
-                PLATFORM_NAME,
-                [{ UUID: uuid } as MatterAccessory],
-            );
+            try {
+                await this.api.matter!.unregisterPlatformAccessories(
+                    PLUGIN_NAME,
+                    PLATFORM_NAME,
+                    [{ UUID: uuid } as MatterAccessory],
+                );
+            } catch (error: unknown) {
+                // The API is handed a `{ UUID }` stub with no metadata and can throw
+                // while still having removed the endpoint. A rejection is no more
+                // proof that the endpoint survived than a resolution is proof that
+                // it went away — only the probe below decides.
+                this.log.debug(
+                    `[Matter] unregister call for ${uuid} threw, deferring to observation: `
+                    + `${error instanceof Error ? error.message : String(error)}`,
+                );
+            }
             this.states.set(uuid, 'published-unverified');
             const absent = await this.waitUntilAbsent(uuid, probeCluster);
             this.states.set(uuid, absent ? 'locally-published' : 'failed');

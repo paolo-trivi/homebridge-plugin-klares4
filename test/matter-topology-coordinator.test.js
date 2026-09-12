@@ -55,3 +55,34 @@ test('unregister is bounded when disappearance cannot be observed', async () => 
   assert.equal(await coordinator.unregister('a', 'onOff'), false);
   assert.equal(coordinator.getState('a'), 'failed');
 });
+
+test('unregister trusts observation over a throwing API call', async () => {
+  // Homebridge is handed a `{ UUID }` stub with no metadata and can throw
+  // (observed in production as "Cannot read properties of undefined
+  // (reading 'deviceType')") while still having removed the endpoint.
+  const present = new Set(['a']);
+  const api = { matter: {
+    registerPlatformAccessories: async () => {},
+    unregisterPlatformAccessories: async () => {
+      present.delete('a');
+      throw new TypeError("Cannot read properties of undefined (reading 'deviceType')");
+    },
+    getAccessoryState: async (id) => present.has(id) ? {} : undefined,
+  } };
+  const coordinator = new MatterTopologyCoordinator(api, log);
+
+  assert.equal(await coordinator.unregister('a', 'onOff'), true);
+  assert.equal(coordinator.getState('a'), 'locally-published');
+});
+
+test('a throwing unregister that leaves the endpoint present still fails', async () => {
+  const api = { matter: {
+    registerPlatformAccessories: async () => {},
+    unregisterPlatformAccessories: async () => { throw new Error('boom'); },
+    getAccessoryState: async () => ({}),
+  } };
+  const coordinator = new MatterTopologyCoordinator(api, log);
+
+  assert.equal(await coordinator.unregister('a', 'onOff'), false);
+  assert.equal(coordinator.getState('a'), 'failed');
+});
