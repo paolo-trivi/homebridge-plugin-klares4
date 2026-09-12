@@ -7,22 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0-rc.1] - 2026-09-12
+
+Additive capabilities on top of `2.1.5-rc.2`: naming provenance, read-only
+voice diagnostics, serialized Matter topology and explicit thermostat
+recovery. Default behaviour is unchanged without new configuration.
+
 ### Fixed
 
-- Mutating output and thermostat commands now validate positive panel acknowledgements. Explicit `FAIL`, `ERROR`, `CMD_NOT_AVAILABLE` and timeout outcomes reject instead of being logged as successful; observable light, dimmer and cover writes may also complete from a matching realtime state update.
-- Matter topology mutations are serialized. Unregister operations are considered complete only after local endpoint disappearance is observable, reducing rename/prune/recovery overlap and lock contention.
-- Matter name persistence is now a validated, atomically-written v2 store with v1 backup/migration, 30-day reservations, Unicode-safe truncation and deterministic repair of invalid or duplicate records.
-- Persisted thermostat fallbacks use versioned records and support a restart-safe, one-shot recovery request with automatic fallback rollback.
+- Matter topology mutations are serialized. An unregister is considered complete only once local endpoint disappearance is observable, and a rename additionally waits for the new endpoint to become locally queryable — so overlapping rename, prune and recovery bursts can no longer race. This verifies local publication only; what a voice controller has actually indexed stays unknown to the plugin.
+- Persisted thermostat fallbacks use versioned records, with legacy entries migrated as `legacy-unknown`. The previously sticky fallback can now be cleared through a restart-safe, one-shot recovery request that reuses the same device ID and rolls back to `TemperatureSensor` on any failure.
 
 ### Changed
 
-- Custom names are now applied to a derived copy of each device instead of mutating the discovered device in place. `klares4-devices.json` therefore lists the panel's own names consistently, instead of a mix that depended on discovery order and write debouncing — making it a reliable reference when filling in `customNames`. HomeKit and MQTT names are unchanged.
+- Custom names are now applied to a derived copy of each device instead of mutating the discovered device in place. A Matter-only override therefore changes the Matter name alone: the name shared with HomeKit and MQTT is unaffected. As a consequence `klares4-devices.json` consistently lists the panel's own names, instead of a mix that depended on discovery order and write debouncing — making it a reliable reference when filling in `customNames`.
 
 ### Added
 
-- Read-only Italian-aware Matter voice-collision diagnostics with deterministic summary hashes and debug-level evidence.
-- Per-device Matter-only `name` and `exposed` overrides through `matterOverrides`.
-- Administrative `matterRecoveryRequests` generations for controlled, per-thermostat recovery.
+- Read-only Italian-aware Matter voice-collision diagnostics with deterministic summary hashes and debug-level evidence. It reports lexically ambiguous names, including names whose distinctive part is lost to the 32-character limit. Nothing is renamed and no exposure changes.
+- Per-device Matter-only `name` and `exposed` overrides through `matterOverrides`, resolved by a single exposure policy: global exclusion, then per-device override, then category, then the existing default.
+- Administrative `matterRecoveryRequests` generations for controlled, per-thermostat recovery. Inert until a generation is configured; incrementing it authorises exactly one attempt.
+
+## [2.1.5-rc.2] - 2026-09-12
+
+Command-path correctness and persisted-name integrity. Reconciles the
+reservation and prune-guard work that shipped in `2.1.5-rc.1` but was never
+present on `main`.
+
+### Fixed
+
+- Mutating output and thermostat commands now resolve only on a real terminal outcome. Explicit `FAIL`, `ERROR`, `CMD_NOT_AVAILABLE` and timeout results reject instead of being logged as successful. Pending commands correlate on an exact ID first, fall back to a single unambiguous candidate only, and refuse duplicate IDs.
+- Light, dimmer and cover writes may also complete from a matching realtime state update, for firmware revisions that never emit `CMD_USR_RES` for outputs. Gate and scenario commands require an acknowledgement, since they have no observable state.
+- Persisted Matter names are now a validated, atomically-written v2 store with v1 backup and migration, 30-day reservations, NFKC normalisation, code-point-safe truncation, re-checked collision suffixes and deterministic repair of invalid or duplicate records. Valid names are preserved byte-for-byte.
+- A prune pass is skipped entirely when discovery returned fewer than half the exposed registered endpoints, so one disturbed sync can no longer cascade into a mass unregister.
 
 ## [2.1.4] - 2026-07-25
 
