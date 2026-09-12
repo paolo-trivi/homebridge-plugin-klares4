@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.5-rc.2] - 2026-09-12
+
+Command-path correctness and persisted-name integrity. Reconciles the
+reservation and prune-guard work that shipped in `2.1.5-rc.1` but was never
+present on `main`. Matter topology serialization and thermostat recovery are
+deliberately **not** in this candidate — they ship separately so a regression
+can be attributed to one change rather than three.
+
+### Fixed
+
+- Mutating output and thermostat commands now resolve only on a real terminal outcome. Explicit `FAIL`, `ERROR`, `CMD_NOT_AVAILABLE` and timeout results reject instead of being logged as successful. Pending commands correlate on an exact ID first, fall back to a single unambiguous candidate only, and refuse duplicate IDs.
+- Light, dimmer and cover writes may also complete from a matching realtime state update, for firmware revisions that never emit `CMD_USR_RES` for outputs. Gate and scenario commands require an acknowledgement, since they have no observable state.
+- Persisted Matter names are now a validated, atomically-written v2 store with v1 backup and migration, 30-day reservations, NFKC normalisation, code-point-safe truncation, re-checked collision suffixes and deterministic repair of invalid or duplicate records. Valid names are preserved byte-for-byte.
+- A prune pass is skipped entirely when discovery returned fewer than half the exposed registered endpoints, so one disturbed sync can no longer cascade into a mass unregister.
+
 ## [2.1.4] - 2026-07-25
 
 Stable release of the **`2.1.4-rc.1` … `2.1.4-rc.7`** cycle, running in
