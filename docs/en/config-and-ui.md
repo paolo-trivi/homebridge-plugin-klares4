@@ -53,6 +53,13 @@ Behavior:
 - `excludeSensors`
 - `excludeScenarios`
 - `customNames` for outputs, zones, sensors, scenarios
+- `matterExposure` hides whole categories from Matter only
+- `matterOverrides` applies per-device Matter-only `name` / `exposed` values keyed by canonical ID
+- `matterRecoveryRequests` maps a `thermostat_*` ID to a monotonic positive generation
+
+Exposure precedence is: global exclusion, per-device override, category, then the existing default (`true`). Matter overrides never alter HAP/HomeKit or MQTT.
+
+A thermostat recovery generation is consumed once and persisted before the topology mutation. Increment it only for a deliberate retry. Failed or interrupted recovery rolls back to the read-only TemperatureSensor fallback; do not delete the fallback store.
 
 ## Room Mapping
 

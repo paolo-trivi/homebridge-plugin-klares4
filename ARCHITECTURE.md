@@ -15,7 +15,8 @@ This document describes the modular architecture delivered for `2.0.0-beta.0` wi
 - WebSocket:
   - Public facade: `KseniaWebSocketClient` (`websocket-client/index.ts`)
   - Internal modules:
-    - `websocket/command-dispatcher.ts`: per-device queue + ACK/timeout pending map.
+    - `websocket/command-dispatcher.ts`: per-device queue, unique pending IDs, strict response correlation and positive-result validation.
+    - `websocket/output-command-confirmation.ts`: bounded realtime-state confirmation for observable output writes.
     - `websocket/protocol-router.ts`: command routing by `CMD`/`PAYLOAD_TYPE`.
     - `websocket/device-state-projector.ts`: parse/mapping utilities from protocol payloads.
     - `websocket/ws-transport.ts`: transport helpers for send/ping/close.
@@ -48,10 +49,23 @@ This document describes the modular architecture delivered for `2.0.0-beta.0` wi
   - Internal services:
     - `platform/accessory-registry.ts`: cache/add/update/remove/prune accessory lifecycle.
     - `platform/accessory-handler-service.ts`: handler factory + status dispatch by device type.
-    - `platform/discovery-service.ts`: exclusion rules and custom-name resolution.
+    - `platform/discovery-service.ts`: global exclusions, derived name provenance and the single per-device Matter policy resolver.
     - `platform/device-list-service.ts`: device persistence + summary logging + room mapping example generation.
     - `platform/config-file-service.ts`: safe update of `generateDebugFile` in `config.json`.
     - `platform/platform-lifecycle-service.ts`: timers and shutdown lifecycle helpers.
+  - Matter subsystem:
+    - `platform/matter-accessory-registry.ts`: Matter registration facade and state-update orchestration.
+    - `platform/matter-topology-coordinator.ts`: process-wide serialization and locally observable register/unregister states.
+    - `platform/matter-name-service.ts` / `matter-name-store.ts`: deterministic name map, validated v2 persistence and reserved slots.
+    - `platform/matter-voice-analyzer.ts`: deterministic, read-only collision diagnostics; it never mutates names.
+    - `platform/matter-prune-tracker.ts`: persisted consecutive-miss pruning with partial-sync guards.
+    - `platform/matter-fallback-store.ts` / `matter-thermostat-recovery-request.ts`: versioned fallback state and explicit one-shot Thermostat recovery.
+
+## Truth Boundaries
+
+- Command writes progress through `requested -> sent -> acknowledged` or, for observable outputs, `state-confirmed`. A socket write alone is never success.
+- Matter topology progresses through `requested -> published-unverified -> locally-published`. Local queryability does not mean a controller has refreshed its own name or voice index.
+- Matter-only names and exposure are derived from source/custom names without mutating the HAP or MQTT device snapshot.
 
 ## Compatibility Contract
 

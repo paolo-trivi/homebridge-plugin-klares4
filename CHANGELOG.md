@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Mutating output and thermostat commands now validate positive panel acknowledgements. Explicit `FAIL`, `ERROR`, `CMD_NOT_AVAILABLE` and timeout outcomes reject instead of being logged as successful; observable light, dimmer and cover writes may also complete from a matching realtime state update.
+- Matter topology mutations are serialized. Unregister operations are considered complete only after local endpoint disappearance is observable, reducing rename/prune/recovery overlap and lock contention.
+- Matter name persistence is now a validated, atomically-written v2 store with v1 backup/migration, 30-day reservations, Unicode-safe truncation and deterministic repair of invalid or duplicate records.
+- Persisted thermostat fallbacks use versioned records and support a restart-safe, one-shot recovery request with automatic fallback rollback.
+
+### Changed
+
+- Custom names are now applied to a derived copy of each device instead of mutating the discovered device in place. `klares4-devices.json` therefore lists the panel's own names consistently, instead of a mix that depended on discovery order and write debouncing — making it a reliable reference when filling in `customNames`. HomeKit and MQTT names are unchanged.
+
+### Added
+
+- Read-only Italian-aware Matter voice-collision diagnostics with deterministic summary hashes and debug-level evidence.
+- Per-device Matter-only `name` and `exposed` overrides through `matterOverrides`.
+- Administrative `matterRecoveryRequests` generations for controlled, per-thermostat recovery.
+
 ## [2.1.4] - 2026-07-25
 
 Stable release of the **`2.1.4-rc.1` … `2.1.4-rc.7`** cycle, running in

@@ -53,6 +53,13 @@ Comportamento:
 - `excludeSensors`
 - `excludeScenarios`
 - `customNames` per output, zone, sensori, scenari
+- `matterExposure` nasconde intere categorie soltanto da Matter
+- `matterOverrides` applica `name` / `exposed` Matter-only per ID canonico
+- `matterRecoveryRequests` associa un ID `thermostat_*` a una generazione positiva monotona
+
+La precedenza dell'esposizione e: esclusione globale, override per device, categoria, quindi default esistente (`true`). Gli override Matter non cambiano HAP/HomeKit o MQTT.
+
+La generazione di recovery viene consumata una sola volta e persistita prima della modifica topologica. Incrementala soltanto per un nuovo tentativo deliberato. Se la recovery fallisce o viene interrotta, il plugin torna al fallback TemperatureSensor; non cancellare lo store fallback.
 
 ## Room Mapping
 

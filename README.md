@@ -51,11 +51,12 @@ No extra configuration is required: enable Matter in Homebridge and pair the bri
 
 ## Voice commands (Alexa / Siri / Google)
 
-Voice assistants resolve utterances by the **exact, unique device name**: "accendi lo studio" works reliably only if exactly one device is named *Studio*. This plugin is built around that rule:
+Voice assistants combine transcription, device names, rooms, groups and built-in intents. A unique device name helps, but does not by itself guarantee how a controller resolves an utterance. The plugin therefore keeps names deterministic and reports likely collisions without renaming devices automatically:
 
 - **Names come from the panel and are the source of truth.** The label you configured in the Lares4 (`DES`) is what you pronounce — the plugin never invents names, it only cleans them (trims stray spaces, replaces characters HomeKit rejects like `+` and parentheses: `Inserisci Finestre+Tapparelle` → `Inserisci Finestre e Tapparelle`).
 - **The controllable device always owns the clean name.** When a cover and a security zone share the same label (common for windows: the *Finestra Studio* cover and the *Finestra Studio* contact zone), the cover/light/thermostat keeps the clean name and the passive sensor gets a ` - Sens.` suffix — so "chiudi finestra studio" always reaches the cover, never the contact sensor.
-- **Names are deterministic and stable across reboots.** The final name for every device is computed in one batch when discovery completes and persisted to `klares4-matter-names.json` in the Homebridge storage folder. From then on every accessory registers with its final name from the very first instant of every boot, regardless of discovery order — controllers never see a rename, so their cached voice targets stay valid. The end-of-sync log prints the full `name → uuid` table and warns loudly if two devices ever ended up with the same name (which the map prevents by construction).
+- **Names are deterministic and stable across reboots.** The final name for every device is computed in one batch and persisted in the versioned `klares4-matter-names.json` store. Valid names remain stable; temporarily missing devices reserve their slot for 30 days. The normal log prints only a compact summary and diagnostic hash; the full table and voice findings are available at debug level.
+- **Voice analysis is diagnostic only.** The end-of-sync analyzer detects exact, normalized, abbreviation, singular/plural, prefix, containment, artificial-suffix and truncation conflicts. It never changes a name and never claims to know the controller's internal friendly name or NLU index.
 - **Room commands need a one-time room setup in the controller.** "Accendi lo studio" as a *room* command (all lights in the room) requires assigning devices to rooms inside Apple Home / Alexa / Google Home — room membership is not conveyed via Matter. Do it once per controller; it survives reboots because device identities (UUID/serial) never change.
 - **Custom aliases are a controller feature.** Matter has no alias concept: if you want "la finestra grande" to mean `Finestra Matrimoniale`, define the alias in the Alexa/Google/Apple app.
 
@@ -71,6 +72,28 @@ On a 100+ endpoint bridge the voice namespace gets crowded — 39 contact zones 
 ```
 
 Available keys: `zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats` (all default `true`). Endpoints of a type you disable are removed automatically after 3 consecutive discovery cycles (the same conservative prune discipline that protects against transient discovery glitches).
+
+For individual exceptions, use canonical device IDs with `matterOverrides`. These overrides affect Matter only; HAP/HomeKit and MQTT keep their existing names and exposure:
+
+```json
+"matterOverrides": {
+  "light_12": { "name": "Studio Ceiling" },
+  "scenario_14": { "exposed": false },
+  "sensor_temp_21": { "name": "Studio Temperature", "exposed": true }
+}
+```
+
+Global exclusions still win, then a per-device `exposed` value, then the category in `matterExposure`, then the backward-compatible default (`true`). Apply one rename at a time: the plugin can verify local Matter publication, but controller-side caches remain outside its control.
+
+Thermostats persisted as read-only temperature-sensor fallbacks are not retried automatically. To request one controlled retry, set a monotonically increasing generation for exactly that device:
+
+```json
+"matterRecoveryRequests": {
+  "thermostat_18": 1
+}
+```
+
+The generation is consumed once and persisted before the topology change. On failure or interrupted recovery, the plugin returns to the TemperatureSensor fallback. Increase the number only for a deliberate later retry; never delete the fallback store.
 
 ## Updating the plugin (important)
 
@@ -109,7 +132,7 @@ If this plugin saves you time, please ⭐ the repo — it really helps others di
 - **Environmental Sensors**: Real-time temperature, humidity, and light levels
 - **System Temperature Sensors**: Internal and external temperature from central unit
 - **Real-time Updates**: WebSocket connection with automatic reconnection
-- **Command ACK & Timeout**: Write commands wait for API response with configurable timeout
+- **Verified command outcomes**: output writes wait for a positive panel ACK or a matching realtime state; gates/scenarios require a positive ACK and all negative/timeout outcomes reject
 - **Matter Support**: Automatic Matter exposure via Homebridge 2.x (Google Home, Alexa, SmartThings)
 - **UI Configuration**: Complete graphical interface in Homebridge UI
 - **Customization**: Custom names and selective entity exclusion
@@ -207,6 +230,8 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
 | `excludeSensors`    | string[] | []           | Sensors to exclude              |
 | `matterExposure`    | object   | all `true`   | Per-type Matter exposure switches (`zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats`) — Matter side only, see [Voice commands](#voice-commands-alexa--siri--google) |
+| `matterOverrides`   | object   | {}           | Per-device Matter-only `name` / `exposed` overrides keyed by canonical device ID |
+| `matterRecoveryRequests` | object | {}         | Monotonic, one-shot Matter Thermostat recovery generation keyed by `thermostat_*` ID |
 | `customNames`       | object   | {}           | Custom names                    |
 
 ### Supported Accessory Types
@@ -463,6 +488,12 @@ Il plugin include codice di affidabilita specifico per Matter, testato in instal
 
 Non serve nessuna configurazione aggiuntiva: abilita Matter in Homebridge e abbina il bridge all'ecosistema preferito.
 
+#### Installazioni voice-first
+
+`matterExposure` nasconde categorie complete solo da Matter. Per eccezioni puntuali usa `matterOverrides`, indicizzato per ID canonico: `name` ed `exposed` non modificano HomeKit/HAP o MQTT. L'analizzatore vocale segnala collisioni lessicali e semantiche con un sommario e un hash deterministico, senza rinominare automaticamente e senza fingere di osservare la cache interna di Alexa.
+
+I termostati persistiti come sensori temperatura fallback non vengono ritentati a ogni boot. Una voce `"thermostat_18": 1` in `matterRecoveryRequests` autorizza un solo tentativo controllato; incrementa il numero solo per un nuovo tentativo deliberato. In caso di fallimento o riavvio interrotto il fallback viene ripristinato automaticamente. Non cancellare lo store Matter.
+
 ### Compatibilita
 
 Testato con centrali **Ksenia Lares 4.0** (firmware che espone il sottoprotocollo WebSocket `KS_WSOCK` sull'IP locale del pannello, con PIN di sistema valido). Se il tuo modello specifico Lares 4.0 funziona o ha problemi, apri una issue cosi possiamo ampliare la lista di compatibilita.
@@ -480,6 +511,7 @@ Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davve
 - **Sensori Ambientali**: Temperatura, umidita e luminosita in tempo reale
 - **Sensori Temperatura Sistema**: Temperatura interna ed esterna dalla centrale
 - **Aggiornamenti Real-time**: Connessione WebSocket con riconnessione automatica
+- **Esiti comando verificati**: ACK positivo o stato realtime coerente per gli output; rejection e timeout vengono propagati
 - **Supporto Matter**: Esposizione automatica via Matter su Homebridge 2.x (Google Home, Alexa, SmartThings)
 - **Configurazione UI**: Interfaccia grafica completa in Homebridge UI
 - **Personalizzazione**: Nomi personalizzati ed esclusione selettiva di entita
@@ -573,6 +605,9 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `excludeZones`      | string[] | []           | Zone da escludere               |
 | `excludeOutputs`    | string[] | []           | Output da escludere             |
 | `excludeSensors`    | string[] | []           | Sensori da escludere            |
+| `matterExposure`    | object   | tutti `true` | Esposizione Matter per categoria |
+| `matterOverrides`   | object   | {}           | Override Matter-only `name` / `exposed` per ID canonico |
+| `matterRecoveryRequests` | object | {}         | Generazione monotona one-shot per recovery di un `thermostat_*` |
 | `customNames`       | object   | {}           | Nomi personalizzati             |
 
 ### Tipi di Accessori Supportati
