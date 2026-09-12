@@ -22,6 +22,7 @@ interface CounterStoreShape {
  * see the "P0 — Prune aggressivo" stabilization work in ARCHITECTURE.md.
  */
 export const MATTER_PRUNE_STALE_THRESHOLD_CYCLES = 3;
+const MATTER_PRUNE_MIN_DISCOVERY_RATIO = 0.5;
 
 interface MatterCycleStats {
     newlyRegistered: number;
@@ -108,9 +109,8 @@ export class MatterPruneTracker {
         }
     }
 
-    /** Marks the start of a new discovery cycle and resets per-cycle counters. */
+    /** Resets per-cycle counters. The prune pass advances the cycle number. */
     startCycle(): void {
-        this.cycleNumber += 1;
         this.stats = emptyStats();
     }
 
@@ -196,6 +196,11 @@ export class MatterPruneTracker {
      * Ends with a compact topology-churn summary log line.
      */
     async runPruneCycle(deps: MatterPruneDeps): Promise<void> {
+        this.cycleNumber += 1;
+        if (this.isDegenerateCycle(deps)) {
+            this.stats = emptyStats();
+            return;
+        }
         const counters = { missingCandidates: 0, pruneSkipped: 0, unregisteredCount: 0 };
 
         for (const [uuid, reg] of deps.registrations) {
@@ -228,6 +233,28 @@ export class MatterPruneTracker {
             counters.pruneSkipped,
             counters.unregisteredCount,
         );
+        this.stats = emptyStats();
+    }
+
+    private isDegenerateCycle(deps: MatterPruneDeps): boolean {
+        const discovered = deps.activeDiscoveredUUIDs.size;
+        const registered = [...deps.registrations.values()].filter((registration) => {
+            if (registration.status !== 'registered') return false;
+            if (!deps.isDeviceExposed) return true;
+            const device = registration.matterAccessory.context?.device as KseniaDevice | undefined;
+            return !device || deps.isDeviceExposed(device);
+        }).length;
+        if (registered === 0) return false;
+
+        if (discovered === 0 || discovered < registered * MATTER_PRUNE_MIN_DISCOVERY_RATIO) {
+            this.log.warn(
+                `[Matter] cycle #${this.cycleNumber}: skipping prune — discovery returned ${discovered} `
+                + `of ${registered} exposed registered endpoint(s), below the `
+                + `${Math.round(MATTER_PRUNE_MIN_DISCOVERY_RATIO * 100)}% safety floor`,
+            );
+            return true;
+        }
+        return false;
     }
 
     private async pruneCandidate(

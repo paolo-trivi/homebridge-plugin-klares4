@@ -38,10 +38,12 @@ export interface NameMapFinalizeResult {
 export class MatterNameService {
     private registry = new MatterNameRegistry();
     private readonly store: MatterNameStore;
+    private known = new Map<string, MatterNameMapEntry>();
 
     constructor(storagePath: string, log: Logger) {
         this.store = new MatterNameStore(storagePath, log);
         for (const entry of this.store.load()) {
+            this.known.set(entry.uuid, entry);
             this.registry.seed(entry.uuid, entry.name, entry.base, entry.type);
         }
     }
@@ -67,7 +69,7 @@ export class MatterNameService {
      * registry state and persist to disk when changed.
      */
     finalize(devices: Iterable<MatterNamedDevice>): NameMapFinalizeResult {
-        const entries = computeMatterNameMap(devices);
+        const entries = computeMatterNameMap(devices, this.known.values());
         const duplicates = findDuplicateDisplayNames(entries.values());
 
         // Drop any pending displaced-rename left by the incremental fallback:
@@ -78,6 +80,7 @@ export class MatterNameService {
             fresh.seed(entry.uuid, entry.name, entry.base, entry.type);
         }
         this.registry = fresh;
+        this.known = entries;
 
         const persisted = this.store.save([...entries.values()]);
         return { entries, duplicates, persisted };

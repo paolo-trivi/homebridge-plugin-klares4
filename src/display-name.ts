@@ -42,8 +42,9 @@ export const HAP_MAX_NAME_LENGTH = 64;
  * boundary character (letter/digit/’). Used for suffix head-truncation too.
  */
 export function truncateDisplayName(name: string, maxLength: number): string {
-    if (name.length <= maxLength) return name;
-    return name.slice(0, maxLength).replace(BOUNDARY_RIGHT, '');
+    const characters = Array.from(name);
+    if (characters.length <= maxLength) return name;
+    return characters.slice(0, maxLength).join('').replace(BOUNDARY_RIGHT, '');
 }
 
 /**
@@ -51,7 +52,7 @@ export function truncateDisplayName(name: string, maxLength: number): string {
  * Returns '' when nothing usable survives (callers apply their fallback).
  */
 export function cleanDisplayName(raw: string, maxLength: number): string {
-    let s = raw;
+    let s = raw.normalize('NFKC');
     s = s.replace(/\+/g, ' e ');
     s = s.replace(/[()[\]]/g, ' ');
     s = s.replace(ALLOWED_MID_CHARS, ' ');

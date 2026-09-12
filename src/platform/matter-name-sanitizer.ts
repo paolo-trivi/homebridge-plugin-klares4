@@ -22,6 +22,14 @@ import { cleanDisplayName, truncateDisplayName } from '../display-name';
 
 const MAX_NAME_LENGTH = 32;
 
+export function isValidMatterAccessoryName(name: string): boolean {
+    return typeof name === 'string'
+        && name.length > 0
+        && Array.from(name).length <= MAX_NAME_LENGTH
+        && /^[\p{L}\p{N}][\p{L}\p{N}’ '.,-]*$/u.test(name)
+        && name.normalize('NFKC') === name;
+}
+
 /**
  * Sanitise a device name for use as a Matter accessory `displayName`.
  */
@@ -101,7 +109,8 @@ export function buildTypedSuffix(name: string, deviceType: string | undefined): 
 }
 
 export function buildUuidFallbackSuffix(name: string, uuid: string, tagLength = 4): string {
-    const tag = uuid.replace(/-/g, '').slice(-tagLength);
+    const compactId = uuid.normalize('NFKC').replace(/[\p{P}\p{S}\s_]+/gu, '');
+    const tag = compactId.slice(-tagLength) || 'id';
     const tail = `${SUFFIX_SEPARATOR}${tag}`;
     const maxNameLen = MAX_NAME_LENGTH - tail.length;
     if (maxNameLen <= 0) return truncateDisplayName(name, MAX_NAME_LENGTH);
@@ -239,6 +248,15 @@ export class MatterNameRegistry {
             const existing = this.slotOwners.get(this.slotKey(typed));
             if (!existing || existing.uuid === uuid) return typed;
         }
-        return buildUuidFallbackSuffix(base, uuid);
+        for (let tagLength = 4; tagLength <= 12; tagLength += 1) {
+            const fallback = buildUuidFallbackSuffix(base, uuid, tagLength);
+            const existing = this.slotOwners.get(this.slotKey(fallback));
+            if (!existing || existing.uuid === uuid) return fallback;
+        }
+        for (let sequence = 2; ; sequence += 1) {
+            const fallback = buildUuidFallbackSuffix(`${base} ${sequence}`, uuid, 12);
+            const existing = this.slotOwners.get(this.slotKey(fallback));
+            if (!existing || existing.uuid === uuid) return fallback;
+        }
     }
 }

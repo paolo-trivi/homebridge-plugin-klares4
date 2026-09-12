@@ -85,6 +85,22 @@ test('computeMatterNameMap: names are unique case-insensitively', () => {
     assert.equal(findDuplicateDisplayNames(map.values()).length, 0);
 });
 
+test('computeMatterNameMap: absent devices retain reserved name slots', () => {
+    const first = computeMatterNameMap([
+        { id: 'cover_1', type: 'cover', name: 'Finestra Studio' },
+        { id: 'zone_1', type: 'zone', name: 'Finestra Studio' },
+    ], [], 1000);
+    const second = computeMatterNameMap(
+        [{ id: 'zone_1', type: 'zone', name: 'Finestra Studio' }],
+        first.values(),
+        2000,
+    );
+
+    assert.equal(second.get('cover_1').name, 'Finestra Studio');
+    assert.equal(second.get('cover_1').reserved, true);
+    assert.equal(second.get('zone_1').name, 'Finestra Studio - Sens.');
+});
+
 test('computeMatterNameMap: uuid fallback tag is lengthened until unique', () => {
     // Both zones already mention their own type ("Sensore ..."), so the typed
     // suffix is skipped and the uuid fallback must disambiguate — even with

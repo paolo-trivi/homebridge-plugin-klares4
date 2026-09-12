@@ -135,7 +135,7 @@ test('MatterNameRegistry: anti-redundancy — skip suffix when name already ment
     const c2 = reg.resolve('cover_27', 'Tapparella Studio', 'cover');
     // Same priority + name already says "Tapparella" → fallback uuid suffix
     assert.notEqual(c2, 'Tapparella Studio - Tapp.');
-    assert.ok(c2.endsWith('r_27'), `uuid fallback expected, got "${c2}"`);
+    assert.ok(c2.endsWith('er27'), `device-id fallback expected, got "${c2}"`);
 });
 
 test('MatterNameRegistry: long name + suffix fits 32 chars with abbreviation', () => {
@@ -159,6 +159,17 @@ test('MatterNameRegistry: deviceType omitted (legacy) → uuid fallback on colli
     reg.resolve('uuid-aaaa', 'Sala');
     const x = reg.resolve('uuid-bbbb', 'Sala');
     assert.ok(x.endsWith('bbbb'));
+});
+
+test('MatterNameRegistry: device-id fallback is sanitized and unique', () => {
+    const reg = new MatterNameRegistry();
+    reg.resolve('cover_a-1234', 'Tapparella Studio', 'cover');
+    const second = reg.resolve('cover_b_1234', 'Tapparella Studio', 'cover');
+    const third = reg.resolve('cover-c_1234', 'Tapparella Studio', 'cover');
+
+    assert.doesNotMatch(second, /_/);
+    assert.doesNotMatch(third, /_/);
+    assert.notEqual(second.toLowerCase(), third.toLowerCase());
 });
 
 test('MatterNameRegistry: real-world Lares4 cover-vs-zone collisions (full ordering)', () => {

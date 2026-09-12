@@ -37,7 +37,7 @@ test('finalize persists the name-map to klares4-matter-names.json', () => {
     assert.equal(entries.get('zone_19').name, 'Finestra Cucina - Sens.');
 
     const onDisk = JSON.parse(fs.readFileSync(path.join(dir, STORE_FILE), 'utf8'));
-    assert.equal(onDisk.version, 1);
+    assert.equal(onDisk.version, 2);
     const zone = onDisk.names.find((e) => e.uuid === 'zone_19');
     assert.equal(zone.name, 'Finestra Cucina - Sens.');
     assert.equal(zone.base, 'Finestra Cucina');
@@ -125,4 +125,48 @@ test('store entries missing required fields are skipped on load', () => {
     const svc = new MatterNameService(dir, silentLog());
     assert.equal(svc.currentNameOf('cover_1'), 'Finestra Cucina');
     assert.equal(svc.currentNameOf(''), undefined);
+});
+
+test('v2 store rejects missing timestamps, unsupported versions and duplicate slots', () => {
+    const invalidTimestampDir = tmpStorage();
+    fs.writeFileSync(path.join(invalidTimestampDir, STORE_FILE), JSON.stringify({
+        version: 2,
+        names: [{ uuid: 'cover_1', name: 'Finestra Cucina', base: 'Finestra Cucina', type: 'cover' }],
+    }), 'utf8');
+    assert.equal(new MatterNameService(invalidTimestampDir, silentLog()).currentNameOf('cover_1'), undefined);
+
+    const unsupportedDir = tmpStorage();
+    fs.writeFileSync(path.join(unsupportedDir, STORE_FILE), JSON.stringify({
+        version: 99,
+        names: [{ uuid: 'cover_1', name: 'Finestra Cucina', base: 'Finestra Cucina', lastSeen: Date.now() }],
+    }), 'utf8');
+    assert.equal(new MatterNameService(unsupportedDir, silentLog()).currentNameOf('cover_1'), undefined);
+
+    const duplicateDir = tmpStorage();
+    fs.writeFileSync(path.join(duplicateDir, STORE_FILE), JSON.stringify({
+        version: 2,
+        names: [
+            { uuid: 'zone_1', name: 'Studio', base: 'Studio', type: 'zone', lastSeen: Date.now() },
+            { uuid: 'light_1', name: 'studio', base: 'studio', type: 'light', lastSeen: Date.now() },
+        ],
+    }), 'utf8');
+    const duplicateService = new MatterNameService(duplicateDir, silentLog());
+    assert.equal(duplicateService.currentNameOf('light_1'), 'studio');
+    assert.equal(duplicateService.currentNameOf('zone_1'), undefined);
+    duplicateService.finalize([{ id: 'light_1', type: 'light', name: 'studio' }]);
+    const repaired = JSON.parse(fs.readFileSync(path.join(duplicateDir, STORE_FILE), 'utf8'));
+    assert.equal(repaired.names.length, 1, 'discarded entries must be removed from disk on finalize');
+});
+
+test('v1 migration writes a backup before the first atomic v2 write', () => {
+    const dir = tmpStorage();
+    fs.writeFileSync(path.join(dir, STORE_FILE), JSON.stringify({
+        version: 1,
+        names: [{ uuid: 'cover_1', name: 'Finestra Cucina', base: 'Finestra Cucina', type: 'cover' }],
+    }), 'utf8');
+    const svc = new MatterNameService(dir, silentLog());
+    svc.finalize([{ id: 'cover_1', type: 'cover', name: 'Finestra Cucina' }]);
+
+    assert.equal(fs.existsSync(path.join(dir, `${STORE_FILE}.v1.bak`)), true);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, STORE_FILE), 'utf8')).version, 2);
 });

@@ -32,6 +32,8 @@ export interface MatterNameMapEntry {
     /** Sanitised base name before any collision suffix. */
     base: string;
     type?: string;
+    lastSeen?: number;
+    reserved?: boolean;
 }
 
 export interface MatterNamedDevice {
@@ -67,12 +69,26 @@ function uniqueUuidFallback(base: string, uuid: string, taken: Set<string>): str
  * Compute the deterministic uuid → displayName map for the given device set.
  * Pure function: same set in, same map out — regardless of iteration order.
  */
-export function computeMatterNameMap(devices: Iterable<MatterNamedDevice>): Map<string, MatterNameMapEntry> {
+export function computeMatterNameMap(
+    devices: Iterable<MatterNamedDevice>,
+    reservations: Iterable<MatterNameMapEntry> = [],
+    now = Date.now(),
+): Map<string, MatterNameMapEntry> {
     const byId = new Map<string, MatterNamedDevice>();
     for (const device of devices) {
         if (device && typeof device.id === 'string' && device.id) byId.set(device.id, device);
     }
-    const sorted = [...byId.values()].sort(compareDevices);
+    const reservedById = new Map<string, MatterNameMapEntry>();
+    for (const entry of reservations) {
+        if (!entry?.uuid || byId.has(entry.uuid)) continue;
+        reservedById.set(entry.uuid, entry);
+    }
+
+    const candidates = [...byId.values()];
+    for (const entry of reservedById.values()) {
+        candidates.push({ id: entry.uuid, name: entry.base, type: entry.type });
+    }
+    const sorted = candidates.sort(compareDevices);
 
     const taken = new Set<string>();
     const out = new Map<string, MatterNameMapEntry>();
@@ -85,7 +101,16 @@ export function computeMatterNameMap(devices: Iterable<MatterNamedDevice>): Map<
         }
         if (!candidate) candidate = uniqueUuidFallback(base, device.id, taken);
         taken.add(candidate.toLowerCase());
-        out.set(device.id, { uuid: device.id, name: candidate, base, type: device.type });
+        const reservation = reservedById.get(device.id);
+        out.set(device.id, {
+            uuid: device.id,
+            name: candidate,
+            base,
+            type: device.type,
+            ...(reservation
+                ? { lastSeen: reservation.lastSeen, reserved: true }
+                : { lastSeen: now }),
+        });
     }
     return out;
 }
@@ -117,9 +142,14 @@ export function logNameTable(
     duplicates: DuplicateNameGroup[],
 ): void {
     const rows = [...entries].sort((a, b) => a.name.localeCompare(b.name));
-    log.info(`[Matter] final name-map (${rows.length} devices):`);
+    const live = rows.filter((row) => !row.reserved).length;
+    const reserved = rows.length - live;
+    log.info(`[Matter] final name-map (${live} devices${reserved ? `, ${reserved} reserved` : ''}):`);
     for (const row of rows) {
-        log.info(`   "${row.name}" -> ${row.uuid}${row.type ? ` [${row.type}]` : ''}`);
+        log.debug(
+            `   "${row.name}" -> ${row.uuid}${row.type ? ` [${row.type}]` : ''}`
+            + `${row.reserved ? ' (reserved)' : ''}`,
+        );
     }
     for (const dup of duplicates) {
         log.warn(

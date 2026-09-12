@@ -45,3 +45,7 @@ test('cleanDisplayName: returns empty string when nothing survives (callers deci
     assert.equal(cleanDisplayName('()[]+', 32), 'e');
     assert.equal(cleanDisplayName('___', 32), '');
 });
+
+test('cleanDisplayName: normalizes decomposed Unicode before applying the allowlist', () => {
+    assert.equal(cleanDisplayName('Caffe\u0300', 32), 'Caffè');
+});
