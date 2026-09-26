@@ -51,6 +51,36 @@ test('F06: summer cfg without a session hint writes the summer setpoint', () => 
     assert.equal(payload.WIN.TM, '21.5');
 });
 
+test('a setpoint keeps the thermostat mode: OFF stays OFF, AUTO stays AUTO, MAN stays MAN', () => {
+    for (const mode of ['OFF', 'AUTO', 'MAN']) {
+        const existingCfg = { ...cfg('WIN'), ACT_MODE: mode };
+        const payload = buildThermostatSetpointCommandPayload({ systemThermostatId: '1', temperature: 22, existingCfg });
+        assert.equal(payload.ACT_MODE, mode);
+        assert.equal(payload.WIN.TM, '22.0');
+        // Everything but the active season's TM is written back unchanged.
+        assert.deepEqual({ ...payload, WIN: undefined }, { ...existingCfg, WIN: undefined });
+    }
+});
+
+test('a setpoint uses MAN only when the cfg has no mode', () => {
+    const withoutMode = { ...cfg('SUM') };
+    delete withoutMode.ACT_MODE;
+    const payload = buildThermostatSetpointCommandPayload({ systemThermostatId: '1', temperature: 24, existingCfg: withoutMode });
+    assert.equal(payload.ACT_MODE, 'MAN');
+    assert.equal(payload.SUM.TM, '24.0');
+
+    const noCfg = buildThermostatSetpointCommandPayload({ systemThermostatId: '1', temperature: 24 });
+    assert.equal(noCfg.ACT_MODE, 'MAN');
+});
+
+test('a setpoint on an OFF thermostat does not switch it on', async () => {
+    const h = makeService({ season: 'WIN' });
+    await h.service.setThermostatTemperature('thermostat_18', 19);
+    assert.equal(h.writes[0].ACT_MODE, 'OFF');
+    assert.equal(h.writes[0].WIN.TM, '19.0');
+    assert.equal(h.state.thermostatCfgById.get('1').ACT_MODE, 'OFF');
+});
+
 test('F06: after a restart a setpoint on a summer thermostat changes SUM.TM', async () => {
     const h = makeService({ season: 'SUM' });
     await h.service.setThermostatTemperature('thermostat_18', 23);

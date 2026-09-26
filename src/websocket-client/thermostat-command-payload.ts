@@ -55,7 +55,11 @@ export function buildThermostatSetpointCommandPayload({
 
     const merged = cloneThermostatCfg(existingCfg);
     merged.ID = systemThermostatId;
-    merged.ACT_MODE = 'MAN';
+    // A setpoint only changes the setpoint: forcing MAN would switch an OFF
+    // thermostat on and drop an AUTO program. MAN only fills a missing mode.
+    if (typeof merged.ACT_MODE !== 'string' || merged.ACT_MODE.trim() === '') {
+        merged.ACT_MODE = 'MAN';
+    }
     merged.ACT_SEA = activeSeason;
     merged[activeSeason] = {
         ...toPlainObject(merged[activeSeason]),
