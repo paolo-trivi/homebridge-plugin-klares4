@@ -141,8 +141,19 @@ function makeHb24MatterApi({ restored = [], unqueryableOnce = [], unregisterClos
         await handler(args);
     };
 
+    // HomebridgeOnOffServer.toggle(): the 'toggle' handler first, then
+    // super.toggle(), whose this.on()/this.off() dispatch back to the
+    // Homebridge overrides and so run the 'on'/'off' handler as well.
+    const toggle = async (uuid) => {
+        await invoke(uuid, 'onOff', 'toggle');
+        const ep = endpoints.get(uuid);
+        const pushed = updates.filter((u) => u.uuid === uuid && u.cluster === 'onOff').at(-1)?.attributes.onOff;
+        const onOff = pushed ?? ep?.clusters?.onOff?.onOff ?? false;
+        await invoke(uuid, 'onOff', onOff ? 'off' : 'on');
+    };
+
     return {
-        api: { matter }, endpoints, log, registerCalls, unregisterCalls, updates, rejectedUpdates, settle, invoke,
+        api: { matter }, endpoints, log, registerCalls, unregisterCalls, updates, rejectedUpdates, settle, invoke, toggle,
     };
 }
 

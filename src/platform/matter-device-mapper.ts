@@ -19,6 +19,7 @@ import {
 import { sanitizeMatterAccessoryName, MatterNameRegistry } from './matter-name-sanitizer';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { buildThermostatHandlers } from './matter-thermostat-handlers';
+import { buildCoverHandlers, buildLightHandlers, buildMomentaryHandlers } from './matter-command-handlers';
 
 const matterNameRegistry = new MatterNameRegistry();
 
@@ -148,25 +149,9 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
         }
         : { onOff: { onOff } };
 
-    const handlers: MatterAccessory['handlers'] = {
-        onOff: {
-            on: async () => { await getWsClient()?.switchLight(device.id, true); },
-            off: async () => { await getWsClient()?.switchLight(device.id, false); },
-        },
-    };
-
-    if (isDimmable) {
-        handlers.levelControl = {
-            moveToLevel: async (args: { level: number }) => {
-                const pct = Math.round((args.level / 254) * 100);
-                await getWsClient()?.dimLight(device.id, pct);
-            },
-            moveToLevelWithOnOff: async (args: { level: number }) => {
-                const pct = Math.round((args.level / 254) * 100);
-                await getWsClient()?.dimLight(device.id, pct);
-            },
-        };
-    }
+    const handlers = buildLightHandlers(device, isDimmable, {
+        api, getWsClient, latest: () => latestSnapshot(device, deps),
+    });
 
     return {
         ...baseFields(device, deps),
@@ -208,14 +193,7 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
                 configStatus: { liftPositionAware: true, operational: true },
             },
         },
-        handlers: {
-            windowCovering: {
-                goToLiftPercentage: async (args: { liftPercent100thsValue: number }) => {
-                    const targetPct = 100 - Math.round(args.liftPercent100thsValue / 100);
-                    await getWsClient()?.moveCover(device.id, targetPct);
-                },
-            },
-        },
+        handlers: buildCoverHandlers(device, { api, getWsClient, latest: () => latestSnapshot(device, deps) }),
     };
 }
 
@@ -285,10 +263,7 @@ function mapMomentarySwitch(device: KseniaDevice, trigger: () => Promise<void>, 
         ...baseFields(device, deps),
         deviceType: deps.api.matter!.deviceTypes.OnOffOutlet,
         clusters: { onOff: { onOff: false } },
-        handlers: { onOff: {
-            on: async () => { await trigger(); scheduleMomentaryAutoOff(device.id, deps); },
-            off: async () => { /* momentary trigger — no-op */ },
-        } },
+        handlers: buildMomentaryHandlers(async () => { await trigger(); scheduleMomentaryAutoOff(device.id, deps); }),
     };
 }
 
