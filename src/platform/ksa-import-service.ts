@@ -8,6 +8,7 @@ import type { KsaSanitizedCache } from '../types';
 import type { PlatformConfigFileService } from './config-file-service';
 import type { Lares4Config } from './types';
 import { normalizeCustomNames, toCustomNameEntries } from './custom-names-config';
+import { applyExclusionSuggestions } from './ksa-config-merge';
 
 export class KsaImportService {
     private readonly cacheService: KsaCacheService;
@@ -70,6 +71,11 @@ export class KsaImportService {
                 ...result.derivedConfig.customNames,
             });
         }
+
+        if (importConfig.applyExclusionSuggestions) {
+            // Suggestions are added to the user's lists; they never replace them.
+            applyExclusionSuggestions(config as Record<string, unknown>, result.derivedConfig.suggestedExclusions);
+        }
     }
 
     private async persistAppliedConfig(platformName: string, result: KsaImportResult, config: Lares4Config): Promise<void> {
@@ -78,7 +84,7 @@ export class KsaImportService {
             const applyDomusMappings = importConfig.applyDomusMappings !== false;
             const applyRoomMapping = importConfig.applyRoomMapping !== false;
             const applyCustomNames = importConfig.applyCustomNames === true;
-            const applyExclusionSuggestions = importConfig.applyExclusionSuggestions === true;
+            const applyExclusions = importConfig.applyExclusionSuggestions === true;
 
             if (applyDomusMappings) {
                 platformConfig.domusThermostat = {
@@ -94,11 +100,8 @@ export class KsaImportService {
                 // Array form: the Homebridge UI drops the category map on its next save.
                 platformConfig.customNames = toCustomNameEntries(result.derivedConfig.customNames);
             }
-            if (applyExclusionSuggestions) {
-                platformConfig.excludeOutputs = result.derivedConfig.suggestedExclusions.outputs;
-                platformConfig.excludeZones = result.derivedConfig.suggestedExclusions.zones;
-                platformConfig.excludeSensors = result.derivedConfig.suggestedExclusions.sensors;
-                platformConfig.excludeScenarios = result.derivedConfig.suggestedExclusions.scenarios;
+            if (applyExclusions) {
+                applyExclusionSuggestions(platformConfig, result.derivedConfig.suggestedExclusions);
             }
 
             platformConfig.ksaImport = {
