@@ -44,6 +44,7 @@ Stability and compliance release, validated on a real Lares4 panel with Homebrid
 - Names changed while Homebridge was offline reach the controllers after the restart.
 - Accessories refused while the Matter server was still starting are registered on a later update.
 - A rare name collision can no longer hang Homebridge while resolving Matter names.
+- Scenarios hidden by the arming policy are removed from Matter after 3 syncs; previously the cache-restored endpoints stayed in the controllers forever, unusable.
 
 #### State and commands
 
@@ -55,6 +56,7 @@ Stability and compliance release, validated on a real Lares4 panel with Homebrid
 - A late `close` from a socket replaced during a reconnect no longer marks the new connection as disconnected.
 - A rare error path in output commands could restart the Homebridge bridge.
 - Reconnecting to an unreachable panel gives up after 10 seconds per attempt instead of hanging for about 2 minutes; shutting down during a reconnection no longer starts another attempt.
+- After an outage, the first reconnection is no longer torn down by a heartbeat left over from the dead socket ("Heartbeat timeout: no PONG received" right after "WebSocket connected"), which cost an extra reconnection cycle.
 - Commands containing emoji or other characters outside the basic range get a correct CRC.
 
 #### HomeKit
