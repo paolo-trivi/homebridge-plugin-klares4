@@ -49,6 +49,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly handlerService: AccessoryHandlerService;
     private readonly configFileService: PlatformConfigFileService;
     private readonly ksaImportService: KsaImportService;
+    private debugCapture?: DebugCaptureManager;
 
     constructor(
         public readonly log: Logger,
@@ -208,8 +209,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 );
                 const durationSeconds = Math.round(durationMs / 1000);
                 this.log.warn(`[DEBUG] Debug capture requested - starting ${durationSeconds}-second capture...`);
-                const debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
-                debugCapture.startCapture(this.wsClient, durationMs);
+                this.debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
+                this.debugCapture.startCapture(this.wsClient, durationMs);
                 void this.configFileService.disableDebugFlag(PLATFORM_NAME);
             }
 
@@ -253,6 +254,9 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
     private cleanupConnections(): void {
         this.lifecycleService.cleanupConnections((): void => {
+            // Flush before disconnecting: both write synchronously, Homebridge exits right after.
+            this.debugCapture?.shutdown();
+            this.deviceListService.flush();
             this.wsClient?.disconnect();
             this.mqttBridge?.disconnect();
         });

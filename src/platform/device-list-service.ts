@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Logger } from 'homebridge';
 
+import { writeFileAtomic, writeFileAtomicSync } from '../atomic-file';
 import { isOutputLikeDevice } from '../device-id';
 import type { KseniaDevice } from '../types';
 import type { DiscoveryService } from './discovery-service';
@@ -58,6 +59,30 @@ export class DeviceListService {
         }
     }
 
+    /**
+     * Shutdown: cancels the debounce timer and writes a pending list
+     * synchronously, so the last discovery is not lost when Homebridge exits.
+     */
+    public flush(): void {
+        if (this.writeTimer) {
+            clearTimeout(this.writeTimer);
+            this.writeTimer = undefined;
+        }
+        const devicesList = this.pendingList;
+        if (!devicesList) {
+            return;
+        }
+        this.pendingList = undefined;
+        try {
+            writeFileAtomicSync(this.devicesFilePath, JSON.stringify(devicesList, null, 2));
+        } catch (error: unknown) {
+            this.options.log.error(
+                'Error saving devices list:',
+                error instanceof Error ? error.message : String(error),
+            );
+        }
+    }
+
     private flushPendingWrite(): void {
         const devicesList = this.pendingList;
         if (!devicesList) {
@@ -66,8 +91,7 @@ export class DeviceListService {
         this.pendingList = undefined;
         const serializedDevices = JSON.stringify(devicesList, null, 2);
 
-        void fs.promises
-            .writeFile(this.devicesFilePath, serializedDevices, 'utf8')
+        void writeFileAtomic(this.devicesFilePath, serializedDevices)
             .then((): void => {
                 const count =
                     devicesList.outputs.length +

@@ -1,6 +1,7 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import type { Logger } from 'homebridge';
+
+import { writeFileAtomic, writeFileAtomicSync } from '../atomic-file';
 
 import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { analyzeMessages, countByCommand, extractCommands, getUniquePayloadTypes } from './analysis';
@@ -16,6 +17,7 @@ export class DebugFileGenerator {
         rawMessages: RawMessage[],
         deviceSnapshots: DeviceSnapshot[],
         captureDurationMs: number,
+        options: { sync?: boolean } = {},
     ): void {
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
@@ -66,20 +68,26 @@ export class DebugFileGenerator {
             };
 
             const serializedData = JSON.stringify(debugData, null, 2);
-            void fs.promises
-                .writeFile(filepath, serializedData, 'utf8')
-                .then((): void => {
-                    this.log.warn('[OK] COMPREHENSIVE DEBUG FILE GENERATED!');
-                    this.log.warn('[FILE] Location: ' + filepath);
-                    this.log.warn('[INFO] Contains:');
-                    this.log.warn(`   - ${debugData.rawMessages.length} raw WebSocket messages`);
-                    this.log.warn(`   - ${debugData.deviceSnapshots.length} device snapshots`);
-                    this.log.warn(`   - ${debugData.statistics.devices} total devices`);
-                    this.log.warn('');
-                    this.log.warn('[SHARE] Share this file for support - PINs are already masked!');
-                    this.log.warn('═══════════════════════════════════════════════════════════');
-                    this.log.warn('');
-                })
+            const reportWritten = (): void => {
+                this.log.warn('[OK] COMPREHENSIVE DEBUG FILE GENERATED!');
+                this.log.warn('[FILE] Location: ' + filepath);
+                this.log.warn('[INFO] Contains:');
+                this.log.warn(`   - ${debugData.rawMessages.length} raw WebSocket messages`);
+                this.log.warn(`   - ${debugData.deviceSnapshots.length} device snapshots`);
+                this.log.warn(`   - ${debugData.statistics.devices} total devices`);
+                this.log.warn('');
+                this.log.warn('[SHARE] Share this file for support - PINs are already masked!');
+                this.log.warn('═══════════════════════════════════════════════════════════');
+                this.log.warn('');
+            };
+            if (options.sync) {
+                // Shutdown path: Homebridge exits shortly after, so the file must be on disk now.
+                writeFileAtomicSync(filepath, serializedData);
+                reportWritten();
+                return;
+            }
+            void writeFileAtomic(filepath, serializedData)
+                .then(reportWritten)
                 .catch((error: unknown): void => {
                     this.log.error(
                         'Error generating debug file:',
