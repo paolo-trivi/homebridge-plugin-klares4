@@ -146,68 +146,32 @@ export class DeviceListService {
     }
 
     private printDevicesSummary(devicesList: DevicesList): void {
-        this.options.log.info('');
-        this.options.log.info('========== AVAILABLE DEVICES ==========');
-        this.options.log.info('Use the following IDs to exclude devices or configure MQTT rooms:');
-        this.options.log.info('');
+        const log = this.options.log;
+        log.info('');
+        log.info('========== AVAILABLE DEVICES ==========');
+        log.info('"ID" is the device ID used by customNames, matterOverrides and MQTT rooms.');
+        log.info('"exclude" is the value to put in excludeOutputs / excludeZones / excludeSensors / excludeScenarios.');
+        log.info('');
 
-        if (devicesList.outputs.length > 0) {
-            this.options.log.info('OUTPUTS (Lights, Covers, Thermostats):');
-            devicesList.outputs.forEach((device: DeviceListItem): void => {
-                const typeLabel =
-                    device.type === 'thermostat'
-                        ? 'THERM'
-                        : device.type === 'light'
-                            ? 'LIGHT'
-                            : 'COVER';
-                this.options.log.info(
-                    `   ID: ${device.fullId.padEnd(20)} - [${typeLabel}] ${device.name}`,
-                );
-            });
-            this.options.log.info('');
+        const sections: Array<[string, DeviceListItem[]]> = [
+            ['OUTPUTS (Lights, Covers, Gates, Thermostats) - excludeOutputs:', devicesList.outputs],
+            ['ZONES (Security Sensors) - excludeZones:', devicesList.zones],
+            ['SENSORS (Temperature, Humidity, Light) - excludeSensors:', devicesList.sensors],
+            ['SCENARIOS (Automations) - excludeScenarios:', devicesList.scenarios],
+        ];
+        for (const [title, devices] of sections) {
+            if (devices.length === 0) continue;
+            log.info(title);
+            for (const device of devices) {
+                // `id` is the prefix-stripped form the exclusion lists compare against.
+                log.info(`   ID: ${device.fullId.padEnd(24)} exclude: ${device.id.padEnd(22)} [${summaryLabel(device)}] ${device.name}`);
+            }
+            log.info('');
         }
 
-        if (devicesList.zones.length > 0) {
-            this.options.log.info('ZONES (Security Sensors):');
-            devicesList.zones.forEach((device: DeviceListItem): void => {
-                this.options.log.info(`   ID: ${device.fullId.padEnd(20)} - [ZONE] ${device.name}`);
-            });
-            this.options.log.info('');
-        }
-
-        if (devicesList.sensors.length > 0) {
-            this.options.log.info('SENSORS (Temperature, Humidity, Light):');
-            devicesList.sensors.forEach((device: DeviceListItem): void => {
-                let typeLabel = 'SENSOR';
-                if (device.name.includes('Temperatura')) {
-                    typeLabel = 'TEMP';
-                } else if (device.name.includes('Umidita')) {
-                    typeLabel = 'HUM';
-                } else if (device.name.includes('Luminosita')) {
-                    typeLabel = 'LUX';
-                }
-                this.options.log.info(
-                    `   ID: ${device.fullId.padEnd(20)} - [${typeLabel}] ${device.name}`,
-                );
-            });
-            this.options.log.info('');
-        }
-
-        if (devicesList.scenarios.length > 0) {
-            this.options.log.info('SCENARIOS (Automations):');
-            devicesList.scenarios.forEach((device: DeviceListItem): void => {
-                this.options.log.info(
-                    `   ID: ${device.fullId.padEnd(20)} - [SCENE] ${device.name}`,
-                );
-            });
-            this.options.log.info('');
-        }
-
-        this.options.log.info('Full list saved to: ' + this.devicesFilePath);
-        this.options.log.info('Use these IDs in configuration to exclude devices');
-        this.options.log.info('Or to configure MQTT rooms in Homebridge UI');
-        this.options.log.info('================================================');
-        this.options.log.info('');
+        log.info('Full list saved to: ' + this.devicesFilePath);
+        log.info('================================================');
+        log.info('');
 
         this.generateRoomMappingExample(devicesList);
     }
@@ -329,4 +293,16 @@ export class DeviceListService {
 
         return devices.slice(0, 3);
     }
+}
+
+function summaryLabel(device: DeviceListItem): string {
+    if (device.type === 'thermostat') return 'THERM';
+    if (device.type === 'light') return 'LIGHT';
+    if (device.type === 'gate') return 'GATE';
+    if (device.type === 'cover') return 'COVER';
+    if (device.type === 'zone') return 'ZONE';
+    if (device.type === 'scenario') return 'SCENE';
+    if (device.fullId.startsWith('sensor_hum_')) return 'HUM';
+    if (device.fullId.startsWith('sensor_light_')) return 'LUX';
+    return device.fullId.includes('temp') ? 'TEMP' : 'SENSOR';
 }

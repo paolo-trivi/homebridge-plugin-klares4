@@ -174,7 +174,7 @@
                 "type": "array",
                 "items": {
                     "type": "string",
-                    "pattern": "^[0-9]+$"
+                    "pattern": "^[0-9]+$|^sensor_system_temp_(in|out)$"
                 },
                 "default": []
             },
@@ -860,7 +860,7 @@
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Come trovare gli ID</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Avvia il plugin almeno una volta</li><li>Apri il file <code>~/.homebridge/klares4-devices.json</code></li><li>Copia l'ID numerico del dispositivo da escludere</li><li>Inseriscilo qui con il pulsante <strong>+ Aggiungi</strong></li></ol></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Come trovare gli ID</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Avvia il plugin almeno una volta</li><li>Nel sommario dei dispositivi stampato nei log, oppure nel campo <code>id</code> di <code>~/.homebridge/klares4-devices.json</code>, copia il valore <strong>exclude</strong> del dispositivo (l'ID numerico senza prefisso, per esempio <code>37</code> per <code>light_37</code>; per le temperature della centrale <code>sensor_system_temp_in</code> o <code>sensor_system_temp_out</code>)</li><li>Inseriscilo qui con il pulsante <strong>+ Aggiungi</strong></li></ol></div>"
                 },
                 {
                     "key": "excludeOutputs",
@@ -896,14 +896,14 @@
                     "key": "excludeSensors",
                     "type": "array",
                     "title": "Sensori Esclusi (Ambientali)",
-                    "description": "Sensori temperatura/umidità/luminosità da nascondere",
+                    "description": "Sensori temperatura/umidità/luminosità da nascondere. Un ID DOMUS esclude tutte e tre le letture; per le temperature della centrale usare sensor_system_temp_in / sensor_system_temp_out",
                     "orderable": false,
                     "buttonText": "+ Aggiungi Sensore",
                     "items": [
                         {
                             "key": "excludeSensors[]",
                             "notitle": true,
-                            "placeholder": "ID numerico (es: 1)"
+                            "placeholder": "ID numerico (es: 1) o sensor_system_temp_in"
                         }
                     ]
                 },
