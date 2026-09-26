@@ -219,6 +219,54 @@ test('MqttBridge publishes immediately while connected and replays after a recon
   assert.equal(JSON.parse(published[1].payload).on, false);
 });
 
+test('MqttBridge clears the old retained state topic when a device is renamed', () => {
+  const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
+  client.simulateConnect();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  bridge.publishDeviceState(createLight('light_1', 'Luce Salotto'));
+
+  const clear = client.published.find(
+    (entry) => entry.topic === 'homebridge/klares4/light/luce_sala/state' && entry.payload === '',
+  );
+  assert.ok(clear, `old topic not cleared: ${JSON.stringify(client.published)}`);
+  assert.equal(clear.options.retain, true);
+  assert.equal(client.published.at(-1).topic, 'homebridge/klares4/light/luce_salotto/state');
+});
+
+test('MqttBridge clears the old topic when a device is renamed while offline', () => {
+  const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
+  client.simulateConnect();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  client.simulateOffline();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Salotto'));
+  client.simulateConnect();
+
+  const topics = client.published.map((entry) => `${entry.topic}|${entry.payload === '' ? 'clear' : 'state'}`);
+  assert.deepEqual(topics, [
+    'homebridge/klares4/light/luce_sala/state|state',
+    'homebridge/klares4/light/luce_sala/state|clear',
+    'homebridge/klares4/light/luce_salotto/state|state',
+  ]);
+});
+
+test('MqttBridge keeps an old topic that another device still publishes to', () => {
+  const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
+  client.simulateConnect();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  bridge.publishDeviceState(createLight('light_2', 'Luce_Sala'));
+  bridge.publishDeviceState(createLight('light_1', 'Luce Salotto'));
+  assert.equal(client.published.filter((entry) => entry.payload === '').length, 0);
+});
+
+test('MqttBridge does not clear anything when retain is disabled or the topic is unchanged', () => {
+  const { bridge, client } = createBridge({ broker: 'mqtt://broker.example', retain: false });
+  client.simulateConnect();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  bridge.publishDeviceState(createLight('light_1', 'Luce Salotto'));
+  assert.equal(client.published.filter((entry) => entry.payload === '').length, 0);
+});
+
 function roomMappingFor(roomName, deviceId) {
   return { enabled: true, rooms: [{ roomName, devices: [{ deviceId }] }] };
 }

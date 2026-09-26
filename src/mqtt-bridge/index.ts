@@ -23,6 +23,8 @@ export class MqttBridge {
      * newest state is kept and republished on each (re)connect.
      */
     private readonly latestDevices = new Map<string, KseniaDevice>();
+    /** State topic last published per device ID, to clear it after a rename. */
+    private readonly publishedTopics = new Map<string, string>();
 
     constructor(
         private readonly config: MqttConfig,
@@ -211,13 +213,17 @@ export class MqttBridge {
         const deviceSlug = createDeviceSlug(device.name);
         const topic = buildStateTopic(this.topicPrefix, room, device.type, deviceSlug);
         const payload = createDeviceStatePayload(device);
+        const retain = this.config.retain ?? true;
+
+        this.clearStaleStateTopic(client, device.id, topic, retain);
+        this.publishedTopics.set(device.id, topic);
 
         client.publish(
             topic,
             JSON.stringify(payload),
             {
                 qos: this.config.qos ?? 1,
-                retain: this.config.retain ?? true,
+                retain,
             },
             (error: Error | undefined): void => {
                 if (error) {
@@ -230,6 +236,31 @@ export class MqttBridge {
                 }
             },
         );
+    }
+
+    /**
+     * State topics are built from the device name (and room), so a rename
+     * moves the state to a new topic. The retained message on the old topic
+     * is cleared with an empty retained payload, unless another device still
+     * publishes there. Only topics published by this process are known.
+     */
+    private clearStaleStateTopic(client: mqtt.MqttClient, deviceId: string, topic: string, retain: boolean): void {
+        const previousTopic = this.publishedTopics.get(deviceId);
+        if (!retain || previousTopic === undefined || previousTopic === topic) {
+            return;
+        }
+        for (const [otherId, otherTopic] of this.publishedTopics) {
+            if (otherId !== deviceId && otherTopic === previousTopic) {
+                return;
+            }
+        }
+        client.publish(previousTopic, '', { qos: this.config.qos ?? 1, retain: true }, (error?: Error): void => {
+            if (error) {
+                this.log.error('MQTT: Error clearing stale state topic:', error.message);
+            } else {
+                this.log.debug(`MQTT: Cleared stale state topic ${previousTopic}`);
+            }
+        });
     }
 
     public disconnect(): void {
