@@ -62,15 +62,17 @@ export class CoverAccessory {
         const safeCurrentPosition = isNaN(this.currentPosition) ? 0 : this.currentPosition;
         const safeTargetPosition = isNaN(this.targetPosition) ? 0 : this.targetPosition;
 
-        this.service.setCharacteristic(
+        // updateCharacteristic, not setCharacteristic: initial values must never
+        // go through setTargetPosition and send a command at construction.
+        this.service.updateCharacteristic(
             this.platform.Characteristic.CurrentPosition,
             safeCurrentPosition,
         );
-        this.service.setCharacteristic(
+        this.service.updateCharacteristic(
             this.platform.Characteristic.TargetPosition,
             safeTargetPosition,
         );
-        this.service.setCharacteristic(
+        this.service.updateCharacteristic(
             this.platform.Characteristic.PositionState,
             this.positionState,
         );

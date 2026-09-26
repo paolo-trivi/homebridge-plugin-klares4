@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const hap = require('@homebridge/hap-nodejs');
 
+const { CoverAccessory } = require('../dist/accessories/cover-accessory.js');
+const { GateAccessory } = require('../dist/accessories/gate-accessory.js');
 const { ThermostatAccessory } = require('../dist/accessories/thermostat-accessory.js');
 
 const { Characteristic, Service } = hap;
@@ -54,4 +56,30 @@ test('thermostat: a status update follows the real HVAC output, not the temperat
     // Above setpoint, but the output is still running (e.g. post-circulation).
     handler.updateStatus(thermostatDevice({ currentTemperature: 22, targetTemperature: 21, mode: 'heat', hvacOutputActive: true }));
     assert.equal(current.value, Characteristic.CurrentHeatingCoolingState.HEAT);
+});
+
+test('cover and gate: building the handler never runs their own write handlers', (t) => {
+    const setTarget = t.mock.method(CoverAccessory.prototype, 'setTargetPosition');
+    const setGate = t.mock.method(GateAccessory.prototype, 'setOn');
+    const calls = [];
+    const wsClient = {
+        moveCover: async (...args) => { calls.push(['moveCover', ...args]); },
+        toggleGate: async (...args) => { calls.push(['toggleGate', ...args]); },
+    };
+
+    const cover = { id: 'cover_3', type: 'cover', name: 'Tapparella', description: '', status: { position: 40, state: 'stopped' } };
+    const coverAccessory = platformAccessory(cover);
+    new CoverAccessory(platform(wsClient), coverAccessory);
+    const gate = { id: 'gate_5', type: 'gate', name: 'Cancello', description: '', status: { on: false } };
+    const gateAccessory = platformAccessory(gate);
+    new GateAccessory(platform(wsClient), gateAccessory);
+
+    assert.equal(setTarget.mock.callCount(), 0);
+    assert.equal(setGate.mock.callCount(), 0);
+    assert.deepEqual(calls, []);
+    const covering = coverAccessory.getService(Service.WindowCovering);
+    assert.equal(covering.getCharacteristic(Characteristic.CurrentPosition).value, 40);
+    assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 40);
+    assert.equal(covering.getCharacteristic(Characteristic.PositionState).value, Characteristic.PositionState.STOPPED);
+    assert.equal(gateAccessory.getService(Service.Switch).getCharacteristic(Characteristic.On).value, false);
 });
