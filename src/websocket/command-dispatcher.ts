@@ -29,8 +29,11 @@ export interface ResponseLikeMessage {
 }
 
 export class CommandDispatcher {
+    private static readonly RETIRED_ID_LIMIT = 256;
     private readonly commandQueues: Map<string, Promise<void>> = new Map();
     private readonly pendingCommands: Map<string, PendingCommandRequest> = new Map();
+    /** IDs of commands that already finished (settled, timed out or cleared), oldest first. */
+    private readonly retiredCommandIds: Set<string> = new Set();
 
     public enqueueDeviceCommand(deviceId: string, command: () => Promise<void>): Promise<void> {
         const previous = this.commandQueues.get(deviceId) ?? Promise.resolve();
@@ -57,9 +60,11 @@ export class CommandDispatcher {
         if (this.pendingCommands.has(commandId)) {
             return Promise.reject(new Error(`Command ID ${commandId} is already pending`));
         }
+        this.retiredCommandIds.delete(commandId);
         return new Promise((resolve, reject) => {
             const timeout = setTimeout((): void => {
                 this.pendingCommands.delete(commandId);
+                this.retire(commandId);
                 reject(new RetryableKlaresError(`Command ${commandId} timed out after ${timeoutMs}ms`));
             }, timeoutMs);
 
@@ -69,11 +74,13 @@ export class CommandDispatcher {
                 resolve: (acknowledgement): void => {
                     clearTimeout(timeout);
                     this.pendingCommands.delete(commandId);
+                    this.retire(commandId);
                     resolve(acknowledgement);
                 },
                 reject: (error: Error): void => {
                     clearTimeout(timeout);
                     this.pendingCommands.delete(commandId);
+                    this.retire(commandId);
                     reject(error);
                 },
                 expectedCmds:
@@ -92,6 +99,12 @@ export class CommandDispatcher {
                 return;
             }
             this.settle(pendingCommand, message, 'exact-id');
+            return;
+        }
+
+        // A late or duplicate response for a command that already finished must
+        // not be re-attributed to whichever other command happens to be pending.
+        if (this.retiredCommandIds.has(message.ID)) {
             return;
         }
 
@@ -119,6 +132,7 @@ export class CommandDispatcher {
 
         clearTimeout(pendingCommand.timeout);
         this.pendingCommands.delete(commandId);
+        this.retire(commandId);
     }
 
     public rejectAllPendingCommands(error: Error): void {
@@ -130,6 +144,15 @@ export class CommandDispatcher {
 
     public clearCommandQueues(): void {
         this.commandQueues.clear();
+    }
+
+    private retire(commandId: string): void {
+        this.retiredCommandIds.delete(commandId);
+        this.retiredCommandIds.add(commandId);
+        if (this.retiredCommandIds.size > CommandDispatcher.RETIRED_ID_LIMIT) {
+            const oldest = this.retiredCommandIds.values().next().value;
+            if (oldest !== undefined) this.retiredCommandIds.delete(oldest);
+        }
     }
 
     private isCompatible(

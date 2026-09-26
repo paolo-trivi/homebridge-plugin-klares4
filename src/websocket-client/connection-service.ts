@@ -72,9 +72,21 @@ export class ConnectionService {
                     });
                 }
 
-                this.deps.state.ws = new WebSocket(wsUrl, ['KS_WSOCK'], wsOptions);
+                const ws = new WebSocket(wsUrl, ['KS_WSOCK'], wsOptions);
+                this.deps.state.ws = ws;
+                // A new attempt is never a manual close; a flag left over from a
+                // superseded socket would otherwise suppress the next reconnect.
+                this.deps.state.isManualClose = false;
+                // Events of a socket replaced by a newer attempt must not touch the
+                // shared state of the live connection.
+                const isCurrent = (): boolean => this.deps.state.ws === ws;
 
-                this.deps.state.ws.on('open', (): void => {
+                ws.on('open', (): void => {
+                    if (!isCurrent()) {
+                        ws.terminate();
+                        rejectOnce(new Error('WebSocket superseded by a newer connection attempt'));
+                        return;
+                    }
                     this.deps.log.info('WebSocket connected');
                     this.deps.state.isConnected = true;
                     this.deps.state.hasCompletedInitialSync = false;
@@ -112,12 +124,17 @@ export class ConnectionService {
                     });
                 });
 
-                this.deps.state.ws.on('message', (data: WebSocket.Data): void => {
+                ws.on('message', (data: WebSocket.Data): void => {
+                    if (!isCurrent()) return;
                     this.deps.onRawMessage(data.toString());
                 });
 
-                this.deps.state.ws.on('close', (code: number, reason: Buffer): void => {
+                ws.on('close', (code: number, reason: Buffer): void => {
                     const reasonText = reason.toString() || 'No reason';
+                    if (!isCurrent()) {
+                        rejectOnce(new Error(`WebSocket closed (${code} - ${reasonText})`));
+                        return;
+                    }
                     this.deps.log.warn(`WebSocket closed: ${code} - ${reason.toString()}`);
                     this.deps.state.isConnected = false;
                     this.deps.state.idLogin = undefined;
@@ -138,7 +155,11 @@ export class ConnectionService {
                     this.deps.state.isManualClose = false;
                 });
 
-                this.deps.state.ws.on('error', (error: Error): void => {
+                ws.on('error', (error: Error): void => {
+                    if (!isCurrent()) {
+                        rejectOnce(error);
+                        return;
+                    }
                     this.deps.log.error('WebSocket error:', error.message);
                     if (this.deps.state.pendingLogin) {
                         this.deps.state.pendingLogin.reject(error);
@@ -147,7 +168,8 @@ export class ConnectionService {
                     }
                 });
 
-                this.deps.state.ws.on('pong', (): void => {
+                ws.on('pong', (): void => {
+                    if (!isCurrent()) return;
                     this.deps.state.heartbeatPending = false;
                     this.deps.state.lastPongReceived = Date.now();
                     if (this.deps.options.debug) {

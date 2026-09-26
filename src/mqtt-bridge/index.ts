@@ -112,7 +112,7 @@ export class MqttBridge {
 
     private handleIncomingMessage(topic: string, payload: string): void {
         try {
-            const parsedTopic = parseCommandTopic(topic);
+            const parsedTopic = parseCommandTopic(topic, this.topicPrefix);
             if (!parsedTopic) {
                 this.log.warn('MQTT: Invalid topic format:', topic);
                 return;

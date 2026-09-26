@@ -182,8 +182,9 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.wsClient.onInitialSyncComplete = (): void => {
                 this.handleInitialSyncComplete();
             };
-            await this.wsClient.connect();
-
+            // MQTT and debug capture must not depend on the first connect: if the
+            // panel is offline at boot, connect() rejects while the client keeps
+            // reconnecting in the background.
             if (this.config.mqtt?.enabled) {
                 this.mqttBridge = new MqttBridge(this.config.mqtt, this.log, this);
                 this.log.info('MQTT Bridge initialized');
@@ -205,6 +206,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 debugCapture.startCapture(this.wsClient, durationMs);
                 void this.configFileService.disableDebugFlag(PLATFORM_NAME);
             }
+
+            await this.wsClient.connect();
 
             this.log.info('Ksenia Lares4 initialized successfully');
         } catch (error: unknown) {

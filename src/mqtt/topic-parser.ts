@@ -3,7 +3,26 @@ export interface ParsedCommandTopic {
     deviceIdentifier: string;
 }
 
-export function parseCommandTopic(topic: string): ParsedCommandTopic | null {
+/**
+ * Parses `<prefix>/<type>/<id>/set` and `<prefix>/<room>/<type>/<id>/set`.
+ * Without `topicPrefix` the prefix is assumed to be two levels deep (the
+ * `homebridge/klares4` default); with it, any prefix depth is supported.
+ */
+export function parseCommandTopic(topic: string, topicPrefix?: string): ParsedCommandTopic | null {
+    if (topicPrefix !== undefined) {
+        // Same raw prefix as the subscription filter `${topicPrefix}/+/+/set`.
+        const prefix = `${topicPrefix}/`;
+        if (!topic.startsWith(prefix)) return null;
+        const levels = topic.slice(prefix.length).split('/');
+        if (levels.length === 3 && levels[2] === 'set') {
+            return { deviceType: levels[0], deviceIdentifier: levels[1] };
+        }
+        if (levels.length === 4 && levels[3] === 'set') {
+            return { deviceType: levels[1], deviceIdentifier: levels[2] };
+        }
+        return null;
+    }
+
     const topicParts = topic.split('/');
 
     if (topicParts.length === 5 && topicParts[4] === 'set') {

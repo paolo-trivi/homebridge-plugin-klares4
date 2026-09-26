@@ -99,7 +99,10 @@ export class ThermostatAccessory {
         const newMode = homeKitTargetToDomainMode(value as number);
 
         try {
-            await this.platform.wsClient?.setThermostatMode(this.device.id, newMode);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.setThermostatMode(this.device.id, newMode);
             updateThermostatStatus(this.device, { mode: newMode });
 
             this.platform.log.info(`${this.device.name}: Mode ${newMode}`);
@@ -151,7 +154,10 @@ export class ThermostatAccessory {
         const targetTemperature = value as number;
 
         try {
-            await this.platform.wsClient?.setThermostatTemperature(this.device.id, targetTemperature);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.setThermostatTemperature(this.device.id, targetTemperature);
             updateThermostatStatus(this.device, { targetTemperature });
 
             this.platform.log.info(`${this.device.name}: Target temperature ${targetTemperature}C`);

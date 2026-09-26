@@ -83,6 +83,8 @@ export class CoverAccessory {
             return;
         }
 
+        const previousTargetPosition = this.targetPosition;
+        const previousPositionState = this.positionState;
         this.targetPosition = targetPosition;
 
         try {
@@ -109,6 +111,12 @@ export class CoverAccessory {
                 `Cover control error ${this.device.name}:`,
                 error instanceof Error ? error.message : String(error),
             );
+            // The command did not take effect: do not leave HomeKit showing a
+            // movement toward a target the panel never accepted.
+            this.targetPosition = previousTargetPosition;
+            this.positionState = previousPositionState;
+            this.service.updateCharacteristic(this.platform.Characteristic.TargetPosition, this.targetPosition);
+            this.service.updateCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
             throw new this.platform.api.hap.HapStatusError(
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
             );

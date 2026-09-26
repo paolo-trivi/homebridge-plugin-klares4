@@ -40,3 +40,36 @@ test('buildStateTopic preserves existing topic contract', () => {
     'homebridge/klares4/sala/light/luce_soggiorno/state',
   );
 });
+
+test('parseCommandTopic honours a configured topicPrefix of any depth', () => {
+  assert.deepEqual(
+    parseCommandTopic('klares4/light/light_1/set', 'klares4'),
+    { deviceType: 'light', deviceIdentifier: 'light_1' },
+  );
+  assert.deepEqual(
+    parseCommandTopic('klares4/sala/light/lampada_sala/set', 'klares4'),
+    { deviceType: 'light', deviceIdentifier: 'lampada_sala' },
+  );
+  assert.deepEqual(
+    parseCommandTopic('home/alarm/klares4/sala/cover/tapparella/set', 'home/alarm/klares4'),
+    { deviceType: 'cover', deviceIdentifier: 'tapparella' },
+  );
+  assert.deepEqual(
+    parseCommandTopic('homebridge/klares4/light/light_1/set', 'homebridge/klares4'),
+    { deviceType: 'light', deviceIdentifier: 'light_1' },
+  );
+  assert.equal(parseCommandTopic('other/light/light_1/set', 'klares4'), null);
+  assert.equal(parseCommandTopic('klares4/light/set', 'klares4'), null);
+});
+
+test('parseCommandTopic matches the subscribed filter when the prefix has a trailing slash', () => {
+  // The bridge subscribes to `${topicPrefix}/+/+/set` with the raw prefix.
+  assert.deepEqual(
+    parseCommandTopic('klares4//sala/light/lampada_sala/set', 'klares4/'),
+    { deviceType: 'light', deviceIdentifier: 'lampada_sala' },
+  );
+  assert.deepEqual(
+    parseCommandTopic('klares4//light/light_1/set', 'klares4/'),
+    { deviceType: 'light', deviceIdentifier: 'light_1' },
+  );
+});

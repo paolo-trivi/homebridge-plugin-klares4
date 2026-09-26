@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Matter renames, stale-endpoint pruning and explicit thermostat recovery can remove endpoints again. The plugin handed `unregisterPlatformAccessories` a bare `{ UUID }` stub; Homebridge 2.4 reads `accessory.deviceType` before removing anything, so every unregister threw a TypeError (logged only at debug level) and the endpoint stayed. The coordinator now passes the accessory it last registered, or the one Homebridge restored from its cache.
+- MQTT commands work with any `mqtt.topicPrefix`. The command-topic parser assumed a two-level prefix such as the default `homebridge/klares4`, so with a one- or three-level prefix direct commands (or room commands) were rejected as "Invalid topic format".
+- The MQTT bridge and the debug capture start even when the panel is unreachable at boot. Both were created after the first WebSocket connect, which rejects when the panel is offline, so they stayed disabled until the next restart even after the connection recovered.
+- A late `close` event from a socket replaced during a heartbeat-triggered reconnect no longer marks the new live connection as disconnected (which made every command fail with "Not connected" until the panel dropped the socket). This could happen with a `reconnectInterval` below 3 seconds.
+- A late or duplicate panel response for a command that already finished (confirmed by realtime state, or timed out) is no longer attributed to another pending command through the single-compatible fallback.
+- HomeKit covers no longer stay in "Opening…"/"Closing…" after a failed move; the target position and movement state return to what they were before the rejected command.
+- HomeKit thermostat writes issued before the WebSocket client exists (for example with an invalid configuration) now fail instead of being reported as successful without sending anything.
+- HomeKit dimmers discovered on a fresh install accept brightness changes without a restart. Dimming is learned from the first output status, after the accessory handler was created, so the Brightness handlers were never bound.
+
 ## [2.2.0-rc.3] - 2026-09-12
 
 ### Fixed

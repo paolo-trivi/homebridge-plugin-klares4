@@ -36,9 +36,11 @@ function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
 }
 
-function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
+function makeApi({ registerImpl, updateImpl, unregisterImpl, initiallyQueryable = [] } = {}) {
     const registered = [];
-    const queryable = new Set();
+    // Endpoints restored from the Homebridge Matter cache are live (and
+    // queryable) before the plugin registers anything in this session.
+    const queryable = new Set(initiallyQueryable);
     const updates = [];
     const metadataUpdates = [];
     const unregistered = [];
@@ -873,4 +875,36 @@ test('failed explicit thermostat recovery rolls back once to TemperatureSensor',
     const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
     assert.equal(saved.thermostats[0].mode, 'fallback');
     assert.equal(saved.thermostats[0].lastProcessedRecoveryRequest, 1);
+});
+
+test('explicit thermostat recovery removes a cache-restored fallback endpoint under Homebridge 2.4 unregister semantics', async () => {
+    const storagePath = tmpStorage();
+    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
+        thermostatAsTemperatureSensor: ['thermostat_18'],
+    }));
+    const { api, registered } = makeApi({
+        // Homebridge 2.4.0 dereferences `accessory.deviceType.deviceType` before removing anything.
+        unregisterImpl: (accessories) => accessories.forEach((a) => a.deviceType.deviceType),
+        initiallyQueryable: ['thermostat_18'],
+    });
+    const registry = new MatterAccessoryRegistry({
+        api,
+        log: silentLog(),
+        getWsClient: () => undefined,
+        storagePath,
+        recoveryRequests: { thermostat_18: 1 },
+    });
+    registry.configureCachedAccessory({
+        UUID: 'thermostat_18',
+        displayName: 'Riscaldamento Sala',
+        deviceType: { name: 'TemperatureSensor', code: 770 },
+        context: { device: thermostatDevice() },
+    });
+
+    await registry.addOrUpdateAccessory(thermostatDevice());
+    await delay(250);
+
+    assert.equal(registered.at(-1).deviceType._t, 'Thermostat');
+    const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
+    assert.equal(saved.thermostats[0].mode, 'native');
 });

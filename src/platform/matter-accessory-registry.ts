@@ -78,6 +78,7 @@ export class MatterAccessoryRegistry {
 
     public configureCachedAccessory(accessory: MatterAccessory): void {
         this.cachedUUIDs.add(accessory.UUID);
+        this.topologyCoordinator.remember(accessory);
         const device = accessory.context?.device as KseniaDevice | undefined;
         if (device?.id && device.type) this.cachedDevices.set(accessory.UUID, device);
         this.log.debug(`[Matter] Cached accessory: ${accessory.displayName} (${accessory.UUID})`);
