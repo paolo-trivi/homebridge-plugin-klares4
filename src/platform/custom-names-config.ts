@@ -80,6 +80,31 @@ const ENTRY_PREFIX: Record<keyof CustomNamesMap, string> = {
     scenarios: 'scenario_',
 };
 
+/**
+ * Adds imported names to the user's `customNames` without overriding any of
+ * them: a device the user already named keeps that name. The user's rows are
+ * kept verbatim (a legacy map is converted to rows); imported names follow
+ * as new rows. Always the array form, the one the Homebridge UI preserves.
+ */
+export function mergeCustomNames(
+    configured: CustomNamesConfig | undefined,
+    imported: Partial<CustomNamesMap>,
+): CustomNameEntry[] {
+    const userNames = normalizeCustomNames(configured);
+    const rows: CustomNameEntry[] = Array.isArray(configured)
+        ? configured.map((entry) => ({ ...entry }))
+        : toCustomNameEntries(userNames);
+    const additions: Partial<CustomNamesMap> = {};
+    for (const category of Object.keys(ENTRY_PREFIX) as Array<keyof CustomNamesMap>) {
+        const missing: Record<string, string> = {};
+        for (const [id, name] of Object.entries(imported[category] ?? {})) {
+            if (!Object.prototype.hasOwnProperty.call(userNames[category], id)) missing[id] = name;
+        }
+        additions[category] = missing;
+    }
+    return [...rows, ...toCustomNameEntries(additions)];
+}
+
 /** Array form of a category map, as written back to `config.json` (KSA import). */
 export function toCustomNameEntries(names: Partial<CustomNamesMap>): CustomNameEntry[] {
     const entries: CustomNameEntry[] = [];

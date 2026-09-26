@@ -7,7 +7,7 @@ import type { KsaImportResult } from '../ksa/types';
 import type { KsaSanitizedCache } from '../types';
 import type { PlatformConfigFileService } from './config-file-service';
 import type { Lares4Config } from './types';
-import { normalizeCustomNames, toCustomNameEntries } from './custom-names-config';
+import { mergeCustomNames, type CustomNamesConfig } from './custom-names-config';
 import { applyExclusionSuggestions } from './ksa-config-merge';
 
 export class KsaImportService {
@@ -66,10 +66,8 @@ export class KsaImportService {
         }
 
         if (importConfig.applyCustomNames) {
-            config.customNames = toCustomNameEntries({
-                ...normalizeCustomNames(config.customNames),
-                ...result.derivedConfig.customNames,
-            });
+            // Per device, the user's own name wins over the panel's.
+            config.customNames = mergeCustomNames(config.customNames, result.derivedConfig.customNames);
         }
 
         if (importConfig.applyExclusionSuggestions) {
@@ -98,7 +96,10 @@ export class KsaImportService {
             }
             if (applyCustomNames) {
                 // Array form: the Homebridge UI drops the category map on its next save.
-                platformConfig.customNames = toCustomNameEntries(result.derivedConfig.customNames);
+                platformConfig.customNames = mergeCustomNames(
+                    platformConfig.customNames as CustomNamesConfig | undefined,
+                    result.derivedConfig.customNames,
+                );
             }
             if (applyExclusions) {
                 applyExclusionSuggestions(platformConfig, result.derivedConfig.suggestedExclusions);

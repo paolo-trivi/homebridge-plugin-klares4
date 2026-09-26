@@ -76,3 +76,46 @@ test('KSA exclusions: suggestions are added to the user list, never replace it',
     assert.deepEqual(mergeExclusionList(undefined, ['7']), ['7']);
     assert.equal(mergeExclusionList(['5'], ['5']), undefined);
 });
+
+test('KSA custom names: re-applying the same import adds no duplicate rows', () => {
+    const { mergeCustomNames } = require('../dist/platform/custom-names-config.js');
+    const imported = { outputs: { 1: 'Luce Panel' }, zones: { 3: 'Zona Panel' } };
+    const once = mergeCustomNames([{ deviceId: 'light_1', name: 'Mia' }], imported);
+    assert.deepEqual(once, [{ deviceId: 'light_1', name: 'Mia' }, { deviceId: 'zone_3', name: 'Zona Panel' }]);
+    assert.deepEqual(mergeCustomNames(once, imported), once);
+});
+
+function namesById(config) {
+    assert.ok(Array.isArray(config.customNames));
+    return Object.fromEntries(config.customNames.map((row) => [row.deviceId, row.name]));
+}
+
+test('KSA custom names: merged per device, the user name wins (runtime and persisted, array form)', async () => {
+    const { runtime, service, persisted } = setup({
+        customNames: [{ deviceId: 'light_1', name: 'Luce Sala Mia' }],
+        ksaImport: { applyAtStartup: true, applyCustomNames: true },
+    });
+    await service.prepare(runtime, 'Lares4Complete');
+
+    for (const config of [runtime, persisted()]) {
+        const byId = namesById(config);
+        assert.equal(byId.light_1, 'Luce Sala Mia');
+        assert.equal(byId.output_1, undefined);
+        assert.equal(byId.output_2, 'Luce Cucina Panel');
+        assert.equal(byId.zone_3, 'Finestra Panel');
+    }
+});
+
+test('KSA custom names: a legacy map is kept and converted, the user name still wins', async () => {
+    const { runtime, service, persisted } = setup({
+        customNames: { outputs: { 2: 'Cucina Mia' } },
+        ksaImport: { applyAtStartup: true, applyCustomNames: true },
+    });
+    await service.prepare(runtime, 'Lares4Complete');
+
+    for (const config of [runtime, persisted()]) {
+        const byId = namesById(config);
+        assert.equal(byId.output_2, 'Cucina Mia');
+        assert.equal(byId.output_1, 'Luce Sala Panel');
+    }
+});
