@@ -11,6 +11,7 @@ import type {
     KseniaZone,
 } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
+import { hasObservedState } from '../device-observation';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import {
     buildThermostatMatterState, toMatterTemperatureCelsius, clampMatterTemperature,
@@ -231,8 +232,17 @@ export function mapThermostatAsTemperatureSensor(device: KseniaThermostat, deps:
     return {
         ...baseFields(device, deps),
         deviceType: deps.api.matter!.deviceTypes.TemperatureSensor,
-        clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(currentC)) } },
+        clusters: { temperatureMeasurement: { measuredValue: measured(device, () => clampCentidegrees(toMatterTemperatureCelsius(currentC))) } },
     };
+}
+
+/**
+ * MeasuredValue is nullable ("unknown") in all three measurement clusters. A
+ * discovery placeholder (0 °C, 0 lux) with no cached state behind it must not
+ * become the endpoint's first reading; the first real value fills it in.
+ */
+function measured(device: KseniaDevice, value: () => number): number | null {
+    return hasObservedState(device) ? value() : null;
 }
 
 function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | undefined {
@@ -240,9 +250,9 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
     const bf = baseFields(device, deps);
     const val = device.status.value;
     switch (device.status.sensorType) {
-        case 'temperature': return { ...bf, deviceType: api.matter!.deviceTypes.TemperatureSensor, clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(val)) } } };
-        case 'humidity':    return { ...bf, deviceType: api.matter!.deviceTypes.HumiditySensor,    clusters: { relativeHumidityMeasurement: { measuredValue: Math.round(Math.max(0, Math.min(100, val)) * 100) } } };
-        case 'light':       return { ...bf, deviceType: api.matter!.deviceTypes.LightSensor,       clusters: { illuminanceMeasurement: { measuredValue: luxToMatterIlluminance(val) } } };
+        case 'temperature': return { ...bf, deviceType: api.matter!.deviceTypes.TemperatureSensor, clusters: { temperatureMeasurement: { measuredValue: measured(device, () => clampCentidegrees(toMatterTemperatureCelsius(val))) } } };
+        case 'humidity':    return { ...bf, deviceType: api.matter!.deviceTypes.HumiditySensor,    clusters: { relativeHumidityMeasurement: { measuredValue: measured(device, () => Math.round(Math.max(0, Math.min(100, val)) * 100)) } } };
+        case 'light':       return { ...bf, deviceType: api.matter!.deviceTypes.LightSensor,       clusters: { illuminanceMeasurement: { measuredValue: measured(device, () => luxToMatterIlluminance(val)) } } };
         case 'motion':      return { ...bf, deviceType: api.matter!.deviceTypes.MotionSensor,      clusters: { occupancySensing: { occupancy: { occupied: val > 0 } } } };
         case 'contact':     return { ...bf, deviceType: api.matter!.deviceTypes.ContactSensor,     clusters: { booleanState: { stateValue: val === 0 } } };
         default:            return undefined;

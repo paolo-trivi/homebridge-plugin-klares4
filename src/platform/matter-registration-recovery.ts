@@ -1,6 +1,7 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
+import { hasObservedState } from '../device-observation';
 import { mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
 import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
@@ -168,7 +169,7 @@ export async function registerFallbackAccessory(
     reg.registeredDisplayName = fallback.displayName;
     reg.status = 'pending';
     reg.recoveryAttempts = 0;
-    reg.pendingStateUpdates = buildStateUpdates(device, true);
+    reg.pendingStateUpdates = hasObservedState(device) ? buildStateUpdates(device, true) : [];
     deps.log.debug(`[Matter] fallback registered, probing: ${device.name}`);
     deps.scheduleComplete(device.id);
 }
