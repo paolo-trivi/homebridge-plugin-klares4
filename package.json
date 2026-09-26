@@ -29,7 +29,7 @@
         "domotica"
     ],
     "engines": {
-        "node": ">=20.0.0",
+        "node": ">=22.0.0",
         "homebridge": "^1.6.0 || ^2.0.0-beta.0"
     },
     "dependencies": {
