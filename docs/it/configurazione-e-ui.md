@@ -66,6 +66,11 @@ Cosa fa ogni blocco, a runtime e quando viene persistito:
 - `excludeScenarios`
 
 Le liste di esclusione vogliono l'ID numerico senza prefisso (`37` per `light_37`, `5` per `zone_5`). Un ID di sensore DOMUS nasconde tutte e tre le sue letture; le temperature della centrale si escludono con `sensor_system_temp_in` / `sensor_system_temp_out`. Il sommario di avvio stampa sia l'ID del dispositivo sia il valore da usare qui (`exclude:`).
+
+Scenari di allarme:
+
+- Gli scenari che inseriscono o disinseriscono l'allarme (ARM/DISARM) non vengono mai esposti.
+- `exposePartialArmScenarios` (boolean, default `false`): con `false` gli scenari di categoria `PARTIAL` (inserimento parziale) non vengono esposti a HomeKit, Matter o MQTT e non possono essere attivati. Impostalo a `true` solo se accetti che chiunque possa azionare l'interruttore (assistenti vocali, scene, automazioni, MQTT) possa inserire parzialmente l'allarme senza che venga chiesto il PIN.
 - `customNames` rinomina i dispositivi per HomeKit, MQTT e Matter; usa la forma array (`{ deviceId, name }`, per esempio `light_18`, `zone_3`, `sensor_1`, oppure `sensor_system_temp_in`, il cui nome e usato cosi com'e), che la UI Homebridge conserva — la vecchia mappa per categoria viene ancora letta ma cancellata quando la UI riscrive config.json. Un import KSA con `applyCustomNames` scrive la forma array
 - `matterExposure` nasconde intere categorie soltanto da Matter
 - `matterOverrides` applica `name` / `exposed` solo su Matter; usa la forma array (`{ deviceId, name, exposed }`), che la UI Homebridge conserva — una mappa per device ID viene cancellata quando la UI riscrive config.json

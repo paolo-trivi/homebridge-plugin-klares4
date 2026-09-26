@@ -66,6 +66,11 @@ What each section does, at runtime and when persisted:
 - `excludeScenarios`
 
 Exclusion lists take the numeric ID without prefix (`37` for `light_37`, `5` for `zone_5`). A DOMUS sensor ID hides all three of its readings; the panel's own temperature readings are excluded with `sensor_system_temp_in` / `sensor_system_temp_out`. The startup summary prints both the device ID and the value to use here (`exclude:`).
+
+Alarm scenarios:
+
+- Scenarios that arm or disarm the alarm (ARM/DISARM) are never exposed.
+- `exposePartialArmScenarios` (boolean, default `false`): when `false`, scenarios of category `PARTIAL` (partial arm) are not exposed to HomeKit, Matter or MQTT and cannot be triggered. Set it to `true` only if you accept that anyone who can operate the switch (voice assistants, scenes, automations, MQTT) can partially arm the alarm without a PIN prompt.
 - `customNames` renames devices for HomeKit, MQTT and Matter; use the array form (`{ deviceId, name }`, e.g. `light_18`, `zone_3`, `sensor_1`, or `sensor_system_temp_in` whose name is used as-is), which the Homebridge UI preserves — the legacy per-category map is still read but dropped when the UI rewrites config.json. A KSA import with `applyCustomNames` writes the array form
 - `matterExposure` hides whole categories from Matter only
 - `matterOverrides` applies per-device Matter-only `name` / `exposed` values; use the array form (`{ deviceId, name, exposed }`), which the Homebridge UI preserves — a map keyed by device ID is dropped when the UI rewrites config.json

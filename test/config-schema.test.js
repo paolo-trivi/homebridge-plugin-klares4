@@ -21,6 +21,13 @@ test('keys the code reads are declared, so the UI keeps them', () => {
     assert.match('3', new RegExp(pairs.items.properties.commandThermostatId.pattern));
 });
 
+test('exposePartialArmScenarios is an explicit opt-in, off by default', () => {
+    const prop = props.exposePartialArmScenarios;
+    assert.equal(prop.type, 'boolean');
+    assert.equal(prop.default, false);
+    assert.match(prop.description, /PIN/);
+});
+
 test('every schema property is reachable from the layout', () => {
     const layoutKeys = new Set();
     const walkLayout = (node) => {

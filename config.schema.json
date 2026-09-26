@@ -143,6 +143,12 @@
                 "maximum": 5000,
                 "description": "Millisecondi prima che uno scenario torni automaticamente a OFF"
             },
+            "exposePartialArmScenarios": {
+                "title": "Esponi scenari di inserimento parziale",
+                "type": "boolean",
+                "default": false,
+                "description": "Se disattivato (default) gli scenari di categoria PARTIAL (inserimento parziale) non vengono esposti a HomeKit, Matter o MQTT e non possono essere attivati, come gli scenari ARM/DISARM che non vengono mai esposti. Attivalo solo se accetti che chiunque possa azionare l'interruttore (assistenti vocali, scene, automazioni, MQTT) possa inserire parzialmente l'allarme senza che venga chiesto il PIN."
+            },
             "devicesSummaryDelay": {
                 "title": "Ritardo Sommario Dispositivi",
                 "type": "integer",
@@ -909,6 +915,9 @@
                         {
                             "key": "scenarioAutoOffDelay",
                             "description": "Dopo l'attivazione, lo switch torna OFF automaticamente"
+                        },
+                        {
+                            "key": "exposePartialArmScenarios"
                         }
                     ]
                 }
