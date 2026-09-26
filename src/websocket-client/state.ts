@@ -17,7 +17,11 @@ export function createInitialWebSocketClientState(
     const domusSensorIdByThermostatProgramId = new Map<string, string>();
 
     if (ksaCache) {
-        for (const program of ksaCache.thermostatPrograms) {
+        // Defensive defaults: an incomplete cache must never stop the client from being created.
+        for (const program of ksaCache.thermostatPrograms ?? []) {
+            if (!program || typeof program.id !== 'string') {
+                continue;
+            }
             thermostatProgramById.set(program.id, {
                 ID: program.id,
                 DES: program.description,
@@ -26,10 +30,10 @@ export function createInitialWebSocketClientState(
                 COOLING_OUT: program.coolingOutputId,
             });
         }
-        for (const [outputId, thermostatProgramId] of Object.entries(ksaCache.thermostatProgramIdByOutputId)) {
+        for (const [outputId, thermostatProgramId] of Object.entries(ksaCache.thermostatProgramIdByOutputId ?? {})) {
             thermostatProgramIdByOutputId.set(outputId, thermostatProgramId);
         }
-        for (const [thermostatProgramId, domusSensorId] of Object.entries(ksaCache.domusSensorIdByThermostatProgramId)) {
+        for (const [thermostatProgramId, domusSensorId] of Object.entries(ksaCache.domusSensorIdByThermostatProgramId ?? {})) {
             domusSensorIdByThermostatProgramId.set(thermostatProgramId, domusSensorId);
         }
     }
