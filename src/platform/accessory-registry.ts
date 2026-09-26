@@ -43,6 +43,8 @@ export class AccessoryRegistry {
             return;
         }
 
+        // Legacy caches keep the invalid Name that HAP warns about at every publish.
+        this.alignHapNames(accessory, device);
         const handler = this.options.createAccessoryHandler(accessory, device);
         if (handler) {
             this.options.accessoryHandlers.set(accessory.UUID, handler);
@@ -60,12 +62,7 @@ export class AccessoryRegistry {
             // Discovery placeholders must not overwrite the state cached from the last session.
             if (!hasObservedState(device)) device = mergeKnownState(device, existingAccessory.context.device as KseniaDevice);
             existingAccessory.context.device = device;
-            // Re-align cached displayNames created before the HAP name sanitiser
-            // (e.g. "Balcone Sala " with trailing space) — UUID is untouched.
-            const cleanName = sanitizeHapDisplayName(device.name, device.id);
-            if (existingAccessory.displayName !== cleanName) {
-                existingAccessory.displayName = cleanName;
-            }
+            this.alignHapNames(existingAccessory, device);
             const existingHandler = this.options.accessoryHandlers.get(uuid);
             if (existingHandler) {
                 this.options.updateAccessoryHandler(existingHandler, device);
@@ -98,6 +95,31 @@ export class AccessoryRegistry {
             [accessory],
         );
         this.options.accessories.set(uuid, accessory);
+    }
+
+    /**
+     * Re-align every HAP name of a cached accessory with the sanitised device
+     * name: displayName, AccessoryInformation Name and the primary service
+     * Name. Covers panel renames and names cached before the HAP sanitiser
+     * (e.g. "Balcone Sala " with a trailing space). The UUID is untouched.
+     */
+    private alignHapNames(accessory: PlatformAccessory, device: KseniaDevice): void {
+        const cleanName = sanitizeHapDisplayName(device.name, device.id);
+        if (accessory.displayName !== cleanName) {
+            if (typeof accessory.updateDisplayName === 'function') {
+                accessory.updateDisplayName(cleanName);
+            } else {
+                accessory.displayName = cleanName;
+            }
+        }
+        const nameCharacteristic = this.options.api.hap.Characteristic?.Name;
+        if (!nameCharacteristic) return;
+        for (const service of accessory.services ?? []) {
+            if (!service.testCharacteristic(nameCharacteristic)) continue;
+            if (service.getCharacteristic(nameCharacteristic).value !== cleanName) {
+                service.updateCharacteristic(nameCharacteristic, cleanName);
+            }
+        }
     }
 
     public updateAccessory(device: KseniaDevice): void {
