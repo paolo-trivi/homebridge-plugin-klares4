@@ -45,8 +45,8 @@ export class GateAccessory {
             .onSet(this.setOn.bind(this))
             .onGet(this.getOn.bind(this));
 
-        // Initialize as OFF
-        this.service.setCharacteristic(this.platform.Characteristic.On, false);
+        // Initialize as OFF without going through the setOn write handler.
+        this.service.updateCharacteristic(this.platform.Characteristic.On, false);
     }
 
     public async setOn(value: CharacteristicValue): Promise<void> {

@@ -49,8 +49,19 @@ export function determineOutputType(category: string, mode?: string): 'light' | 
     return determineProjectedOutputType(category, mode);
 }
 
-export function isIgnoredScenarioCategory(category?: string): boolean {
-    return category === 'ARM' || category === 'DISARM';
+/**
+ * Scenarios that arm or disarm the alarm run with the stored user PIN, so they
+ * are never exposed. PARTIAL (partial arming) is hidden too unless the user
+ * explicitly opts in with `exposePartialArmScenarios`.
+ */
+export function isIgnoredScenarioCategory(category?: string, exposePartialArm = false): boolean {
+    const normalized = normalizeScenarioCategory(category);
+    if (normalized === 'ARM' || normalized === 'DISARM') return true;
+    return normalized === 'PARTIAL' && !exposePartialArm;
+}
+
+export function normalizeScenarioCategory(category?: string): string {
+    return typeof category === 'string' ? category.trim().toUpperCase() : '';
 }
 
 export type ParsedOutputDevice = ReturnType<typeof parseOutputData> | KseniaGate;

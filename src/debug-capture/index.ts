@@ -13,6 +13,7 @@ export class DebugCaptureManager {
     private deviceSnapshots: DeviceSnapshot[] = [];
     private rawMessageUnsubscribe?: () => void;
     private captureDurationMs = 60000;
+    private activeClient?: KseniaWebSocketClient;
     private readonly fileGenerator: DebugFileGenerator;
 
     constructor(
@@ -44,6 +45,7 @@ export class DebugCaptureManager {
         this.log.warn('');
 
         this.isCapturing = true;
+        this.activeClient = wsClient;
         this.captureDurationMs = durationMs;
         this.rawMessages = [];
         this.deviceSnapshots = [];
@@ -55,6 +57,8 @@ export class DebugCaptureManager {
                 this.captureDeviceSnapshot(wsClient, 'INTERVAL');
             }
         }, 10000);
+        // A pending capture must never keep Homebridge from exiting; shutdown() flushes it.
+        this.snapshotInterval.unref?.();
 
         this.captureTimer = setTimeout(() => {
             if (this.snapshotInterval) {
@@ -63,9 +67,20 @@ export class DebugCaptureManager {
             }
             this.stopCapture(wsClient);
         }, durationMs);
+        this.captureTimer.unref?.();
     }
 
-    public stopCapture(wsClient: KseniaWebSocketClient): void {
+    /**
+     * Homebridge shutdown: ends a capture in progress and writes its file
+     * synchronously, so a restart during a long capture does not lose it.
+     */
+    public shutdown(): void {
+        if (this.isCapturing && this.activeClient) {
+            this.stopCapture(this.activeClient, { sync: true });
+        }
+    }
+
+    public stopCapture(wsClient: KseniaWebSocketClient, options: { sync?: boolean } = {}): void {
         if (!this.isCapturing) {
             return;
         }
@@ -76,6 +91,7 @@ export class DebugCaptureManager {
         this.log.warn('═══════════════════════════════════════════════════════════');
 
         this.isCapturing = false;
+        this.activeClient = undefined;
         if (this.captureTimer) {
             clearTimeout(this.captureTimer);
             this.captureTimer = undefined;
@@ -87,7 +103,7 @@ export class DebugCaptureManager {
 
         this.captureDeviceSnapshot(wsClient, 'END');
         this.unhookWebSocket();
-        this.fileGenerator.generate(this.rawMessages, this.deviceSnapshots, this.captureDurationMs);
+        this.fileGenerator.generate(this.rawMessages, this.deviceSnapshots, this.captureDurationMs, options);
     }
 
     private captureDeviceSnapshot(

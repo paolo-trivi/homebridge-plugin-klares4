@@ -9,6 +9,7 @@ import type {
     ResolvedMatterPolicy,
 } from './types';
 import { normalizeMatterOverrides } from './matter-override-config';
+import { isSystemSensorId, normalizeCustomNames, type CustomNamesMap } from './custom-names-config';
 
 /** Lares4 device.type → matterExposure config key. */
 const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
@@ -24,12 +25,23 @@ const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
 export class DiscoveryService {
     /** Both accepted config shapes, resolved once to a map keyed by device ID. */
     private readonly matterOverrides: Record<string, MatterDeviceOverride>;
+    /** `customNames` resolved to the category map; recomputed if the KSA import replaces it. */
+    private customNamesSource: Lares4Config['customNames'];
+    private customNamesMap: CustomNamesMap = normalizeCustomNames(undefined);
 
     constructor(
         private readonly config: Lares4Config,
         private readonly log: Logger,
     ) {
         this.matterOverrides = normalizeMatterOverrides(config.matterOverrides);
+        const hidden = Object.keys(this.matterOverrides).filter((id) => this.matterOverrides[id].exposed === false);
+        if (hidden.length > 0) {
+            // A Homebridge UI save before 2.2.0 wrote exposed:false on every override row.
+            this.log.warn(
+                `[Matter] matterOverrides hides ${hidden.length} device(s) from Matter: ${hidden.join(', ')}. `
+                + 'If you did not untick "Esposto su Matter" yourself, tick it again in the plugin settings.',
+            );
+        }
     }
 
     public getNormalizedId(deviceId: string): string {
@@ -117,19 +129,30 @@ export class DiscoveryService {
         };
     }
 
+    private customNames(): CustomNamesMap {
+        if (this.config.customNames !== this.customNamesSource) {
+            this.customNamesSource = this.config.customNames;
+            this.customNamesMap = normalizeCustomNames(this.config.customNames);
+        }
+        return this.customNamesMap;
+    }
+
     public getCustomName(device: KseniaDevice): string | undefined {
         const id = this.getNormalizedId(device.id);
+        const customNames = this.customNames();
 
         if (device.type === 'zone') {
-            return this.config.customNames?.zones?.[id];
+            return customNames.zones[id];
         }
 
         if (isOutputLikeDevice(device)) {
-            return this.config.customNames?.outputs?.[id];
+            return customNames.outputs[id];
         }
 
         if (device.type === 'sensor') {
-            const sensorName = this.config.customNames?.sensors?.[id];
+            const sensorName = customNames.sensors[id];
+            // A panel temperature sensor is a single reading: its name is used as-is.
+            if (sensorName && isSystemSensorId(id)) return sensorName;
             if (sensorName) {
                 if (device.id.includes('_temp_')) return `${sensorName} - Temperatura`;
                 if (device.id.includes('_hum_')) return `${sensorName} - Umidita`;
@@ -138,7 +161,7 @@ export class DiscoveryService {
         }
 
         if (device.type === 'scenario') {
-            return this.config.customNames?.scenarios?.[id];
+            return customNames.scenarios[id];
         }
 
         return undefined;

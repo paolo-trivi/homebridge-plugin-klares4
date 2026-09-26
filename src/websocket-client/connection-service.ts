@@ -25,10 +25,17 @@ interface ConnectionServiceDeps {
 
 export class ConnectionService {
     private readonly maxReconnectDelay = 60000;
+    /** Set by disconnect(): no reconnect may be scheduled after shutdown. */
+    private stopped = false;
 
     constructor(private readonly deps: ConnectionServiceDeps) {}
 
     public async connect(): Promise<void> {
+        this.stopped = false;
+        return this.open();
+    }
+
+    private async open(): Promise<void> {
         return new Promise((resolve, reject) => {
             let settled = false;
             const resolveOnce = (): void => {
@@ -72,10 +79,37 @@ export class ConnectionService {
                     });
                 }
 
-                this.deps.state.ws = new WebSocket(wsUrl, ['KS_WSOCK'], wsOptions);
+                const ws = new WebSocket(wsUrl, ['KS_WSOCK'], wsOptions);
+                this.deps.state.ws = ws;
+                // A new attempt is never a manual close; a flag left over from a
+                // superseded socket would otherwise suppress the next reconnect.
+                this.deps.state.isManualClose = false;
+                // Events of a socket replaced by a newer attempt must not touch the
+                // shared state of the live connection.
+                const isCurrent = (): boolean => this.deps.state.ws === ws;
+                // Without it a black-holed connect hangs until the kernel's TCP
+                // timeout (about 133 s observed); terminate() then emits error and
+                // close, and the close handler schedules the normal backoff.
+                const connectTimeoutMs = this.deps.options.connectTimeoutMs ?? 10000;
+                const connectTimer = setTimeout((): void => {
+                    if (ws.readyState !== WebSocket.CONNECTING) return;
+                    const timeoutError = new Error(`WebSocket connection timed out after ${connectTimeoutMs}ms`);
+                    this.deps.log.warn(timeoutError.message);
+                    rejectOnce(timeoutError);
+                    ws.terminate();
+                }, connectTimeoutMs);
 
-                this.deps.state.ws.on('open', (): void => {
+                ws.on('open', (): void => {
+                    clearTimeout(connectTimer);
+                    if (!isCurrent()) {
+                        ws.terminate();
+                        rejectOnce(new Error('WebSocket superseded by a newer connection attempt'));
+                        return;
+                    }
                     this.deps.log.info('WebSocket connected');
+                    // A heartbeat left over from the previous socket would judge this one
+                    // by a PONG from before the outage; it restarts once the login completes.
+                    this.stopHeartbeat();
                     this.deps.state.isConnected = true;
                     this.deps.state.hasCompletedInitialSync = false;
                     this.deps.state.pendingOutputStatuses.clear();
@@ -112,13 +146,20 @@ export class ConnectionService {
                     });
                 });
 
-                this.deps.state.ws.on('message', (data: WebSocket.Data): void => {
+                ws.on('message', (data: WebSocket.Data): void => {
+                    if (!isCurrent()) return;
                     this.deps.onRawMessage(data.toString());
                 });
 
-                this.deps.state.ws.on('close', (code: number, reason: Buffer): void => {
+                ws.on('close', (code: number, reason: Buffer): void => {
+                    clearTimeout(connectTimer);
                     const reasonText = reason.toString() || 'No reason';
+                    if (!isCurrent()) {
+                        rejectOnce(new Error(`WebSocket closed (${code} - ${reasonText})`));
+                        return;
+                    }
                     this.deps.log.warn(`WebSocket closed: ${code} - ${reason.toString()}`);
+                    this.stopHeartbeat();
                     this.deps.state.isConnected = false;
                     this.deps.state.idLogin = undefined;
                     this.deps.commandDispatcher.rejectAllPendingCommands(
@@ -138,7 +179,12 @@ export class ConnectionService {
                     this.deps.state.isManualClose = false;
                 });
 
-                this.deps.state.ws.on('error', (error: Error): void => {
+                ws.on('error', (error: Error): void => {
+                    clearTimeout(connectTimer);
+                    if (!isCurrent()) {
+                        rejectOnce(error);
+                        return;
+                    }
                     this.deps.log.error('WebSocket error:', error.message);
                     if (this.deps.state.pendingLogin) {
                         this.deps.state.pendingLogin.reject(error);
@@ -147,7 +193,8 @@ export class ConnectionService {
                     }
                 });
 
-                this.deps.state.ws.on('pong', (): void => {
+                ws.on('pong', (): void => {
+                    if (!isCurrent()) return;
                     this.deps.state.heartbeatPending = false;
                     this.deps.state.lastPongReceived = Date.now();
                     if (this.deps.options.debug) {
@@ -193,6 +240,7 @@ export class ConnectionService {
     }
 
     public disconnect(): void {
+        this.stopped = true;
         if (this.deps.state.heartbeatTimer) {
             clearInterval(this.deps.state.heartbeatTimer);
         }
@@ -212,6 +260,14 @@ export class ConnectionService {
         this.deps.state.idLogin = undefined;
         this.deps.commandDispatcher.clearCommandQueues();
         this.deps.commandDispatcher.rejectAllPendingCommands(new Error('Client disconnected'));
+    }
+
+    private stopHeartbeat(): void {
+        if (this.deps.state.heartbeatTimer) {
+            clearInterval(this.deps.state.heartbeatTimer);
+            this.deps.state.heartbeatTimer = undefined;
+        }
+        this.deps.state.heartbeatPending = false;
     }
 
     private forceReconnect(): void {
@@ -238,7 +294,8 @@ export class ConnectionService {
     }
 
     private scheduleReconnect(): void {
-        if (this.deps.state.reconnectTimer) {
+        // Suspended after repeated login rejections (see login-rejection-guard).
+        if (this.stopped || this.deps.state.reconnectTimer || this.deps.state.reconnectSuspended) {
             return;
         }
 
@@ -256,14 +313,17 @@ export class ConnectionService {
 
         this.deps.state.reconnectTimer = setTimeout((): void => {
             this.deps.state.reconnectTimer = undefined;
+            if (this.stopped) return;
             this.deps.state.reconnectAttempts++;
             this.deps.log.info(`Attempting reconnection (attempt ${this.deps.state.reconnectAttempts})...`);
-            this.connect()
+            this.open()
                 .then((): void => {
                     this.deps.state.reconnectAttempts = 0;
                     this.deps.log.info('Reconnection successful');
                 })
                 .catch((err: unknown): void => {
+                    // A shutdown aborts the attempt in progress: not a failure to retry.
+                    if (this.stopped) return;
                     this.deps.log.error(
                         'Reconnection failed:',
                         err instanceof Error ? err.message : String(err),

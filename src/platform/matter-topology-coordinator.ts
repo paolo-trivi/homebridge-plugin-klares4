@@ -19,6 +19,21 @@ export type MatterPublicationState =
  */
 const DEFAULT_UNREGISTER_TIMEOUT_MS = 3_000;
 
+/**
+ * Grace period after the endpoint first reads as absent. Homebridge 2.4
+ * `unregisterAccessory` awaits `endpoint.close()` before it deletes the UUID
+ * from its registry, and `getAccessoryState` already answers `undefined` while
+ * the endpoint is closing. A register issued in that window is rejected as
+ * "already registered" (only logged). Observed on a real bridge: close takes
+ * well under a second.
+ */
+const DEFAULT_UNREGISTER_SETTLE_MS = 1_000;
+
+function resolveSettleMs(): number {
+    const fromEnv = Number(process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS);
+    return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : DEFAULT_UNREGISTER_SETTLE_MS;
+}
+
 function resolveTimeout(configured?: number): number {
     if (Number.isFinite(configured) && (configured as number) > 0) return configured as number;
     const fromEnv = Number(process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS);
@@ -28,6 +43,13 @@ function resolveTimeout(configured?: number): number {
 export class MatterTopologyCoordinator {
     private tail: Promise<void> = Promise.resolve();
     private readonly states = new Map<string, MatterPublicationState>();
+    /**
+     * Last accessory object handed to (or restored by) Homebridge per UUID.
+     * Homebridge 2.4 `unregisterPlatformAccessories` reads
+     * `accessory.deviceType.deviceType` before removing anything, so a bare
+     * `{ UUID }` stub throws and the endpoint survives.
+     */
+    private readonly knownAccessories = new Map<string, MatterAccessory>();
     private readonly unregisterTimeoutMs: number;
 
     constructor(
@@ -38,9 +60,15 @@ export class MatterTopologyCoordinator {
         this.unregisterTimeoutMs = resolveTimeout(unregisterTimeoutMs);
     }
 
+    /** Records an accessory restored from the Homebridge cache so it can be unregistered. */
+    public remember(accessory: MatterAccessory): void {
+        if (accessory?.UUID) this.knownAccessories.set(accessory.UUID, accessory);
+    }
+
     public register(accessory: MatterAccessory): Promise<void> {
         return this.enqueue(accessory.UUID, async () => {
             this.states.set(accessory.UUID, 'requested');
+            this.knownAccessories.set(accessory.UUID, accessory);
             await this.api.matter!.registerPlatformAccessories(
                 PLUGIN_NAME,
                 PLATFORM_NAME,
@@ -57,13 +85,11 @@ export class MatterTopologyCoordinator {
                 await this.api.matter!.unregisterPlatformAccessories(
                     PLUGIN_NAME,
                     PLATFORM_NAME,
-                    [{ UUID: uuid } as MatterAccessory],
+                    [this.knownAccessories.get(uuid) ?? ({ UUID: uuid } as MatterAccessory)],
                 );
             } catch (error: unknown) {
-                // The API is handed a `{ UUID }` stub with no metadata and can throw
-                // while still having removed the endpoint. A rejection is no more
-                // proof that the endpoint survived than a resolution is proof that
-                // it went away — only the probe below decides.
+                // A rejection is no more proof that the endpoint survived than a
+                // resolution is proof that it went away — only the probe below decides.
                 this.log.debug(
                     `[Matter] unregister call for ${uuid} threw, deferring to observation: `
                     + `${error instanceof Error ? error.message : String(error)}`,
@@ -72,6 +98,7 @@ export class MatterTopologyCoordinator {
             this.states.set(uuid, 'published-unverified');
             const absent = await this.waitUntilAbsent(uuid, probeCluster);
             this.states.set(uuid, absent ? 'locally-published' : 'failed');
+            if (absent) this.knownAccessories.delete(uuid);
             return absent;
         });
     }
@@ -106,7 +133,10 @@ export class MatterTopologyCoordinator {
         while (Date.now() < deadline) {
             try {
                 const state = await this.api.matter!.getAccessoryState(uuid, clusterName);
-                if (state === undefined) return true;
+                if (state === undefined) {
+                    await new Promise((resolve): void => { setTimeout(resolve, resolveSettleMs()); });
+                    return true;
+                }
             } catch {
                 // An API error is not proof that the endpoint disappeared.
             }

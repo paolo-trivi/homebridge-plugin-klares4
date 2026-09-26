@@ -11,6 +11,7 @@ import { sanitizeHapDisplayName } from '../display-name';
 export class LightAccessory {
     private service: Service;
     public device: KseniaLight;
+    private brightnessHandlersBound = false;
 
     constructor(
         private readonly platform: Lares4Platform,
@@ -44,11 +45,19 @@ export class LightAccessory {
             .onGet(this.getOn.bind(this));
 
         if (this.device.status?.dimmable) {
-            this.service
-                .getCharacteristic(this.platform.Characteristic.Brightness)
-                .onSet(this.setBrightness.bind(this))
-                .onGet(this.getBrightness.bind(this));
+            this.bindBrightnessHandlers();
         }
+    }
+
+    // Discovery parses every light as non-dimmable; dimming is learned from the
+    // first status carrying POS, so the handlers may have to be bound later.
+    private bindBrightnessHandlers(): void {
+        if (this.brightnessHandlersBound) return;
+        this.brightnessHandlersBound = true;
+        this.service
+            .getCharacteristic(this.platform.Characteristic.Brightness)
+            .onSet(this.setBrightness.bind(this))
+            .onGet(this.getBrightness.bind(this));
     }
 
     public async setOn(value: CharacteristicValue): Promise<void> {
@@ -120,6 +129,9 @@ export class LightAccessory {
             this.device.status?.on ?? false,
         );
 
+        if (this.device.status?.dimmable) {
+            this.bindBrightnessHandlers();
+        }
         if (this.device.status?.dimmable && this.device.status?.brightness !== undefined) {
             this.service.updateCharacteristic(
                 this.platform.Characteristic.Brightness,

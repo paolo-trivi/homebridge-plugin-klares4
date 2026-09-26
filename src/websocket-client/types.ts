@@ -17,6 +17,8 @@ export interface WebSocketConnectionOptions {
 }
 
 export interface PendingLoginRequest {
+    /** ID of the LOGIN sent for this attempt; only its LOGIN_RES may settle it. */
+    messageId?: string;
     resolve: () => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
@@ -64,6 +66,8 @@ export interface SendCommandOptions {
     responseCmds?: string[];
     requirePositiveResult?: boolean;
     allowGenericErrorFallback?: boolean;
+    /** Response PAYLOAD_TYPEs accepted when the response ID does not match exactly. */
+    responsePayloadTypes?: string[];
     stateConfirmation?: {
         outputId: string;
         matches: (status: KseniaOutputStatusRaw) => boolean;
@@ -90,6 +94,10 @@ export interface WebSocketClientState {
     heartbeatPending: boolean;
     lastPongReceived: number;
     reconnectAttempts: number;
+    /** Explicit LOGIN_RES rejections since the last successful login. */
+    loginRejections: number;
+    /** Set after too many rejected logins: no automatic reconnection until restart. */
+    reconnectSuspended: boolean;
     isManualClose: boolean;
     pendingLogin?: PendingLoginRequest;
     hasCompletedInitialSync: boolean;
@@ -112,11 +120,20 @@ export interface WebSocketClientState {
     thermostatRealtimeByOutputId: Map<string, number>;
     thermostatRealtimeSnapshotById: Map<string, {
         mode?: string;
+        season?: 'WIN' | 'SUM';
         targetTemperature?: number;
         hvacOutputActive?: boolean;
         updatedAt: number;
     }>;
+    /**
+     * Realtime ACT_SEA per OUTPUT thermostat id, stamped when the season last
+     * changed. STATUS_TEMPERATURES is keyed by DOMUS sensor id, which can equal
+     * another thermostat's cfg id, so the season is only looked up by output.
+     */
+    thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number }>;
     missingThermostatProgramWarningOutputIds: Set<string>;
+    /** Normalized CAT of every scenario listed by MULTI_TYPES, exposed or not. */
+    scenarioCategoryById: Map<string, string>;
 }
 
 export interface MessagePipeline {
