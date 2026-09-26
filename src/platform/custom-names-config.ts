@@ -31,11 +31,14 @@ export type CustomNamesConfig = Partial<CustomNamesMap> | CustomNameEntry[];
  * Output-like devices share one namespace on the panel, so every output family
  * (and the generic `output_` form written by the KSA import) maps to `outputs`.
  * A DOMUS sensor name is its base name, applied to all three of its readings.
+ * The panel's own temperature sensors have no numeric ID: they are keyed by
+ * their full device ID (the same value the exclusion list compares).
  */
 const CATEGORY_BY_PREFIX: Array<[RegExp, keyof CustomNamesMap]> = [
     [/^zone_(\d+)$/, 'zones'],
     [/^(?:light|cover|gate|thermostat|output)_(\d+)$/, 'outputs'],
     [/^sensor_(?:(?:temp|hum|light)_)?(\d+)$/, 'sensors'],
+    [/^(sensor_system_temp_(?:in|out))$/, 'sensors'],
     [/^scenario_(\d+)$/, 'scenarios'],
 ];
 
@@ -105,12 +108,17 @@ export function mergeCustomNames(
     return [...rows, ...toCustomNameEntries(additions)];
 }
 
+export function isSystemSensorId(id: string): boolean {
+    return id === 'sensor_system_temp_in' || id === 'sensor_system_temp_out';
+}
+
 /** Array form of a category map, as written back to `config.json` (KSA import). */
 export function toCustomNameEntries(names: Partial<CustomNamesMap>): CustomNameEntry[] {
     const entries: CustomNameEntry[] = [];
     for (const category of Object.keys(ENTRY_PREFIX) as Array<keyof CustomNamesMap>) {
         for (const [id, name] of Object.entries(names[category] ?? {})) {
-            entries.push({ deviceId: `${ENTRY_PREFIX[category]}${id}`, name });
+            const deviceId = isSystemSensorId(id) ? id : `${ENTRY_PREFIX[category]}${id}`;
+            entries.push({ deviceId, name });
         }
     }
     return entries;

@@ -56,6 +56,28 @@ test('F02: DiscoveryService applies array-form custom names', () => {
     assert.equal(discovery.getCustomName({ id: 'sensor_hum_1', type: 'sensor', name: 'x', status: {} }), 'Sala - Umidita');
 });
 
+test('the panel temperature sensors can be renamed and are accepted by the UI patterns', () => {
+    const rows = [
+        { deviceId: 'sensor_system_temp_in', name: 'Temperatura Centrale' },
+        { deviceId: 'sensor_system_temp_out', name: 'Temperatura Esterna Casa' },
+    ];
+    const normalized = normalizeCustomNames(rows);
+    assert.equal(normalized.sensors.sensor_system_temp_in, 'Temperatura Centrale');
+    assert.deepEqual(toCustomNameEntries(normalized), rows);
+
+    const discovery = new DiscoveryService({ customNames: rows }, log);
+    // A single reading: the name is used as-is, without the DOMUS " - Temperatura" suffix.
+    assert.equal(discovery.getCustomName({ id: 'sensor_system_temp_in', type: 'sensor', name: 'Temperatura Interna', status: {} }), 'Temperatura Centrale');
+    assert.equal(discovery.getCustomName({ id: 'sensor_temp_1', type: 'sensor', name: 'x', status: {} }), undefined);
+
+    const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config.schema.json'), 'utf8')).schema.properties;
+    for (const key of ['customNames', 'matterOverrides']) {
+        const pattern = new RegExp(schema[key].items.properties.deviceId.pattern);
+        for (const id of ['sensor_system_temp_in', 'sensor_system_temp_out']) assert.match(id, pattern, `${key} accepts ${id}`);
+        assert.doesNotMatch('sensor_system_temp_x', pattern);
+    }
+});
+
 test('F02/F38: no per-device setting in the UI schema is a free-form map or an unset boolean', () => {
     const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config.schema.json'), 'utf8'));
     const offenders = [];

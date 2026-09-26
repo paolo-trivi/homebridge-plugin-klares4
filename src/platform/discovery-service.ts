@@ -9,7 +9,7 @@ import type {
     ResolvedMatterPolicy,
 } from './types';
 import { normalizeMatterOverrides } from './matter-override-config';
-import { normalizeCustomNames, type CustomNamesMap } from './custom-names-config';
+import { isSystemSensorId, normalizeCustomNames, type CustomNamesMap } from './custom-names-config';
 
 /** Lares4 device.type → matterExposure config key. */
 const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
@@ -151,6 +151,8 @@ export class DiscoveryService {
 
         if (device.type === 'sensor') {
             const sensorName = customNames.sensors[id];
+            // A panel temperature sensor is a single reading: its name is used as-is.
+            if (sensorName && isSystemSensorId(id)) return sensorName;
             if (sensorName) {
                 if (device.id.includes('_temp_')) return `${sensorName} - Temperatura`;
                 if (device.id.includes('_hum_')) return `${sensorName} - Umidita`;

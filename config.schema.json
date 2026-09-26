@@ -240,8 +240,8 @@
                             "type": "string",
                             "required": true,
                             "placeholder": "zone_18",
-                            "pattern": "^(zone|light|cover|gate|thermostat|scenario|sensor_(temp|hum|light|motion|contact))_[A-Za-z0-9_-]+$",
-                            "description": "ID come appare in klares4-devices.json"
+                            "pattern": "^(zone|light|cover|gate|thermostat|scenario|sensor_(temp|hum|light|motion|contact))_[A-Za-z0-9_-]+$|^sensor_system_temp_(in|out)$",
+                            "description": "ID come appare in klares4-devices.json (anche sensor_system_temp_in / sensor_system_temp_out per le temperature della centrale)"
                         },
                         "name": {
                             "title": "Nome su Matter",
@@ -303,8 +303,8 @@
                             "type": "string",
                             "required": true,
                             "placeholder": "light_18",
-                            "pattern": "^(zone|light|cover|gate|thermostat|output|scenario)_[0-9]+$|^sensor_((temp|hum|light)_)?[0-9]+$",
-                            "description": "ID come appare in klares4-devices.json (per i sensori DOMUS anche sensor_<id>: il nome vale per temperatura, umidita e luminosita)"
+                            "pattern": "^(zone|light|cover|gate|thermostat|output|scenario)_[0-9]+$|^sensor_((temp|hum|light)_)?[0-9]+$|^sensor_system_temp_(in|out)$",
+                            "description": "ID come appare in klares4-devices.json (per i sensori DOMUS anche sensor_<id>: il nome vale per temperatura, umidita e luminosita; per le temperature della centrale sensor_system_temp_in / sensor_system_temp_out, nome usato cosi com'e)"
                         },
                         "name": {
                             "title": "Nome",
