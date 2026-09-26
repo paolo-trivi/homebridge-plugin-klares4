@@ -50,8 +50,12 @@ const status = {
 
 // `unqueryableOnce`: UUIDs whose first endpoint is created but answers no
 // cluster probe, i.e. present in Homebridge's map yet not queryable.
-function makeHb24MatterApi({ restored = [], unqueryableOnce = [], unregisterCloseMs = 0 } = {}) {
+// `serverStarting`: MatterAPIImpl.registerPlatformAccessories rejects while the
+// bridge Matter server is still starting (isBridgeServerStarting), see
+// `setServerStarting`.
+function makeHb24MatterApi({ restored = [], unqueryableOnce = [], unregisterCloseMs = 0, serverStarting = false } = {}) {
     const unqueryable = new Set(unqueryableOnce);
+    let starting = serverStarting;
     // uuid -> { deviceType, clusters, restoredFromCache, nodeLabel, handlers, reachable }
     const endpoints = new Map();
     for (const r of restored) {
@@ -76,7 +80,12 @@ function makeHb24MatterApi({ restored = [], unqueryableOnce = [], unregisterClos
     const matter = {
         deviceTypes,
         status,
-        registerPlatformAccessories: async (_plugin, _platform, accessories) => {
+        registerPlatformAccessories: async (plugin, _platform, accessories) => {
+            if (starting) {
+                throw new Error(`${plugin}: Cannot register Matter accessories yet — the Matter server for this bridge is still starting. `
+                    + 'Register from your platform\'s \'didFinishLaunching\' event; if you already do, this is transient and the '
+                    + 'accessories are restored from cache on the next start.');
+            }
             for (const a of accessories) {
                 registerCalls.push({ UUID: a.UUID, deviceType: a.deviceType?.name });
                 // Fire-and-forget, like the REGISTER_MATTER_PLATFORM_ACCESSORIES event.
@@ -152,8 +161,11 @@ function makeHb24MatterApi({ restored = [], unqueryableOnce = [], unregisterClos
         await invoke(uuid, 'onOff', onOff ? 'off' : 'on');
     };
 
+    const setServerStarting = (value) => { starting = value; };
+
     return {
         api: { matter }, endpoints, log, registerCalls, unregisterCalls, updates, rejectedUpdates, settle, invoke, toggle,
+        setServerStarting,
     };
 }
 

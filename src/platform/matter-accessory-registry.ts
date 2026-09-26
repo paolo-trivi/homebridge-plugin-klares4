@@ -9,10 +9,7 @@ import {
     type CachedEndpointLabel,
 } from './matter-registry-state';
 import {
-    handleMissingRegisteredAccessory,
-    handleRegisterFailure,
-    isFallbackTemperatureSensor,
-    type MatterRegistration,
+    canRetryRegistration, handleMissingRegisteredAccessory, handleRegisterFailure, isFallbackTemperatureSensor, type MatterRegistration,
 } from './matter-registration-recovery';
 import { MatterRegistrationGate } from './matter-registration-gate';
 import { needsDimmableUpgrade, upgradeToDimmableLight, withCachedDimmable } from './matter-light-capability';
@@ -116,7 +113,7 @@ export class MatterAccessoryRegistry {
                     return;
                 case 'failed':
                 case 'skipped':
-                    return;
+                    if (!canRetryRegistration(existing)) return;
             }
         }
 
@@ -128,7 +125,7 @@ export class MatterAccessoryRegistry {
         if (this.isDeviceExposed && !this.isDeviceExposed(device)) return;
         this.activeDiscoveredUUIDs.add(device.id);
         const existing = this.registrations.get(device.id);
-        if (!existing) {
+        if (!existing || canRetryRegistration(existing)) {
             await this.registerAccessory(device);
             return;
         }

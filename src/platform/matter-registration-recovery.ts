@@ -27,6 +27,28 @@ export interface MatterRegistration {
      * update without any push. The name-map finalize pass diffs against this.
      */
     registeredDisplayName?: string;
+    /** Set when the failure was transient: earliest time a new update may retry the registration. */
+    retryAfter?: number;
+}
+
+const DEFAULT_REGISTER_RETRY_MS = 5_000;
+
+function registerRetryMs(): number {
+    const fromEnv = Number(process.env.KLARES4_MATTER_REGISTER_RETRY_MS);
+    return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : DEFAULT_REGISTER_RETRY_MS;
+}
+
+/**
+ * Homebridge 2.4 rejects a bridged register while the bridge's Matter server
+ * is still starting and calls it transient. Nothing was registered, so the
+ * next discovery or state update may simply try again.
+ */
+export function isTransientRegisterError(message: string): boolean {
+    return /still starting/i.test(message);
+}
+
+export function canRetryRegistration(reg: MatterRegistration): boolean {
+    return reg.status === 'failed' && reg.retryAfter !== undefined && Date.now() >= reg.retryAfter;
 }
 
 interface RecoveryDeps {
@@ -129,7 +151,9 @@ export async function handleRegisterFailure(
     deps: RecoveryDeps,
 ): Promise<void> {
     const msg = deps.fmtErr(err);
-    if (device.type === 'thermostat' && deps.thermostatFallbackEnabled) {
+    const transient = isTransientRegisterError(msg);
+    // A transient refusal says nothing about the Thermostat shape: no fallback.
+    if (device.type === 'thermostat' && deps.thermostatFallbackEnabled && !transient) {
         deps.log.warn(
             `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor. Error: ${msg}`,
         );
@@ -146,6 +170,11 @@ export async function handleRegisterFailure(
     reg.failedAt = Date.now();
     reg.lastError = msg;
     reg.pendingStateUpdates = [];
+    if (transient) {
+        reg.retryAfter = reg.failedAt + registerRetryMs();
+        deps.log.warn(`[Matter] register deferred: ${device.name} — the Matter server is still starting; retrying on a later update`);
+        return;
+    }
     deps.log.warn(`[Matter] accessory failed: ${device.name} — ${msg}`);
 }
 
