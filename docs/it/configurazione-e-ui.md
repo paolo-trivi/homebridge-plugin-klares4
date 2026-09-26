@@ -6,6 +6,8 @@
 - `pin`
 - opzionali `port`, `https`, `allowInsecureTls`
 
+Lascia `port` vuota: il plugin usa 443 con `https` (il default) e 80 senza. Una `port` esplicita viene sempre usata cosi com'e, quindi `https: false` con `port: 443` non si connette.
+
 ## Affidabilita e Logging
 
 - `logLevel`:
@@ -16,6 +18,8 @@
 - `reconnectInterval`
 - `heartbeatInterval`
 
+Il vecchio `debug: true` vale solo se `logLevel` manca. La UI Homebridge scrive al salvataggio tutti i default di primo livello, compreso `logLevel: 1`, quindi per il log di debug usa `logLevel: 2`.
+
 ## Blocco Domus Termostati
 
 `domusThermostat`:
@@ -23,7 +27,7 @@
 - `enabled`
 - `sensorFreshnessMs`
 - `manualPairs` (`output -> sensore Domus`)
-- `manualCommandPairs` (`output -> cfg thermostat ID`)
+- `manualCommandPairs` (`output -> cfg thermostat ID`), array di `{ thermostatOutputId, commandThermostatId }`; scritto dall'import KSA e modificabile dalla UI
 
 ## Blocco Import KSA
 
@@ -44,7 +48,15 @@ Comportamento:
   - preview summary nei log
   - apply runtime in memoria
   - salvataggio cache sanitizzata
-- Se `applyAtStartup=true`, i blocchi selezionati vengono persistiti in `config.json` e il flag torna `false`.
+- Se `applyAtStartup=true`, i blocchi selezionati vengono persistiti in `config.json` e il flag torna `false`. `config.json` viene riscritto in modo atomico (file temporaneo + rename) e mantiene la sua formattazione.
+
+Cosa fa ogni blocco, a runtime e quando viene persistito:
+
+- `applyDomusMappings` (attivo di default): imposta `domusThermostat.manualPairs` e `manualCommandPairs` dal backup.
+- `applyRoomMapping` (attivo di default): i nomi delle stanze della centrale diventano slug sicuri per MQTT (`Sala / Pranzo` diventa `sala_pranzo`). Le stanze della centrale vengono usate solo se non hai definito nessuna stanza; le tue stanze non vengono mai sostituite. L'import non attiva mai `roomMapping.enabled`, perche cambierebbe tutti i topic MQTT: attivalo tu.
+- `applyCustomNames`: i nomi della centrale vengono aggiunti per dispositivo; un dispositivo a cui hai gia dato un nome mantiene il tuo. Il risultato e scritto nella forma array.
+- `applyExclusionSuggestions`: gli ID suggeriti vengono aggiunti alle tue liste `exclude*` senza mai sostituirle (oggi il parser non ne suggerisce nessuno).
+- Un `klares4-ksa-cache.json` non valido o incompleto viene ignorato con un warning; riesegui l'import per ricostruirlo.
 
 ## Visibilita Device e Naming
 
@@ -52,10 +64,13 @@ Comportamento:
 - `excludeZones`
 - `excludeSensors`
 - `excludeScenarios`
-- `customNames` rinomina i dispositivi per HomeKit, MQTT e Matter; usa la forma array (`{ deviceId, name }`, per esempio `light_18`, `zone_3`, `sensor_1`), che la UI Homebridge conserva — la vecchia mappa per categoria viene ancora letta ma cancellata quando la UI riscrive config.json. Un import KSA con `applyCustomNames` scrive la forma array
+
+Le liste di esclusione vogliono l'ID numerico senza prefisso (`37` per `light_37`, `5` per `zone_5`). Un ID di sensore DOMUS nasconde tutte e tre le sue letture; le temperature della centrale si escludono con `sensor_system_temp_in` / `sensor_system_temp_out`. Il sommario di avvio stampa sia l'ID del dispositivo sia il valore da usare qui (`exclude:`).
+- `customNames` rinomina i dispositivi per HomeKit, MQTT e Matter; usa la forma array (`{ deviceId, name }`, per esempio `light_18`, `zone_3`, `sensor_1`, oppure `sensor_system_temp_in`, il cui nome e usato cosi com'e), che la UI Homebridge conserva — la vecchia mappa per categoria viene ancora letta ma cancellata quando la UI riscrive config.json. Un import KSA con `applyCustomNames` scrive la forma array
 - `matterExposure` nasconde intere categorie soltanto da Matter
 - `matterOverrides` applica `name` / `exposed` solo su Matter; usa la forma array (`{ deviceId, name, exposed }`), che la UI Homebridge conserva — una mappa per device ID viene cancellata quando la UI riscrive config.json
-- `matterRecoveryRequests` associa un ID `thermostat_*` a una generazione positiva monotona
+- `matterRecoveryRequests` e un array di `{ deviceId, generation }`: un ID `thermostat_*` e una generazione positiva che puo solo crescere. Le righe senza `deviceId` o senza una `generation` valida vengono ignorate (con gli schemi precedenti la UI scriveva a ogni salvataggio una riga vuota `{ "generation": 1 }`; e innocua)
+- `matterUnregisterTimeoutMs` (default 3000, 500-30000): quanto il plugin attende che un endpoint Matter rimosso sparisca davvero, prima di rinunciare e mantenere il nome attuale
 
 La precedenza dell'esposizione e: esclusione globale, override per device, categoria, quindi default esistente (`true`). Gli override Matter non cambiano HAP/HomeKit o MQTT. Nella UI la casella "Esposto su Matter" di ogni riga e selezionata di default: deselezionala per nascondere il dispositivo; una riga selezionata mantiene esposto il dispositivo anche se la sua categoria e disattivata. Un salvataggio dalla UI con la 2.2.0-rc.3 o precedenti scriveva `exposed: false` su tutte le righe; ora il plugin elenca i dispositivi nascosti in un warning all'avvio.
 
@@ -67,12 +82,16 @@ La generazione di recovery viene consumata una sola volta e persistita prima del
 - `roomMapping.rooms[]`
 - ogni stanza contiene `roomName` e `devices[].deviceId`
 
-L'import KSA puo generare room mapping da `PRG_ROOMS + PRG_MAPS`.
+`roomName` deve rispettare `^[a-z0-9_]+$`: diventa un livello del topic MQTT.
+
+L'import KSA puo generare le stanze da `PRG_ROOMS + PRG_MAPS` quando non ne hai (vedi sopra); trasforma i nomi della centrale in slug e lascia `enabled` come l'hai impostato.
 
 ## Telemetry
 
 - `telemetry` (boolean, default: `true`)
 
-Il plugin raccoglie automaticamente e in forma anonima gli errori tecnici (crash, eccezioni non gestite) tramite Sentry per facilitare l'identificazione e la risoluzione dei bug.
-La funzione applica una sanitizzazione molto stretta prima dell'invio: non vengono MAI trasmessi il PIN, l'IP della centrale, URL, token, IP client, configurazioni, o nomi scelti per i dispositivi.
-Se preferisci non inviare alcuna segnalazione di errore, puoi disattivare la funzione impostando `telemetry: false` nella configurazione.
+La telemetry e attiva di default e invia segnalazioni anonime di errore tramite Sentry. Per disattivarla usa `telemetry: false`.
+
+- Vengono inviati solo gli errori che il plugin stesso segnala in punti espliciti (oggi un avvio della piattaforma o un'inizializzazione della connessione falliti): tipo di errore, messaggio, stack trace, versione del plugin e una breve etichetta di contesto.
+- Non c'e nessuna cattura globale di crash o eccezioni non gestite, e nessun dato di utilizzo o analytics.
+- Ogni evento viene prima sanitizzato: PIN, IP/host della centrale e sender configurati, URL e indirizzi IPv4 vengono rimossi dal testo; campi come nomi, stanze, dispositivi, configurazione e payload vengono scartati. Gli stack frame possono contenere il percorso di installazione del plugin.
