@@ -5,6 +5,7 @@ const hap = require('@homebridge/hap-nodejs');
 const { CoverAccessory } = require('../dist/accessories/cover-accessory.js');
 const { GateAccessory } = require('../dist/accessories/gate-accessory.js');
 const { ThermostatAccessory } = require('../dist/accessories/thermostat-accessory.js');
+const { ZoneAccessory } = require('../dist/accessories/zone-accessory.js');
 
 const { Characteristic, Service } = hap;
 
@@ -179,4 +180,26 @@ test('thermostat: the chosen temperature display unit is kept and survives a res
     const restarted = new ThermostatAccessory(platform(undefined), accessory);
     assert.equal(await restarted.getTemperatureDisplayUnits(), Characteristic.TemperatureDisplayUnits.FAHRENHEIT);
     assert.equal(units().value, Characteristic.TemperatureDisplayUnits.FAHRENHEIT);
+});
+
+test('zone: a bypassed zone is inactive, not tampered', async () => {
+    const zone = (status) => ({ id: 'zone_4', type: 'zone', name: 'Finestra Cucina', description: '', status: { armed: false, fault: false, open: false, ...status } });
+    const accessory = platformAccessory(zone({ bypassed: true }));
+    const handler = new ZoneAccessory(platform(undefined), accessory);
+    const sensor = accessory.getService(Service.ContactSensor);
+    const tampered = () => sensor.getCharacteristic(Characteristic.StatusTampered).value;
+    const active = () => sensor.getCharacteristic(Characteristic.StatusActive).value;
+
+    assert.equal(tampered(), Characteristic.StatusTampered.NOT_TAMPERED);
+    assert.equal(await handler.getStatusTampered(), Characteristic.StatusTampered.NOT_TAMPERED);
+    assert.equal(active(), false);
+
+    handler.updateStatus(zone({ bypassed: false }));
+    assert.equal(tampered(), Characteristic.StatusTampered.NOT_TAMPERED);
+    assert.equal(active(), true);
+
+    handler.updateStatus(zone({ bypassed: true }));
+    assert.equal(tampered(), Characteristic.StatusTampered.NOT_TAMPERED);
+    assert.equal(await handler.getStatusTampered(), Characteristic.StatusTampered.NOT_TAMPERED);
+    assert.equal(active(), false);
 });
