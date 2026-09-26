@@ -32,9 +32,11 @@ La suite di partenza (274 test) era verde su Node 20 e 22.
 | Severità | Totale | Corretti in questo audit | Aperti |
 |---|---|---|---|
 | P0 | 0 | 0 | 0 |
-| P1 | 6 | 1 | 5 |
-| P2 | 16 | 7 | 9 |
-| P3 | 14 | 0 | 14 |
+| P1 | 8 | 8 | 0 |
+| P2 | 16 | 9 | 7 |
+| P3 | 16 | 1 | 15 |
+
+Aggiornato dopo la verifica sul campo (vedi *Field verification*): +2 P1 trovati sul campo (F37, F38), +2 P3 (F39, F40). Corretti in questa fase: F02, F03, F04, F05, F06, F14, F22, F37, F38, F40.
 
 **Aree a maggior rischio**
 
@@ -78,6 +80,60 @@ La suite di partenza (274 test) era verde su Node 20 e 22.
 | Standards reviewed | DONE | Homebridge 2.4.0 (typings e runtime); developers.homebridge.io Matter API; Verified-Plugins (rev. 2026-05-05); HAP-NodeJS 2.2.2; matter.js 0.17.9 (Matter spec 1.6); connectedhomeip ZCL XML; OASIS MQTT 3.1.1/5.0; mqtt.js 5.16.0 |
 
 > ⚠️ **Effetto collaterale da segnalare.** `npm test` inizializza Sentry con il DSN di produzione e invia eventi sintetici ("test error", "test message"; vedi F28). Anche le esecuzioni dei test fatte durante questo audit possono aver inviato quegli eventi al progetto Sentry, se la rete del container li ha lasciati passare.
+
+---
+
+# Field verification
+
+Eseguita il 2026-09-26 su un'installazione reale, dopo il report statico. Nessun inserimento o disinserimento, nessun bypass, nessun comando a luci, tapparelle, cancelli o termostati da parte dell'auditor (i comandi `CMD_SET_OUTPUT`/`CMD_EXE_SCENARIO` visti nella capture alle 20:42 venivano dai controller di casa). PIN, IP del pannello e credenziali non compaiono in questo report.
+
+**Ambiente**
+
+| Voce | Valore |
+|---|---|
+| Host | Debian 13 (kernel 6.12), Docker, `homebridge/homebridge:latest` (tag 2026-09-25), rete host |
+| Homebridge | 2.4.0 (HAP-NodeJS 2.2.2, matter.js 0.17.9), identico al codice analizzato: F01 (`requiresExternalBridge(accessory.deviceType)`), register bridged fire-and-forget, `already registered` su UUID duplicato |
+| Node (container) | 24.21.0 |
+| Plugin installato | 2.2.0-rc.3 da npm, poi le build del branch installate sostituendo `dist/` nella stessa cartella (dipendenze identiche) |
+| Child bridge | sì, `0E:91:2B:75:74:97`, **solo Matter** (`hap.enabled: false`, Matter su 5530), 109 endpoint |
+| MQTT | disabilitato nel plugin (non attivato per il test, per scelta dell'utente) |
+| Pannello | Lares4, firmware non esposto nei messaggi catturati; `PRG_THERMOSTATS` → `CMD_NOT_AVAILABLE` (percorso degradato "DOMUS sensor id come cfg id" attivo: `thermostat_18` e `thermostat_34` → cfg 1) |
+| Backup | `/root/smarthome/_backups/klares4-audit-20260926-202851/` sull'host (config, persist, accessories, storage Matter, file `klares4-*`, plugin rc.3 per il rollback) |
+
+**Gate locali**
+
+| Check | Risultato |
+|---|---|
+| `npm ci`, `check:max-lines`, `tsc --noEmit --noUnusedLocals --noUnusedParameters` | PASS |
+| Test baseline (287) su Node 20.20.2 / 22.23.3 / 24.21.0 / 26.8.1 | PASS su tutte |
+| Test finali | 316/316 su Node 26; Sentry bloccato durante ogni esecuzione (5 tentativi di invio per esecuzione, F28) |
+| Nuovi test contro la `dist` non modificata del branch | falliscono tutti prima delle fix (F03, F04, F05, F14, F37 e i test di schema F02/F38) |
+
+**Metodo**
+
+- Log NORMAL e DEBUG: `logLevel: 2` e `_bridge.debugModeEnabled: true` (debug di Homebridge solo per il child bridge), `telemetry: false` per tutta la durata.
+- Reconnect (F03): regola iptables sull'host che scarta il traffico verso la porta 443 del pannello per 110 s, rimossa da un timer systemd (più un failsafe). Il pannello chiude il socket (1006) dopo circa 16 s; il primo tentativo di riconnessione resta appeso 133 s fino all'ETIMEDOUT del kernel (F39).
+- Debug capture: `generateDebugFile: true`, 900 s, 137 messaggi raw, analizzati sull'host senza estrarre dati sensibili.
+- F02/F38: `customNames` di prova in `config.json`, salvataggio dalla UI fatto dall'utente, diff; config originale ripristinato subito dopo (hash identico al backup).
+
+**Risultati**
+
+| Finding | Esito sul campo |
+|---|---|
+| F01 | FIXED: unregister emesso e osservato, nessun `threw … deviceType`; rivelato F37 |
+| F02 | CONFIRMED (customNames cancellato dal salvataggio UI) → FIXED |
+| F03 | CONFIRMED al boot e al reconnect → FIXED e verificato (nessun placeholder verso Matter) |
+| F04 | NOT REPRODUCIBLE (nessun dimmer sul pannello) → FIXED con test |
+| F05 | non esercitato (recovery non eseguita) → FIXED con test |
+| F06 | condizioni CONFIRMED (cfg 1 in SUM) → FIXED con test; setpoint dal vivo non eseguito |
+| F14 | percorso esercitato: il retry con purge ha recuperato il rename rifiutato → FIXED |
+| F16 | presupposto CONFIRMED (READ con `RESULT: FAIL`); non impatta questa installazione (HAP disabilitato) |
+| F17 | osservato: riscrittura di `config.json` con formattazione diversa |
+| F20, F21 | NEEDS VERIFICATION (nessun comando al termostato) |
+| F22 | NOT REPRODUCED (PIN stringa, mascherato) → FIXED con test |
+| F37 (nuovo) | CONFIRMED sul campo → FIXED e verificato (rename in 1 s, zero `already registered`) |
+| F38 (nuovo) | CONFIRMED sul campo → FIXED; round-trip UI del nuovo schema: vedi F38 |
+| Avvio con la build | nessun warning o errore del plugin; riepilogo `cycle #1` identico a quello della rc.3 |
 
 ---
 
@@ -212,7 +268,9 @@ Modello Matter: matter.js 0.17.9, spec 1.6.
 
 Ordine: severità, poi impatto. "FIXED" indica una patch applicata in questo audit con test di regressione. Nessun commit è stato fatto.
 
-## [P1] F01 — Unregister Matter sempre inefficace su Homebridge 2.4 (rename, prune, recovery no-op) — FIXED
+## [P1] F01 — Unregister Matter sempre inefficace su Homebridge 2.4 (rename, prune, recovery no-op) — FIXED (verificato sul campo)
+
+**Stato sul campo:** FIXED. Con la build del branch l'unregister viene emesso (`Unregistering 1 Matter accessory`) e l'endpoint rimosso (`Unregistered Matter accessory: PC (light_37)`), senza nessun `threw … deviceType`. Il rename ha però rivelato F37, corretto a parte.
 
 **Category:** API CONTRACT VIOLATION
 **Files:** `src/platform/matter-topology-coordinator.ts`, `src/platform/matter-accessory-registry.ts`
@@ -243,7 +301,9 @@ Tutti i manager Matter di Homebridge (main e child bridge) ricevono l'oggetto pe
 - `test/matter-accessory-registry.test.js`: "explicit thermostat recovery removes a cache-restored fallback endpoint under Homebridge 2.4 unregister semantics". Il mock ora supporta `initiallyQueryable` per modellare gli endpoint restaurati da cache.
 **Confidence:** High per HB 2.4.0. Per beta precedenti: NEEDS VERIFICATION.
 
-## [P1] F02 — `customNames` viene cancellato dalla Homebridge UI al primo salvataggio
+## [P1] F02 — `customNames` viene cancellato dalla Homebridge UI al primo salvataggio — CONFIRMED sul campo, FIXED
+
+**Stato sul campo:** CONFIRMED. `customNames.outputs = {"37": "PC Test Audit"}` aggiunto a `config.json`, poi un salvataggio dalla UI (Plugin → Klares4 → Salva): nel diff `customNames` è sparito. Lo stesso salvataggio ha prodotto F38. **Fix:** forma array `[{ deviceId, name }]` in schema e layout, normalizzatore `platform/custom-names-config.ts` che accetta anche la mappa legacy, import KSA che scrive la forma array, test di schema anti-mappa. Round-trip UI del nuovo schema: vedi *Field verification*.
 
 **Category:** COMPATIBILITY / BEST PRACTICE (requisito dello schema UI)
 **Files:** `config.schema.json`, `src/platform/discovery-service.ts`, `src/platform/ksa-import-service.ts`
@@ -269,7 +329,9 @@ Documenti da aggiornare: README (EN e IT, tabelle config), `docs/en/config-and-u
 **Regression test:** test di normalizzazione su entrambe le forme (come `test/matter-override-config.test.js`), più un test di schema che fallisce se una proprietà per-device usa `additionalProperties`.
 **Confidence:** High (stesso meccanismo già osservato in produzione dall'autore). La UI non è stata testata direttamente.
 
-## [P1] F03 — Ogni (ri)connessione pubblica i default del parser come stato reale (transizioni spurie HomeKit/Matter)
+## [P1] F03 — Ogni (ri)connessione pubblica i default del parser come stato reale (transizioni spurie HomeKit/Matter) — CONFIRMED sul campo, FIXED (verificato)
+
+**Stato sul campo:** CONFIRMED, al boot e al reconnect (blocco iptables di circa 110 s verso il pannello). Log DEBUG di Homebridge, update di attributi Matter: la tapparella "Finestra Bagno Matrimoniale" (reale 80% aperta) passa da `currentPositionLiftPercent100ths: 10000` (chiusa) a 2000; il contatto "Contatto Bagno Matrimoniale" (finestra aperta) passa da `stateValue: true` (chiusa) di nuovo ad aperta circa 1 s dopo; i sensori DOMUS vanno a `measuredValue: 0` (0 °C) e i termostati a 2000 (20 °C) prima dei valori reali (2430). **Fix:** `device-observation.ts` (placeholder di discovery marcati, merge con lo stato noto) e `websocket-client/discovered-device.ts`; alla rediscovery il device conserva lo stato osservato; al boot Matter/HAP usano lo stato in cache finché il pannello non ne riporta uno. **Dopo la fix, sul campo:** 0 push di 0 °C/20 °C, tapparella solo 2000, contatto aperto sempre `false`, al boot e al reconnect. MQTT non verificato sul campo (disabilitato su questa installazione): pubblica solo sugli update di stato, quindi non riceveva placeholder dalla discovery.
 
 **Category:** ROBUSTNESS
 **Files:** `src/websocket-client/message-service.ts`, `src/websocket/device-state-projector.ts`, `src/websocket-client/device-parsers.ts`, `src/platform/index.ts`, `src/platform/accessory-registry.ts`
@@ -296,7 +358,9 @@ Test: due sync consecutivi non devono emettere stati diversi dall'ultimo reale. 
 **Regression test:** `repro-pipeline.js` trasformato in test: dopo il secondo `MULTI_TYPES` nessuna emissione con `on:false`/`value:0`.
 **Confidence:** High sul meccanismo. L'impatto sulle automazioni dipende dalla configurazione dell'utente.
 
-## [P1] F04 — I dimmer vengono registrati su Matter come `OnOffLight` (dimmerazione Matter mai disponibile)
+## [P1] F04 — I dimmer vengono registrati su Matter come `OnOffLight` (dimmerazione Matter mai disponibile) — NOT REPRODUCIBLE sul campo, FIXED
+
+**Stato sul campo:** NOT REPRODUCIBLE: il pannello non ha uscite dimmerabili (tutte le luci `dimmable:false`, nessun `POS` negli `STATUS_OUTPUTS`). Il difetto resta confermato dal codice e dai test con il mock HB 2.4. **Fix:** `platform/matter-light-capability.ts`: al primo stato con livello, unregister osservato e poi register come `DimmableLight` sotto lo stesso UUID, serializzati dal gate F05; ai boot successivi la capability viene letta dal `context` della cache Matter.
 
 **Category:** ROBUSTNESS / SPEC (device type errato)
 **Files:** `src/platform/matter-device-mapper.ts`, `src/platform/matter-accessory-registry.ts`, `src/websocket/device-state-projector.ts`
@@ -316,7 +380,9 @@ Test: due sync consecutivi non devono emettere stati diversi dall'ultimo reale. 
 **Regression test:** registry: discovery `dimmable:false`, poi status con `POS`; atteso `DimmableLight` registrato.
 **Confidence:** High.
 
-## [P1] F05 — Race nella recovery esplicita del termostato: doppia registrazione dello stesso UUID
+## [P1] F05 — Race nella recovery esplicita del termostato: doppia registrazione dello stesso UUID — FIXED (non esercitato sul campo)
+
+**Stato sul campo:** non esercitato: nessuna `matterRecoveryRequests` è stata eseguita, perché avrebbe cambiato il device type dei 6 termostati nei controller. Il codice Homebridge installato (2.4.0) conferma il presupposto (UUID duplicato → `already registered`, solo loggato). **Fix:** `platform/matter-registration-gate.ts`, una registrazione in volo per `device.id`; i chiamanti concorrenti la attendono e poi seguono il normale percorso di update. Test con un mock fedele a HB 2.4 (`test/fixtures/hb24-matter-api.js`).
 
 **Category:** ROBUSTNESS (concurrency)
 **Files:** `src/platform/matter-accessory-registry.ts`, `src/platform/matter-thermostat-recovery-request.ts`
@@ -339,7 +405,9 @@ Test: due sync consecutivi non devono emettere stati diversi dall'ultimo reale. 
 **Regression test:** `repro-race-hb24.js` come test: atteso `Thermostat` nativo e un solo register effettivo.
 **Confidence:** High.
 
-## [P1] F06 — Scrittura del setpoint con la stagione sbagliata: modifica persa in estate, oppure il pannello passa a raffrescamento
+## [P1] F06 — Scrittura del setpoint con la stagione sbagliata: modifica persa in estate, oppure il pannello passa a raffrescamento — CONFIRMED (condizioni presenti sul campo), FIXED
+
+**Stato sul campo:** condizioni CONFIRMED: dalla debug capture, la cfg termostato id 1 (Sala, `thermostat_18`/`thermostat_34`) è in `ACT_SEA: SUM`, le cfg 2-5 in `WIN`. Il realtime `STATUS_TEMPERATURES.THERM.ACT_SEA` coincide con la cfg (nessun cambio di stagione in 15 minuti), quindi dopo un riavvio un setpoint su "Sala" avrebbe riscritto `SUM.TM` invariato. Il cambio di setpoint dal vivo non è stato eseguito per scelta dell'utente: con ACT_MODE forzato a MAN avrebbe acceso l'impianto. **Fix:** `ThermostatSeasonTracker`: la stagione è la più recente tra l'ultimo `WRITE_CFG` con ACK positivo e il realtime `ACT_SEA`, altrimenti la cfg in cache; la patch viene costruita per quella stagione; nessun hint prima dell'ACK.
 
 **Category:** ROBUSTNESS (controllo errato)
 **Files:** `src/websocket-client/thermostat-command-payload.ts`, `src/websocket-client/thermostat-write-payload.ts`, `src/websocket-client/command-service.ts`
@@ -475,7 +543,9 @@ Stessa dinamica con un ACK arrivato dopo un timeout.
 **Regression test:** `test/hap-accessories.test.js`.
 **Confidence:** High.
 
-## [P2] F14 — Recovery "not queryable": re-register dello stesso UUID senza unregister
+## [P2] F14 — Recovery "not queryable": re-register dello stesso UUID senza unregister — FIXED (verificato sul campo)
+
+**Stato sul campo:** il percorso è stato esercitato: il rename di `light_37` era stato rifiutato ("already registered", vedi F37) e il retry con unregister al primo tentativo l'ha recuperato (`retrying registration (1/2) [stale-endpoint purge]` → `registered`). Nota di precisione: in HB 2.4 un register fallito non lascia l'UUID nella mappa (`AccessoryManager` lo aggiunge solo a fine registrazione), quindi il caso scatta quando un endpoint esiste ma la probe sul cluster atteso fallisce (endpoint dell'altra forma, endpoint in chiusura). **Fix:** `removeBeforeReregister` prima del fallback e di ogni retry.
 
 **Category:** API CONTRACT VIOLATION
 **Files:** `src/platform/matter-registration-recovery.ts`, `src/platform/matter-accessory-registry.ts`
@@ -502,7 +572,9 @@ Stessa dinamica con un ACK arrivato dopo un timeout.
 **Regression test:** handler con client che rifiuta; atteso un `updateAccessoryState` con il setpoint precedente.
 **Confidence:** High.
 
-## [P2] F16 — Prune HAP immediato su sync parziale (rimozione irreversibile da HomeKit)
+## [P2] F16 — Prune HAP immediato su sync parziale (rimozione irreversibile da HomeKit) — presupposto CONFIRMED, aperto
+
+**Stato sul campo:** il pannello risponde a una READ con errore esplicito: `READ_RES PRG_THERMOSTATS` → `RESULT: FAIL, RESULT_DETAIL: CMD_NOT_AVAILABLE`, a ogni login (boot e reconnect). Tutte le altre READ hanno avuto risposta OK. Una `MULTI_TYPES` fallita non è stata osservata. Su questa installazione HAP è disabilitato sul child bridge (solo Matter), quindi l'impatto qui è nullo; resta aperto per le installazioni HAP.
 
 **Category:** ROBUSTNESS (partial sync)
 **Files:** `src/platform/accessory-registry.ts`, `src/platform/index.ts`
@@ -516,7 +588,9 @@ Stessa dinamica con un ACK arrivato dopo un timeout.
 **Regression test:** registry HAP con discovery solo zone, atteso nessuna rimozione di output.
 **Confidence:** Medium (dipende dal comportamento del firmware sotto carico; meccanismo certo).
 
-## [P2] F17 — Riscrittura non atomica di `config.json`
+## [P2] F17 — Riscrittura non atomica di `config.json` — osservato sul campo, aperto
+
+**Stato sul campo:** il reset di `generateDebugFile` ha riscritto `config.json` all'avvio (20:41) cambiando la formattazione dell'intero file (non più round-trip identico con indent 4) e senza scrittura atomica. Il contenuto è rimasto intatto.
 
 **Category:** ROBUSTNESS (persistence)
 **Files:** `src/platform/config-file-service.ts`
@@ -555,7 +629,9 @@ Stessa dinamica con un ACK arrivato dopo un timeout.
 **Regression test:** cache incompleta, atteso client creato senza preload.
 **Confidence:** High sul meccanismo; probabilità bassa.
 
-## [P2] F20 — La cfg del termostato in cache viene riscritta per intero: modifiche fatte dal pannello annullate
+## [P2] F20 — La cfg del termostato in cache viene riscritta per intero: modifiche fatte dal pannello annullate — NEEDS VERIFICATION, aperto
+
+**Stato sul campo:** non verificato: il test di setpoint dal vivo è stato saltato su richiesta dell'utente (avrebbe acceso riscaldamento o raffrescamento). La cfg letta al boot contiene `ACT_MODE, ACT_SEA, ID, MAN_HRS, SUM, TOF, WIN`.
 
 **Category:** ROBUSTNESS (stale state)
 **Files:** `src/websocket-client/command-service.ts`, `src/websocket-client/message-service.ts`
@@ -579,7 +655,9 @@ Stessa dinamica con un ACK arrivato dopo un timeout.
 **Suggested fix:** mappare il target sul setpoint coerente con la modalità e ignorare negli handler le variazioni del setpoint "non attivo".
 **Confidence:** High per la visualizzazione. NEEDS VERIFICATION per la doppia write: ordine di invocazione degli handler in Homebridge `ThermostatBehavior`.
 
-## [P2] F22 — PIN numerico in `config.json` scritto in chiaro nel log INFO, nel debug file e non scrubbato in telemetry
+## [P2] F22 — PIN numerico in `config.json` scritto in chiaro nel log INFO, nel debug file e non scrubbato in telemetry — NOT REPRODUCED sul campo, FIXED
+
+**Stato sul campo:** NOT REPRODUCED: qui il PIN è una stringa e viene mascherato (`"PIN":"**…"` nel log INFO, `***MASKED***` nella capture). Il PIN reale non compare nella debug capture; le 40 chiavi `PIN` non mascherate sono il flag di un carattere `SCENARIOS[].PIN`. **Fix:** `String(config.pin)` all'avvio; regex del log e capture tolleranti ai numeri.
 
 **Category:** SECURITY / PRIVACY
 **Files:** `src/log-levels.ts`, `src/debug-capture/raw-message-capture.ts`, `src/websocket-client/command-service.ts`, `src/platform/index.ts`
@@ -642,7 +720,9 @@ Homebridge termina il processo entro 5 s, quindi l'impatto è limitato.
 **Suggested fix:** `StatusTampered` da un campo di tamper reale del pannello, se disponibile, altrimenti 0. Serve una nota nel CHANGELOG: è un cambio visibile.
 **Confidence:** High sulla semantica.
 
-## [P3] F28 — I test inviano eventi al Sentry di produzione; `telemetry:false` non è verificato sul trasporto
+## [P3] F28 — I test inviano eventi al Sentry di produzione; `telemetry:false` non è verificato sul trasporto — CONFIRMED, aperto
+
+**Stato:** CONFIRMED: ogni `npm test` tenta 5 invii a `o4511676680699904.ingest.de.sentry.io`. In questa sessione tutti gli invii sono stati bloccati da un preload (`https.request`/`tls.connect`/`dns.lookup` → ENOTFOUND) più `https_proxy` verso una porta chiusa; nessun evento è partito.
 
 **Category:** TEST GAP / PRIVACY
 **Files:** `test/telemetry.test.js:117-150`, `src/telemetry.ts:3`
@@ -661,7 +741,9 @@ Homebridge termina il processo entro 5 s, quindi l'impatto è limitato.
 **Suggested fix:** allineare la doc (EN, IT e README); aggiungere `rewriteFramesIntegration`/scrub di `frame.filename`/`abs_path`; valutare l'opt-in se si punta allo stato "Verified".
 **Confidence:** High.
 
-## [P3] F30 — CI: Node 24 non testato (usato in release), Node 20 fuori supporto
+## [P3] F30 — CI: Node 24 non testato (usato in release), Node 20 fuori supporto — suite verde su Node 24, aperto (CI)
+
+**Stato:** la suite passa su Node 24.21.0 (lo stesso del container Homebridge) e su 26.8.1; la matrice CI non è stata modificata.
 
 **Category:** COMPATIBILITY
 **Files:** `.github/workflows/ci.yml:24` (`node: ['20','22']`), `release-publish.yml` (Node 24)
@@ -725,6 +807,43 @@ Homebridge termina il processo entro 5 s, quindi l'impatto è limitato.
 **Files:** `src/platform/index.ts:204-206`, `src/debug-capture/index.ts:53-65`, `src/platform/device-list-service.ts`
 **Evidence:** il `DebugCaptureManager` non viene conservato né fermato su `shutdown`, e i suoi timer non sono `unref`. Un riavvio durante la capture (fino a 30 min) perde il file. Il `JSON.stringify(…, null, 2)` finale è sincrono su tutti i messaggi (duplicati come `rawData` e `parsed`). Il timer di scrittura di `klares4-devices.json` non viene cancellato né eseguito allo shutdown, e la scrittura non è atomica. Il file non viene riletto dal plugin, quindi l'impatto è minimo.
 **Suggested fix:** fermare la capture e fare flush su `shutdown`; `unref()` dei timer.
+**Confidence:** High.
+
+---
+
+## [P1] F37 — Unregister "osservato" troppo presto: il register successivo viene rifiutato come `already registered` — FIXED (verificato sul campo)
+
+**Category:** API CONTRACT / RACE (trovato sul campo)
+**Files:** `src/platform/matter-topology-coordinator.ts`
+**Evidence (campo, rename di `light_37`):** `Unregistering 1 Matter accessory` → prima probe `getAccessoryState` già `undefined` → `register requested … [rename]` → `[Matter/ChildManager] Failed to register … "light_37" is already registered` → solo dopo `Unregistered Matter accessory: PC (light_37)`. Il rename è rimasto senza endpoint per circa 30 s, finché il retry F14 non l'ha recuperato. In `homebridge/dist/matter/server/AccessoryManager.js`, `unregisterAccessory` fa `await accessory.endpoint.close()` e solo dopo `deps.accessories.delete(uuid)`; durante la chiusura `StateManager.getAccessoryState` risponde già `undefined`.
+**Impact:** ogni rename, recovery o re-register dopo un unregister rischia il rifiuto. Senza il retry F14 (quindi nella rc.3 anche con la fix F01) il rename non si applica mai.
+**Fix:** dopo la prima assenza osservata il coordinator attende un periodo di assestamento (default 1000 ms, `KLARES4_MATTER_UNREGISTER_SETTLE_MS`) prima di considerare l'endpoint rimosso. Sul campo la chiusura richiede molto meno di 1 s.
+**Regression test:** `test/matter-registration-race.test.js` "F37 …" (il mock HB 2.4 modella la finestra di chiusura con `unregisterCloseMs`).
+**Verifica dopo la fix:** rename `PC Test Audit` → `PC Test Audit 2`: `register requested [rename]` e `registered` nello stesso secondo, zero `already registered`, nessun retry.
+**Confidence:** High.
+
+## [P1] F38 — Un salvataggio dalla Homebridge UI imposta `exposed: false` su tutti i `matterOverrides` (device poi potati da Matter) — FIXED
+
+**Category:** COMPATIBILITY / CONFIG INTEGRITY (trovato sul campo)
+**Files:** `config.schema.json` (`matterOverrides.items.exposed`), `src/platform/discovery-service.ts`
+**Evidence (campo):** stesso salvataggio UI di F02. Prima: 18 override `{ deviceId, name }` senza `exposed`. Dopo: tutti e 18 con `"exposed": false`. Lo schema dichiarava `exposed` come boolean senza default e la UI materializza la checkbox non toccata come `false`. Nello stesso salvataggio: aggiunta una voce `matterRecoveryRequests` senza `deviceId` (`{ generation: 1 }`, ignorata dal normalizzatore) e `matterUnregisterTimeoutMs: 3000` (default); `maxSeconds` è passato da 30 a 20 (probabilmente la modifica "innocua" dell'utente).
+**Impact:** al riavvio successivo i 16 contatti e 2 scenari con override risultano non esposti; il prune tracker li rimuove da Matter dopo 3 cicli (ogni boot o reconnect è un ciclo), e in Apple Home, Alexa e Google si perdono stanze e automazioni. L'installazione è stata protetta ripristinando subito il config; sull'host c'è un aggiornamento automatico dell'immagine alle 05:00 che avrebbe riavviato con il config rovinato.
+**Fix:** `"default": true` sulla checkbox (descrizione in UI: deselezionare per nascondere; se selezionata, forza l'esposizione anche con la categoria disattivata); warning all'avvio che elenca i device nascosti da un override, per individuare le configurazioni già colpite; test di schema che rifiuta boolean senza default negli item di array e mappe `additionalProperties`/`patternProperties`.
+**Round-trip UI del nuovo schema:** PENDING, da ripetere con un salvataggio dalla UI sulla build finale.
+**Confidence:** High.
+
+## [P3] F39 — Nessun timeout applicativo sulla connessione WebSocket
+
+**Evidence (campo):** con il traffico verso il pannello scartato, il tentativo `Attempting reconnection (attempt 1)` è rimasto appeso dalle 20:43:25 alle 20:45:38 (`connect ETIMEDOUT`, timeout TCP del kernel), prima di programmare il tentativo successivo.
+**Impact:** dopo un blackout di rete, la riconnessione può tardare fino a circa 2 minuti oltre il ritorno del pannello.
+**Suggested fix:** timeout di connessione e handshake (per esempio 10 s) in `connection-service.ts`, poi il normale backoff.
+**Confidence:** High.
+
+## [P3] F40 — Il file di debug riporta una versione obsoleta — FIXED
+
+**Evidence (campo):** `klares4-debug-*.json` → `"version": "1.1.9-beta0"` con il plugin 2.2.0-rc.3.
+**Impact:** diagnosi più difficili sui file allegati alle issue.
+**Fix:** `PLUGIN_VERSION_RAW` in `debug-capture/file-generator.ts`; test `test/debug-file-version.test.js`.
 **Confidence:** High.
 
 ---
@@ -851,6 +970,8 @@ Eseguita dopo il primo audit con due revisioni indipendenti in sola lettura, e c
 
 # Suggested roadmap
 
+> **Aggiornamento dopo la verifica sul campo.** I punti 1-8 e 10 di "Before stable release" sono corretti e coperti da test (per F10 vale il mock HB 2.4 condiviso `test/fixtures/hb24-matter-api.js`); a questi si aggiungono F37 e F38, trovati sul campo. Restano per la stable: il round-trip UI del nuovo schema (F02/F38) e un soak di qualche giorno con reconnect. Il resto della roadmap è invariato.
+
 **Before stable release** (ognuno con ragione concreta)
 
 1. F01 unregister (fatto: da committare con i test).
@@ -894,6 +1015,26 @@ Eseguita dopo il primo audit con due revisioni indipendenti in sola lettura, e c
 ---
 
 # Files changed
+
+**Fase di verifica sul campo e correzioni (2026-09-26)**
+
+| File | Motivo |
+|---|---|
+| `src/platform/matter-registration-gate.ts` (nuovo) | F05: una registrazione in volo per device |
+| `src/platform/matter-light-capability.ts` (nuovo) | F04: upgrade a `DimmableLight`, capability dalla cache |
+| `src/platform/matter-registration-recovery.ts` | F14: unregister prima di fallback e retry; `handleRegisterFailure` spostato qui dal registry (limite 350 righe) |
+| `src/platform/matter-topology-coordinator.ts` | F37: assestamento dopo la prima assenza osservata |
+| `src/platform/matter-accessory-registry.ts` | F03/F04/F05: gate, upgrade dimmer, stato di boot dalla cache |
+| `src/device-observation.ts`, `src/websocket-client/discovered-device.ts` (nuovi) | F03: placeholder di discovery e merge con lo stato noto |
+| `src/websocket-client/message-service.ts`, `src/websocket-client/index.ts`, `src/platform/accessory-registry.ts` | F03 |
+| `src/websocket-client/thermostat-write-payload.ts`, `thermostat-command-payload.ts`, `command-service.ts`, `thermostat-status-updater.ts`, `types.ts` | F06: `ThermostatSeasonTracker`, patch per la stagione attiva |
+| `src/log-levels.ts`, `src/debug-capture/raw-message-capture.ts`, `src/platform/index.ts` | F22 |
+| `src/platform/custom-names-config.ts` (nuovo), `src/platform/types.ts`, `discovery-service.ts`, `ksa-import-service.ts`, `config.schema.json` | F02, F38 |
+| `src/debug-capture/file-generator.ts` | F40 |
+| `README.md`, `docs/en/config-and-ui.md`, `docs/it/configurazione-e-ui.md`, `CHANGELOG.md` | documentazione utente (EN e IT) |
+| `test/fixtures/hb24-matter-api.js` (nuovo) e 8 file di test nuovi; `test/matter-accessory-registry.test.js` aggiornato | regressioni con semantica HB 2.4 |
+
+**Fase statica (commit precedente)**
 
 Nessun commit e nessun push, come richiesto.
 
