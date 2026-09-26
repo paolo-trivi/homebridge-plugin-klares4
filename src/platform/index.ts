@@ -81,6 +81,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 this.handlerService.createAccessoryHandler(accessory, device),
             updateAccessoryHandler: (handler, device): void =>
                 this.handlerService.updateAccessoryHandler(handler, device),
+            isDeviceExcluded: (device): boolean => this.discoveryService.isDeviceExcluded(device),
         });
         this.matterRegistry = new MatterAccessoryRegistry({
             api: this.api,

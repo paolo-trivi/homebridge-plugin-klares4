@@ -2,6 +2,13 @@ import type { API, Logger, PlatformAccessory } from 'homebridge';
 import { sanitizeHapDisplayName } from '../display-name';
 import { hasObservedState, mergeKnownState } from '../device-observation';
 import type { KseniaDevice } from '../types';
+import {
+    HAP_PRUNE_STALE_THRESHOLD_CYCLES,
+    cachedDevice,
+    discoveryFamily,
+    readMissedCycles,
+    writeMissedCycles,
+} from './hap-prune-policy';
 import type { AccessoryHandler } from './types';
 
 interface AccessoryRegistryOptions {
@@ -20,6 +27,8 @@ interface AccessoryRegistryOptions {
         handler: AccessoryHandler,
         device: KseniaDevice,
     ) => void;
+    /** Config exclusions: an excluded cached accessory is removed without waiting. */
+    isDeviceExcluded?: (device: KseniaDevice) => boolean;
 }
 
 export class AccessoryRegistry {
@@ -135,6 +144,13 @@ export class AccessoryRegistry {
         this.options.updateAccessoryHandler(handler, device);
     }
 
+    /**
+     * One prune pass per completed discovery sync (see `hap-prune-policy.ts`):
+     * only accessories of a discovery family that answered in this sync are
+     * candidates, and a candidate is removed after
+     * `HAP_PRUNE_STALE_THRESHOLD_CYCLES` consecutive missed syncs. Accessories
+     * excluded in the config are removed immediately.
+     */
     public pruneStaleAccessories(): void {
         // Safety net: a sync that discovered NOTHING is a failed/partial sync
         // (WS glitch, panel busy), not a panel with zero devices. Removing every
@@ -146,11 +162,63 @@ export class AccessoryRegistry {
             );
             return;
         }
-        for (const [uuid, accessory] of this.options.accessories) {
-            if (!this.options.activeDiscoveredUUIDs.has(uuid)) {
-                this.removeAccessory(accessory);
+        const answeredFamilies = this.answeredDiscoveryFamilies();
+        const counterChanged: PlatformAccessory[] = [];
+        let unanswered = 0;
+        let waiting = 0;
+        let removed = 0;
+
+        for (const [uuid, accessory] of [...this.options.accessories]) {
+            if (this.options.activeDiscoveredUUIDs.has(uuid)) {
+                if (writeMissedCycles(accessory, 0)) counterChanged.push(accessory);
+                continue;
             }
+            const device = cachedDevice(accessory);
+            if (device && this.options.isDeviceExcluded?.(device)) {
+                this.removeAccessory(accessory);
+                removed += 1;
+                continue;
+            }
+            if (device && !answeredFamilies.has(discoveryFamily(device.id))) {
+                unanswered += 1;
+                continue;
+            }
+            const missed = readMissedCycles(accessory) + 1;
+            if (missed < HAP_PRUNE_STALE_THRESHOLD_CYCLES) {
+                writeMissedCycles(accessory, missed);
+                counterChanged.push(accessory);
+                waiting += 1;
+                this.options.log.info(
+                    `Missing accessory: ${accessory.displayName} — absent for ${missed}/`
+                    + `${HAP_PRUNE_STALE_THRESHOLD_CYCLES} syncs, not removed yet`,
+                );
+                continue;
+            }
+            this.removeAccessory(accessory);
+            removed += 1;
         }
+
+        if (counterChanged.length > 0) {
+            // Persist the counters with the cached accessories (survive a restart).
+            this.options.api.updatePlatformAccessories?.(counterChanged);
+        }
+        if (unanswered > 0 || waiting > 0 || removed > 0) {
+            this.options.log.info(
+                `Accessory prune: removed=${removed} waiting=${waiting} `
+                + `keptCategoryNotAnswered=${unanswered}`,
+            );
+        }
+    }
+
+    /** Discovery families with at least one device seen in this sync. */
+    private answeredDiscoveryFamilies(): Set<string> {
+        const families = new Set<string>();
+        for (const uuid of this.options.activeDiscoveredUUIDs) {
+            const accessory = this.options.accessories.get(uuid);
+            const device = accessory ? cachedDevice(accessory) : undefined;
+            if (device) families.add(discoveryFamily(device.id));
+        }
+        return families;
     }
 
     public removeAccessory(accessory: PlatformAccessory): void {
