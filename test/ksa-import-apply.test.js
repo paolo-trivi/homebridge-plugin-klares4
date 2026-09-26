@@ -85,6 +85,44 @@ test('KSA custom names: re-applying the same import adds no duplicate rows', () 
     assert.deepEqual(mergeCustomNames(once, imported), once);
 });
 
+const ROOM_NAME_PATTERN = /^[a-z0-9_]+$/;
+
+test('KSA rooms: panel room names become MQTT-safe slugs and room mapping is not switched on', async () => {
+    const { runtime, service } = setup({});
+    await service.prepare(runtime, 'Lares4Complete');
+
+    const rooms = runtime.roomMapping.rooms;
+    assert.deepEqual(rooms.map((room) => room.roomName).sort(), ['cucina', 'sala_pranzo_ingresso_1']);
+    for (const room of rooms) assert.match(room.roomName, ROOM_NAME_PATTERN);
+    assert.notEqual(runtime.roomMapping.enabled, true);
+});
+
+test('KSA rooms: user-defined rooms and the enabled flag are never replaced', async () => {
+    const userMapping = { enabled: true, rooms: [{ roomName: 'soggiorno', devices: [{ deviceId: 'light_1' }] }] };
+    const { runtime, service, persisted } = setup({
+        roomMapping: userMapping,
+        ksaImport: { applyAtStartup: true },
+    });
+    await service.prepare(runtime, 'Lares4Complete');
+
+    assert.deepEqual(runtime.roomMapping, userMapping);
+    assert.deepEqual(persisted().roomMapping, userMapping);
+});
+
+test('KSA rooms: with no user rooms the panel rooms are persisted, enabled stays as the user set it', async () => {
+    const { runtime, service, persisted } = setup({
+        roomMapping: { enabled: false, rooms: [{}] },
+        ksaImport: { applyAtStartup: true },
+    });
+    await service.prepare(runtime, 'Lares4Complete');
+
+    const saved = persisted().roomMapping;
+    assert.equal(saved.enabled, false);
+    assert.deepEqual(saved.rooms.map((room) => room.roomName).sort(), ['cucina', 'sala_pranzo_ingresso_1']);
+    assert.deepEqual(saved.rooms.find((room) => room.roomName === 'cucina').devices, [{ deviceId: 'light_2' }]);
+    assert.equal(runtime.roomMapping.enabled, false);
+});
+
 function namesById(config) {
     assert.ok(Array.isArray(config.customNames));
     return Object.fromEntries(config.customNames.map((row) => [row.deviceId, row.name]));

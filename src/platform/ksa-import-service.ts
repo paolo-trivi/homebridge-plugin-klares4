@@ -8,7 +8,7 @@ import type { KsaSanitizedCache } from '../types';
 import type { PlatformConfigFileService } from './config-file-service';
 import type { Lares4Config } from './types';
 import { mergeCustomNames, type CustomNamesConfig } from './custom-names-config';
-import { applyExclusionSuggestions } from './ksa-config-merge';
+import { applyExclusionSuggestions, resolveKsaRoomMapping } from './ksa-config-merge';
 
 export class KsaImportService {
     private readonly cacheService: KsaCacheService;
@@ -62,7 +62,8 @@ export class KsaImportService {
         }
 
         if (importConfig.applyRoomMapping !== false) {
-            config.roomMapping = result.derivedConfig.roomMapping;
+            const roomMapping = resolveKsaRoomMapping(config.roomMapping, result.derivedConfig.roomMapping.rooms ?? []);
+            if (roomMapping) config.roomMapping = roomMapping;
         }
 
         if (importConfig.applyCustomNames) {
@@ -92,7 +93,11 @@ export class KsaImportService {
                 };
             }
             if (applyRoomMapping) {
-                platformConfig.roomMapping = result.derivedConfig.roomMapping;
+                const roomMapping = resolveKsaRoomMapping(
+                    platformConfig.roomMapping,
+                    result.derivedConfig.roomMapping.rooms ?? [],
+                );
+                if (roomMapping) platformConfig.roomMapping = roomMapping;
             }
             if (applyCustomNames) {
                 // Array form: the Homebridge UI drops the category map on its next save.

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import type { KsaSanitizedCache } from '../types';
+import { createDeviceSlug } from '../mqtt/topic-parser';
 import { determineOutputType } from '../websocket/device-state-projector';
 import type { KsaDerivedConfig, KsaImportResult, KsaMapRecord, ParsedKsaProgram } from './types';
 
@@ -82,10 +83,12 @@ function buildDerivedConfig(program: ParsedKsaProgram, cache: KsaSanitizedCache)
     const roomDevices = new Map<string, Set<string>>();
 
     for (const map of cache.roomDeviceRefs) {
-        const roomName = ownValue(roomNameById, map.roomId);
-        if (!roomName) {
+        const panelRoomName = ownValue(roomNameById, map.roomId);
+        if (!panelRoomName) {
             continue;
         }
+        // Room names end up in MQTT topics: '/', '+', '#' and spaces must never reach them.
+        const roomName = createDeviceSlug(panelRoomName) || `room_${createDeviceSlug(map.roomId) || 'unnamed'}`;
         const resolvedDeviceIds = resolveRoomMapToDeviceIds(map, outputById);
         if (resolvedDeviceIds.length === 0) {
             continue;
