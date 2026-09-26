@@ -59,6 +59,7 @@ export function createInitialWebSocketClientState(
         domusLatest: new Map(),
         thermostatRealtimeByOutputId: new Map(),
         thermostatRealtimeSnapshotById: new Map(),
+        thermostatRealtimeSeasonByOutputId: new Map(),
         missingThermostatProgramWarningOutputIds: new Set(),
         scenarioCategoryById: new Map(),
     };

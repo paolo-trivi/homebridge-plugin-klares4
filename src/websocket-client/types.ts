@@ -117,6 +117,12 @@ export interface WebSocketClientState {
         hvacOutputActive?: boolean;
         updatedAt: number;
     }>;
+    /**
+     * Realtime ACT_SEA per OUTPUT thermostat id, stamped when the season last
+     * changed. STATUS_TEMPERATURES is keyed by DOMUS sensor id, which can equal
+     * another thermostat's cfg id, so the season is only looked up by output.
+     */
+    thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number }>;
     missingThermostatProgramWarningOutputIds: Set<string>;
     /** Normalized CAT of every scenario listed by MULTI_TYPES, exposed or not. */
     scenarioCategoryById: Map<string, string>;

@@ -28,6 +28,7 @@ export class ThermostatStatusUpdater {
             this.deps.state.pendingTemperatureStatuses.delete(entry.ID);
             const patch = buildThermostatPatch(entry);
             for (const outputThermostatId of thermostatOutputIds) {
+                this.recordRealtimeSeason(outputThermostatId, entry);
                 const thermostatDevice = this.deps.state.devices.get(`thermostat_${outputThermostatId}`);
                 if (!thermostatDevice || thermostatDevice.type !== 'thermostat') {
                     continue;
@@ -134,12 +135,19 @@ export class ThermostatStatusUpdater {
         return undefined;
     }
 
+    private recordRealtimeSeason(outputThermostatId: string, entry: KseniaTemperatureStatusRaw): void {
+        const season = parseSeason(entry);
+        if (!season) return;
+        const seasons = this.deps.state.thermostatRealtimeSeasonByOutputId;
+        if (seasons.get(outputThermostatId)?.season === season) return;
+        seasons.set(outputThermostatId, { season, updatedAt: Date.now() });
+    }
+
     private recordRealtimeSnapshot(entry: KseniaTemperatureStatusRaw): void {
         const previous = this.deps.state.thermostatRealtimeSnapshotById.get(entry.ID);
-        const actSea = entry.THERM?.ACT_SEA?.toUpperCase();
         const next = {
             mode: parseThermostatMode(entry),
-            season: actSea === 'SUM' ? 'SUM' as const : actSea === 'WIN' ? 'WIN' as const : undefined,
+            season: parseSeason(entry),
             targetTemperature: parseFloatInRange(entry.THERM?.TEMP_THR?.VAL, 5, 40),
             hvacOutputActive: parseThermostatOutputActive(entry.THERM?.OUT_STATUS),
             updatedAt: Date.now(),
@@ -180,6 +188,11 @@ function buildThermostatPatch(entry: KseniaTemperatureStatusRaw): Partial<{
         mode: parseThermostatMode(entry),
         hvacOutputActive: parseThermostatOutputActive(entry.THERM?.OUT_STATUS),
     };
+}
+
+function parseSeason(entry: KseniaTemperatureStatusRaw): 'WIN' | 'SUM' | undefined {
+    const actSea = entry.THERM?.ACT_SEA?.toUpperCase();
+    return actSea === 'SUM' ? 'SUM' : actSea === 'WIN' ? 'WIN' : undefined;
 }
 
 function parseThermostatMode(entry: KseniaTemperatureStatusRaw): ThermostatMode | undefined {

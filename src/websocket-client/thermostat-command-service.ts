@@ -55,7 +55,9 @@ export class ThermostatCommandService {
         await this.deps.commandDispatcher.enqueueDeviceCommand(thermostatId, async (): Promise<void> => {
             await this.primeThermostatConfigCache(commandThermostatId);
             const existingCfg = this.deps.state.thermostatCfgById.get(commandThermostatId);
-            const realtime = this.deps.state.thermostatRealtimeSnapshotById?.get(commandThermostatId);
+            // By output id: the realtime snapshot map is keyed by DOMUS sensor id,
+            // which on swapped pairs is another thermostat's cfg id.
+            const realtime = this.deps.state.thermostatRealtimeSeasonByOutputId?.get(outputThermostatId);
             const cfgEntry = buildThermostatSetpointCommandPayload({
                 systemThermostatId: commandThermostatId,
                 temperature: safeTemperature,
