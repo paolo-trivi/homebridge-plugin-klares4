@@ -12,7 +12,14 @@ const SENSITIVE_KEYS = /^(pin|password|token|secret|ip|ipaddress|host|hostname|u
 const URL_PATTERN = /\b(?:wss?|https?):\/\/[^\s"')]+/gi;
 const IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g;
 
-let initialized = false;
+/**
+ * Dedicated client + scope instead of `Sentry.init`: Homebridge runs many
+ * plugins in one process, and `init` installs a process-global client that
+ * another plugin's `init` can replace (or that would receive its events).
+ * Nothing here touches the global carrier.
+ */
+let client: Sentry.NodeClient | undefined;
+let scope: Sentry.Scope | undefined;
 /** Test-only transport factory; production always uses Sentry's Node transport. */
 let transportOverride: NodeOptions['transport'] | undefined;
 /** Exact config-derived strings (panel IP/host, PIN, sender) scrubbed from every text field. */
@@ -71,6 +78,12 @@ export function sanitizeEventData(event: Sentry.ErrorEvent): Sentry.ErrorEvent |
         scrubRecordValues(event.extra);
     }
 
+    // Tags: klares4 sets none, but tags another plugin put on the shared
+    // global/isolation scope are merged into every event
+    if (event.tags) {
+        scrubRecordValues(event.tags);
+    }
+
     // Scrub sensitive keys and string values from contexts
     if (event.contexts) {
         for (const ctxName of Object.keys(event.contexts)) {
@@ -111,46 +124,58 @@ export function initTelemetry(telemetryEnabled: boolean | undefined, version: st
         sensitiveValues = sensitive.filter((v): v is string => typeof v === 'string' && v.length >= 3);
     }
 
-    if (telemetryEnabled === false || initialized) {
+    if (telemetryEnabled === false || scope) {
         return;
     }
 
-    Sentry.init({
+    const nodeClient = new Sentry.NodeClient({
         dsn: SENTRY_DSN,
         release: `homebridge-plugin-klares4@${version}`,
         environment: 'production',
         sampleRate: 1.0,
-        ...(transportOverride ? { transport: transportOverride } : {}),
-        // Disable all default integrations that could capture HTTP, console, etc.
-        defaultIntegrations: false,
+        includeServerName: false,
+        transport: transportOverride ?? Sentry.makeNodeTransport,
+        stackParser: Sentry.defaultStackParser,
+        // Only event processors scoped to this client: nothing that captures
+        // HTTP, console or global handlers, or patches process-wide globals.
         integrations: [
             Sentry.linkedErrorsIntegration(),
             Sentry.dedupeIntegration(),
-            Sentry.inboundFiltersIntegration(),
-            Sentry.functionToStringIntegration(),
+            Sentry.eventFiltersIntegration(),
         ],
         beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
             return sanitizeEventData(event);
         },
     });
+    const isolatedScope = new Sentry.Scope();
+    isolatedScope.setClient(nodeClient);
+    // Integrations are set up by init(), which must follow setClient().
+    nodeClient.init();
 
-    initialized = true;
+    client = nodeClient;
+    scope = isolatedScope;
 }
 
 /** Reports an error to Sentry. No-op when telemetry is disabled. */
 export function captureError(error: unknown, context?: Record<string, string>): void {
-    if (!initialized) {
+    if (!scope) {
         return;
     }
-    Sentry.captureException(error, context ? { extra: context } : undefined);
+    if (context) {
+        const eventScope = scope.clone();
+        eventScope.setExtras(context);
+        eventScope.captureException(error);
+        return;
+    }
+    scope.captureException(error);
 }
 
 /** Sends an informational message to Sentry. No-op when telemetry is disabled. */
 export function captureMessage(msg: string, level?: 'info' | 'warning' | 'error'): void {
-    if (!initialized) {
+    if (!scope) {
         return;
     }
-    Sentry.captureMessage(msg, level ?? 'info');
+    scope.captureMessage(msg, level ?? 'info');
 }
 
 /**
@@ -159,11 +184,13 @@ export function captureMessage(msg: string, level?: 'info' | 'warning' | 'error'
  * Never throws; the returned promise never rejects and may be ignored.
  */
 export function closeTelemetry(): Promise<void> {
-    if (!initialized) {
+    const closingClient = client;
+    client = undefined;
+    scope = undefined;
+    if (!closingClient) {
         return Promise.resolve();
     }
-    initialized = false;
-    return Sentry.close(2000).then(
+    return Promise.resolve(closingClient.close(2000)).then(
         () => undefined,
         () => undefined, // swallow — never block shutdown
     );
@@ -174,7 +201,7 @@ export function closeTelemetry(): Promise<void> {
  * @internal
  */
 export function _resetForTesting(): void {
-    initialized = false;
+    void closeTelemetry();
     sensitiveValues = [];
 }
 

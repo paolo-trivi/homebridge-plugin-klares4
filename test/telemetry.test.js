@@ -281,3 +281,62 @@ test('sanitizeEventData strips compound sensitive keys (ipAddress, hostname, dev
   assert.equal(result.extra.deviceName, undefined);
   assert.equal(result.extra.step, 'x');
 });
+
+// ---------------------------------------------------------------------------
+// isolation from other plugins sharing the Homebridge process (F18)
+// ---------------------------------------------------------------------------
+
+test('telemetry keeps its own client when another plugin calls Sentry.init afterwards', async () => {
+  const Sentry = require('@sentry/node');
+  const foreign = [];
+  _resetForTesting();
+  resetTransport();
+
+  initTelemetry(true, '1.0.0');
+  Sentry.init({
+    dsn: 'https://public@o0.ingest.example.invalid/1',
+    defaultIntegrations: false,
+    skipOpenTelemetrySetup: true,
+    transport: () => ({
+      send: async (envelope) => {
+        foreign.push(envelope);
+        return { statusCode: 200 };
+      },
+      flush: async () => true,
+    }),
+  });
+
+  captureError(new Error('klares4 error'));
+  Sentry.captureException(new Error('other plugin error'));
+  await Sentry.flush(2000);
+  await closeTelemetry();
+  await Sentry.close(2000);
+
+  const ours = sentEvents().map((event) => event.exception.values[0].value);
+  const theirs = foreign
+    .flatMap(([, items]) => items)
+    .filter(([header]) => header.type === 'event')
+    .map(([, event]) => event.exception.values[0].value);
+  assert.deepEqual(ours, ['klares4 error'], 'klares4 events must reach only the klares4 client');
+  assert.deepEqual(theirs, ['other plugin error'], 'other plugins must never receive klares4 events');
+  _resetForTesting();
+});
+
+test('initTelemetry does not install a process-global Sentry client', async () => {
+  const Sentry = require('@sentry/node');
+  _resetForTesting();
+  resetTransport();
+  const before = Sentry.getClient();
+  initTelemetry(true, '1.0.0');
+  assert.equal(Sentry.getClient(), before, 'the global Sentry client must be left untouched');
+  await closeTelemetry();
+});
+
+test('sanitizeEventData scrubs tags merged from a shared global scope', () => {
+  _resetForTesting();
+  const event = { tags: { host: 'lares.local', note: 'seen at 10.0.0.7', component: 'ws' } };
+  const result = sanitizeEventData(event);
+  assert.equal(result.tags.host, undefined);
+  assert.equal(result.tags.note, 'seen at [ip]');
+  assert.equal(result.tags.component, 'ws');
+});
