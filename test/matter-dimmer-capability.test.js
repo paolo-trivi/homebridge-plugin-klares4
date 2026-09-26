@@ -72,3 +72,38 @@ test('F04: a plain on/off light is never re-registered', async () => {
     assert.equal(hb.registerCalls.length, 1);
     assert.deepEqual(hb.unregisterCalls, []);
 });
+
+test('F04: a level reported while the on/off registration is still pending upgrades once it completes', async () => {
+    const hb = makeHb24MatterApi();
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+
+    await registry.addOrUpdateAccessory(light({ on: false, dimmable: false }));
+    assert.equal(registry.getStatus('light_5'), 'pending');
+    await registry.updateAccessoryState(light({ on: true, dimmable: true, brightness: 60 }));
+    await delay(700);
+
+    assert.deepEqual(hb.log, []);
+    assert.equal(hb.endpoints.get('light_5').deviceType.name, 'DimmableLight');
+    assert.equal(registry.getStatus('light_5'), 'registered');
+    // No LevelControl write may ever target the OnOffLight endpoint.
+    assert.deepEqual(hb.rejectedUpdates, []);
+});
+
+test('F04: a re-discovery that renames the light does not disable the dimmer upgrade', async () => {
+    const hb = makeHb24MatterApi();
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+
+    await registry.addOrUpdateAccessory(light({ on: false, dimmable: false }));
+    await delay(150);
+    assert.equal(registry.getStatus('light_5'), 'registered');
+
+    // Reconnect: READ_RES carries a new name, the status already knows the level.
+    await registry.addOrUpdateAccessory({ ...light({ on: true, dimmable: true, brightness: 60 }), name: 'Faretti Cucina' });
+    await delay(150);
+    assert.deepEqual(hb.rejectedUpdates, [], 'no levelControl write to an OnOffLight endpoint');
+
+    await registry.updateAccessoryState({ ...light({ on: true, dimmable: true, brightness: 60 }), name: 'Faretti Cucina' });
+    await delay(600);
+    assert.deepEqual(hb.log, []);
+    assert.equal(hb.endpoints.get('light_5').deviceType.name, 'DimmableLight');
+});

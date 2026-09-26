@@ -2,8 +2,9 @@ import type { API, Logger } from 'homebridge';
 import type { MatterAccessory } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
-import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor, hasAccessoryMetadataChanged } from './matter-device-mapper';
-import { buildStateUpdates, mergeStateUpdates } from './matter-state-updates';
+import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } from './matter-device-mapper';
+import { buildStateUpdates } from './matter-state-updates';
+import { enqueueDeviceState, refreshRegistrationMetadata } from './matter-registry-state';
 import {
     handleMissingRegisteredAccessory,
     handleRegisterFailure,
@@ -301,14 +302,15 @@ export class MatterAccessoryRegistry {
         this.stateUpdateQueue.markReadyAfterBootstrap(reg);
         this.log.info(`[Matter] registered: ${reg.displayName}`);
         this.stateUpdateQueue.scheduleFlush(uuid);
+        // A level reported while the registration was pending was only queued.
+        const latest = reg.matterAccessory.context?.device as KseniaDevice | undefined;
+        if (latest && needsDimmableUpgrade(reg, latest)) void this.updateAccessoryState(latest);
     }
 
     private enqueueStateFor(device: KseniaDevice): void {
         const reg = this.registrations.get(device.id);
         if (!reg || !hasObservedState(device)) return;
-        reg.matterAccessory.context.device = device;
-        const fallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
-        mergeStateUpdates(reg.pendingStateUpdates, device, fallback);
+        enqueueDeviceState(reg, device, device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id));
     }
 
     private refreshAccessoryMetadata(device: KseniaDevice, reg: MatterRegistration): void {
@@ -317,13 +319,8 @@ export class MatterAccessoryRegistry {
             ? mapThermostatAsTemperatureSensor(device as KseniaThermostat, this.mapperDeps())
             : deviceToMatterAccessory(device, this.mapperDeps());
         if (!matterAccessory) return;
-        if (!hasAccessoryMetadataChanged(reg.matterAccessory, matterAccessory)) {
-            this.pruneTracker.recordMetadataUnchanged();
-            return;
-        }
-        this.pruneTracker.recordMetadataChanged();
-        reg.matterAccessory = matterAccessory;
-        reg.displayName = matterAccessory.displayName;
+        if (refreshRegistrationMetadata(reg, matterAccessory)) this.pruneTracker.recordMetadataChanged();
+        else this.pruneTracker.recordMetadataUnchanged();
     }
 
     private fmtErr(err: unknown): string {

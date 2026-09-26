@@ -28,8 +28,10 @@ export function mergeStateUpdates(
     pending: PendingMatterStateUpdate[],
     device: KseniaDevice,
     thermostatAsFallback: boolean,
+    hasCluster: (clusterName: string) => boolean = () => true,
 ): void {
     for (const update of buildStateUpdates(device, thermostatAsFallback)) {
+        if (!hasCluster(update.clusterName)) continue;
         const idx = pending.findIndex(
             (p) => p.clusterName === update.clusterName && p.partId === update.partId,
         );
