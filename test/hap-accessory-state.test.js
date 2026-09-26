@@ -83,3 +83,49 @@ test('cover and gate: building the handler never runs their own write handlers',
     assert.equal(covering.getCharacteristic(Characteristic.PositionState).value, Characteristic.PositionState.STOPPED);
     assert.equal(gateAccessory.getService(Service.Switch).getCharacteristic(Characteristic.On).value, false);
 });
+
+function coverDevice(status) {
+    return { id: 'cover_7', type: 'cover', name: 'Tapparella', description: '', status: { ...status } };
+}
+
+test('cover: a command sent outside HomeKit (MQTT) publishes the new TargetPosition', async () => {
+    const wsClient = { moveCover: async () => undefined };
+    const accessory = platformAccessory(coverDevice({ position: 20, state: 'stopped' }));
+    const handler = new CoverAccessory(platform(wsClient), accessory);
+    try {
+        await handler.setTargetPosition(80); // what the MQTT command executor calls
+        const covering = accessory.getService(Service.WindowCovering);
+        assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 80);
+        assert.equal(covering.getCharacteristic(Characteristic.PositionState).value, Characteristic.PositionState.INCREASING);
+    } finally {
+        handler.dispose();
+    }
+});
+
+test('cover: the panel target (TPOS) is published even when the position has not moved yet', () => {
+    const accessory = platformAccessory(coverDevice({ position: 20, state: 'stopped' }));
+    const handler = new CoverAccessory(platform(undefined), accessory);
+    const covering = accessory.getService(Service.WindowCovering);
+
+    // Movement started from the keypad: POS still 20, TPOS already 80.
+    handler.updateStatus(coverDevice({ position: 20, targetPosition: 80, state: 'opening' }));
+    assert.equal(covering.getCharacteristic(Characteristic.CurrentPosition).value, 20);
+    assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 80);
+    assert.equal(covering.getCharacteristic(Characteristic.PositionState).value, Characteristic.PositionState.INCREASING);
+
+    // Stopped half way: target follows the panel back to the real position.
+    handler.updateStatus(coverDevice({ position: 50, targetPosition: 50, state: 'stopped' }));
+    assert.equal(covering.getCharacteristic(Characteristic.CurrentPosition).value, 50);
+    assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 50);
+    assert.equal(covering.getCharacteristic(Characteristic.PositionState).value, Characteristic.PositionState.STOPPED);
+});
+
+test('cover: without a panel target the TargetPosition falls back to the position', () => {
+    const accessory = platformAccessory(coverDevice({ position: 30, state: 'stopped' }));
+    const handler = new CoverAccessory(platform(undefined), accessory);
+    const covering = accessory.getService(Service.WindowCovering);
+    covering.updateCharacteristic(Characteristic.TargetPosition, 90); // stale value left by a controller
+
+    handler.updateStatus(coverDevice({ position: 30, state: 'stopped' }));
+    assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 30);
+});

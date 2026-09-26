@@ -106,6 +106,9 @@ export class CoverAccessory {
             }
             await this.platform.wsClient.moveCover(this.device.id, targetPosition);
             this.platform.log.info(`${this.device.name}: Moving to ${targetPosition}%`);
+            // Commands from MQTT call this method directly: HomeKit only learns
+            // the new target if it is pushed.
+            this.service.updateCharacteristic(this.platform.Characteristic.TargetPosition, targetPosition);
 
             this.simulateMovement(targetPosition);
         } catch (error: unknown) {
@@ -207,21 +210,21 @@ export class CoverAccessory {
         }
 
         // Only update position/target from firmware when simulation is not active,
-        // to avoid the simulation and real firmware updates conflicting
+        // to avoid the simulation and real firmware updates conflicting.
+        // The target follows the panel (TPOS) on its own: a movement started
+        // from the keypad changes TPOS before POS.
         if (!this.moveInterval) {
-            if (this.device.status?.position !== this.currentPosition) {
-                this.currentPosition = this.device.status?.position ?? 0;
-                this.targetPosition = this.device.status?.position ?? 0;
+            this.currentPosition = this.device.status?.position ?? 0;
+            this.targetPosition = this.device.status?.targetPosition ?? this.currentPosition;
 
-                this.service.updateCharacteristic(
-                    this.platform.Characteristic.CurrentPosition,
-                    this.currentPosition,
-                );
-                this.service.updateCharacteristic(
-                    this.platform.Characteristic.TargetPosition,
-                    this.targetPosition,
-                );
-            }
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.CurrentPosition,
+                this.currentPosition,
+            );
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.TargetPosition,
+                this.targetPosition,
+            );
         }
 
         switch (this.device.status?.state) {
@@ -231,8 +234,12 @@ export class CoverAccessory {
             case 'closing':
                 this.positionState = 0;
                 break;
+            case 'stopped':
+                this.positionState = 2;
+                break;
             default:
-                this.positionState = 2; // stopped
+                // No panel state: keep the simulated direction while it runs.
+                if (!this.moveInterval) this.positionState = 2;
         }
 
         this.service.updateCharacteristic(
