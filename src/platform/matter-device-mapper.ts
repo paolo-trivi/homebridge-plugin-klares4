@@ -76,6 +76,18 @@ interface MapperDeps {
      * mapper falls back to the module-level incremental registry.
      */
     resolveDisplayName?: (device: KseniaDevice) => string;
+    /**
+     * Latest known snapshot for a device ID. Homebridge registers handlers once
+     * per endpoint, so they outlive the device captured at mapping time.
+     */
+    getLatestDevice?: (id: string) => KseniaDevice | undefined;
+    /** Re-publish the known state of a device after a command the panel refused. */
+    republishState?: (id: string) => void;
+}
+
+function latestSnapshot<T extends KseniaDevice>(device: T, deps: MapperDeps): T {
+    const latest = deps.getLatestDevice?.(device.id);
+    return latest?.type === device.type ? latest as T : device;
 }
 
 const DEFAULT_MOMENTARY_AUTO_OFF_MS = 500;
@@ -223,7 +235,11 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
         // `refreshAccessoryMetadata` — share its state, which is what makes the
         // echo-suppression survive the multi-second WRITE_CFG round-trip.
         handlers: {
-            thermostat: buildThermostatHandlers({ device, supportsCooling, log, getWsClient, tracker: thermostatEchoTracker }),
+            thermostat: buildThermostatHandlers({
+                device, supportsCooling, log, getWsClient, tracker: thermostatEchoTracker,
+                getDevice: () => latestSnapshot(device, deps),
+                republish: () => deps.republishState?.(device.id),
+            }),
         },
     };
 }

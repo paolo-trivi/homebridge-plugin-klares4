@@ -1,4 +1,4 @@
-import type { MatterAccessory } from 'homebridge';
+import type { Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import { hasAccessoryMetadataChanged } from './matter-device-mapper';
 import type { MatterRegistration } from './matter-registration-recovery';
@@ -36,4 +36,26 @@ export function refreshRegistrationMetadata(reg: MatterRegistration, mapped: Mat
     };
     reg.displayName = mapped.displayName;
     return true;
+}
+
+/**
+ * Includes the *post-sanitisation* displayName + length so register failures
+ * can be diagnosed without re-deriving the sanitiser output: the original
+ * `device.name` may exceed Matter's 32-char nodeLabel limit while the
+ * displayName actually sent to matter.js does not.
+ */
+export function logRegisterRequested(
+    log: Logger,
+    device: KseniaDevice,
+    matterName: string,
+    flags: { fromCache: boolean; fallback: boolean; isRename: boolean },
+): void {
+    const nameAnnotation = matterName !== device.name
+        ? ` -> "${matterName}" [${matterName.length}ch]`
+        : ` [${matterName.length}ch]`;
+    log.info(
+        `[Matter] register requested: ${device.name}${nameAnnotation} `
+        + `(${device.type}, uuid=${device.id})`
+        + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.isRename ? ' [rename]' : ''}`,
+    );
 }

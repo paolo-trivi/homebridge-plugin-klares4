@@ -192,10 +192,21 @@ export interface ThermostatMatterState {
  *
  * @param device Lares4 thermostat device
  */
+/**
+ * The single Lares4 target is the cooling setpoint only in cool mode on a
+ * cooling-capable zone; otherwise it is the heating setpoint.
+ */
+export function isCoolingSetpointActive(supportsCooling: boolean, mode: DomainThermostatMode | undefined): boolean {
+    return supportsCooling && mode === 'cool';
+}
+
 export function buildThermostatMatterState(device: KseniaThermostat): ThermostatMatterState {
+    const supportsCooling = thermostatSupportsCooling(device);
+    const coolActive = isCoolingSetpointActive(supportsCooling, device.mode);
     // Convert + clamp to absolute Matter bounds, with safe fallbacks for null/undefined/NaN.
     const localTempC = coerceToFiniteNumber(device.currentTemperature) ?? DEFAULT_LOCAL_TEMPERATURE_C;
-    const heatingTargetC = coerceToFiniteNumber(device.targetTemperature) ?? DEFAULT_HEATING_SETPOINT_C;
+    const targetC = coerceToFiniteNumber(device.targetTemperature)
+        ?? (coolActive ? DEFAULT_COOLING_SETPOINT_C : DEFAULT_HEATING_SETPOINT_C);
 
     const heatMinCenti = Math.round(DEFAULT_MIN_HEAT_C * 100);
     const heatMaxCenti = Math.round(DEFAULT_MAX_HEAT_C * 100);
@@ -204,23 +215,35 @@ export function buildThermostatMatterState(device: KseniaThermostat): Thermostat
     const deadbandCenti = Math.round(DEFAULT_DEADBAND_C * 100);
 
     const localTempCenti = clampMatterTemperature(toMatterTemperatureCelsius(localTempC), TEMP_ABS_MIN_CENTI, TEMP_ABS_MAX_CENTI);
-    const heatingSetpointCenti = clampMatterTemperature(toMatterTemperatureCelsius(heatingTargetC), heatMinCenti, heatMaxCenti);
+    let coolingTargetCenti: number;
+    let enforcedHeatingSetpointCenti: number;
+    if (coolActive) {
+        // Cool mode: the target is the cooling setpoint; heating sits at least a
+        // deadband below it (always reachable: coolMin - deadband > heatMin).
+        coolingTargetCenti = clampMatterTemperature(toMatterTemperatureCelsius(targetC), coolMinCenti, coolMaxCenti);
+        enforcedHeatingSetpointCenti = clampMatterTemperature(
+            Math.min(Math.round(DEFAULT_HEATING_SETPOINT_C * 100), coolingTargetCenti - deadbandCenti),
+            heatMinCenti,
+            heatMaxCenti,
+        );
+    } else {
+        const heatingSetpointCenti = clampMatterTemperature(toMatterTemperatureCelsius(targetC), heatMinCenti, heatMaxCenti);
 
-    // AUTO-feature invariant: occupiedCoolingSetpoint - occupiedHeatingSetpoint >= minSetpointDeadBand.
-    // If the natural cooling default would violate this, push it up to heating + deadband.
-    const coolingTargetCenti = clampMatterTemperature(
-        Math.max(Math.round(DEFAULT_COOLING_SETPOINT_C * 100), heatingSetpointCenti + deadbandCenti),
-        coolMinCenti,
-        coolMaxCenti,
-    );
+        // AUTO-feature invariant: occupiedCoolingSetpoint - occupiedHeatingSetpoint >= minSetpointDeadBand.
+        // If the natural cooling default would violate this, push it up to heating + deadband.
+        coolingTargetCenti = clampMatterTemperature(
+            Math.max(Math.round(DEFAULT_COOLING_SETPOINT_C * 100), heatingSetpointCenti + deadbandCenti),
+            coolMinCenti,
+            coolMaxCenti,
+        );
 
-    // If after clamping the cool side, the gap is still smaller than the deadband
-    // (only possible at the very top of the cooling range), drag heating down instead.
-    const enforcedHeatingSetpointCenti = (coolingTargetCenti - heatingSetpointCenti < deadbandCenti)
-        ? Math.max(heatMinCenti, coolingTargetCenti - deadbandCenti)
-        : heatingSetpointCenti;
+        // If after clamping the cool side, the gap is still smaller than the deadband
+        // (only possible at the very top of the cooling range), drag heating down instead.
+        enforcedHeatingSetpointCenti = (coolingTargetCenti - heatingSetpointCenti < deadbandCenti)
+            ? Math.max(heatMinCenti, coolingTargetCenti - deadbandCenti)
+            : heatingSetpointCenti;
+    }
 
-    const supportsCooling = thermostatSupportsCooling(device);
     const controlSequence = supportsCooling
         ? CONTROL_SEQ_COOLING_AND_HEATING
         : CONTROL_SEQ_HEATING_ONLY;

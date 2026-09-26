@@ -4,7 +4,7 @@ import type { KseniaDevice, KseniaThermostat } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates } from './matter-state-updates';
-import { enqueueDeviceState, refreshRegistrationMetadata } from './matter-registry-state';
+import { enqueueDeviceState, logRegisterRequested, refreshRegistrationMetadata } from './matter-registry-state';
 import {
     handleMissingRegisteredAccessory,
     handleRegisterFailure,
@@ -195,7 +195,17 @@ export class MatterAccessoryRegistry {
             momentaryAutoOffMs: this.momentaryAutoOffMs,
             thermostatEchoTracker: this.thermostatEchoTracker,
             resolveDisplayName: (device: KseniaDevice) => this.nameService.resolveName(device),
+            getLatestDevice: (id: string) => this.registrations.get(id)?.matterAccessory.context?.device as KseniaDevice | undefined,
+            republishState: (id: string) => this.republishKnownState(id),
         };
+    }
+
+    /** Pushes the last observed state again, e.g. after the panel refused a Matter command. */
+    private republishKnownState(uuid: string): void {
+        const device = this.registrations.get(uuid)?.matterAccessory.context?.device as KseniaDevice | undefined;
+        if (!device) return;
+        this.enqueueStateFor(device);
+        this.stateUpdateQueue.scheduleFlush(uuid);
     }
 
     private registerAccessory(device: KseniaDevice, isRename = false): Promise<void> {
@@ -242,19 +252,7 @@ export class MatterAccessoryRegistry {
             if (fromCache) this.pruneTracker.recordCachedRestore();
             else this.pruneTracker.recordNewlyRegistered();
         }
-        // Include the *post-sanitisation* displayName + length so register failures
-        // can be diagnosed without re-deriving the sanitiser output: the original
-        // `device.name` may exceed Matter's 32-char nodeLabel limit while the
-        // displayName actually sent to matter.js does not.
-        const matterName = matterAccessory.displayName;
-        const nameAnnotation = matterName !== device.name
-            ? ` -> "${matterName}" [${matterName.length}ch]`
-            : ` [${matterName.length}ch]`;
-        this.log.info(
-            `[Matter] register requested: ${device.name}${nameAnnotation} `
-            + `(${device.type}, uuid=${device.id})`
-            + `${fromCache ? ' [cache restore]' : ''}${persistedFallback ? ' [fallback]' : ''}${isRename ? ' [rename]' : ''}`,
-        );
+        logRegisterRequested(this.log, device, matterAccessory.displayName, { fromCache, fallback: persistedFallback, isRename });
         // We must always call registerPlatformAccessories — the MatterServer keeps
         // a runtime accessory map that is populated only on register. The Homebridge
         // accessory cache (configureMatterAccessory) is necessary but NOT sufficient:
