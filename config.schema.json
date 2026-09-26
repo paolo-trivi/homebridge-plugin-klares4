@@ -4,7 +4,7 @@
     "singular": true,
     "customUi": false,
     "headerDisplay": "<div style='margin-bottom:12px;'><h3 style='margin:0 0 6px 0;'>Klares4 - Ksenia Lares4 per Homebridge</h3><p style='margin:0 0 12px 0;'>Plugin Homebridge per controllo locale della centrale Ksenia Lares4.</p><div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Prerequisiti:</strong><ul style='margin:8px 0 0 18px;padding:0;'><li>Centrale raggiungibile in rete locale</li><li>Interfaccia WebSocket abilitata</li><li>PIN utente valido (4-8 cifre)</li></ul></div></div>",
-    "footerDisplay": "<div style='margin-top:16px;padding-top:12px;border-top:1px solid currentColor;'><p style='margin:0 0 8px 0;'>Versione 2.0.1 • Sviluppato da Paolo Trivisonno</p><p style='margin:0;'><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' rel='noopener noreferrer'>Documentazione</a> | <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' rel='noopener noreferrer'>Segnala Bug</a> | <a href='https://github.com/sponsors/paolo-trivi' target='_blank' rel='noopener noreferrer'>Supporta</a></p></div>",
+    "footerDisplay": "<div style='margin-top:16px;padding-top:12px;border-top:1px solid currentColor;'><p style='margin:0 0 8px 0;'>Sviluppato da Paolo Trivisonno</p><p style='margin:0;'><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' rel='noopener noreferrer'>Documentazione</a> | <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' rel='noopener noreferrer'>Segnala Bug</a> | <a href='https://github.com/sponsors/paolo-trivi' target='_blank' rel='noopener noreferrer'>Supporta</a></p></div>",
     "schema": {
         "type": "object",
         "properties": {
@@ -27,10 +27,10 @@
             "port": {
                 "title": "Porta WebSocket",
                 "type": "integer",
-                "default": 443,
                 "minimum": 1,
                 "maximum": 65535,
-                "description": "Porta di comunicazione (443 per HTTPS, 80 per HTTP)"
+                "placeholder": "443 / 80",
+                "description": "Lasciare vuoto per usare 443 con HTTPS e 80 senza HTTPS. Indicarla solo se la centrale usa una porta diversa."
             },
             "https": {
                 "title": "Connessione Sicura (HTTPS)",
@@ -73,7 +73,7 @@
                 "title": "Modalita Debug (Legacy)",
                 "type": "boolean",
                 "default": false,
-                "description": "Deprecated: usa logLevel invece. Attiva logging dettagliato"
+                "description": "Deprecato: usare Livello Log. Vale solo se logLevel non e presente in config.json; la Homebridge UI salva sempre logLevel, quindi per il debug impostare Livello Log a 2"
             },
             "logLevel": {
                 "title": "Livello Log",
@@ -373,6 +373,32 @@
                         "maximum": 3600000,
                         "description": "Dopo questo tempo senza update DOMUS, fallback su STATUS_SYSTEM.TEMP.IN"
                     },
+                    "manualCommandPairs": {
+                        "title": "Mapping Comandi Termostato",
+                        "description": "Associa l'output del termostato all'ID del programma termostato usato per i comandi. Scritto dall'import KSA; di solito non va modificato a mano.",
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "thermostatOutputId": {
+                                    "title": "Thermostat Output ID",
+                                    "type": "string",
+                                    "pattern": "^(thermostat_)?[0-9]+$",
+                                    "placeholder": "18 o thermostat_18"
+                                },
+                                "commandThermostatId": {
+                                    "title": "ID Programma Termostato",
+                                    "type": "string",
+                                    "pattern": "^[0-9]+$",
+                                    "placeholder": "3"
+                                }
+                            },
+                            "required": [
+                                "thermostatOutputId",
+                                "commandThermostatId"
+                            ]
+                        }
+                    },
                     "manualPairs": {
                         "title": "Override Manuale Mapping",
                         "type": "array",
@@ -466,6 +492,14 @@
                         "type": "string",
                         "placeholder": "mqtt://192.168.1.x:1883",
                         "description": "Indirizzo completo del broker (es: mqtt://host:1883 o mqtts://host:8883)"
+                    },
+                    "port": {
+                        "title": "Porta Broker",
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535,
+                        "placeholder": "1883",
+                        "description": "Se indicata ha la precedenza sulla porta dell'URL. Indicarla sempre se il broker non usa 1883 (per esempio 8883 con mqtts)."
                     },
                     "username": {
                         "title": "Username",
@@ -635,7 +669,7 @@
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Configurazione essenziale</strong><p style='margin:8px 0 0 0;'>Inserisci IP, porta e PIN della centrale. Se non conosci l'IP, verificalo nella configurazione di rete del pannello.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Configurazione essenziale</strong><p style='margin:8px 0 0 0;'>Inserisci IP e PIN della centrale; la porta serve solo se diversa da 443 (HTTPS) o 80 (HTTP). Se non conosci l'IP, verificalo nella configurazione di rete del pannello.</p></div>"
                 },
                 {
                     "key": "ip",
@@ -778,6 +812,33 @@
                                             "key": "domusThermostat.manualPairs[].domusSensorId",
                                             "title": "DOMUS Sensor ID",
                                             "placeholder": "1 o sensor_temp_1"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "key": "domusThermostat.manualCommandPairs",
+                            "type": "array",
+                            "title": "Mapping Comandi (da import KSA)",
+                            "orderable": false,
+                            "buttonText": "+ Aggiungi Mapping",
+                            "condition": {
+                                "functionBody": "return !model.domusThermostat || model.domusThermostat.enabled !== false;"
+                            },
+                            "items": [
+                                {
+                                    "type": "fieldset",
+                                    "items": [
+                                        {
+                                            "key": "domusThermostat.manualCommandPairs[].thermostatOutputId",
+                                            "title": "Thermostat Output ID",
+                                            "placeholder": "18 o thermostat_18"
+                                        },
+                                        {
+                                            "key": "domusThermostat.manualCommandPairs[].commandThermostatId",
+                                            "title": "ID Programma Termostato",
+                                            "placeholder": "3"
                                         }
                                     ]
                                 }
@@ -1049,6 +1110,10 @@
                     },
                     "items": [
                         {
+                            "key": "mqtt.port",
+                            "flex": "1 1 120px"
+                        },
+                        {
                             "key": "mqtt.username",
                             "flex": "1 1 200px"
                         },
@@ -1237,7 +1302,7 @@
                     "items": [
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Strumento diagnostico completo</strong><p style='margin:8px 0 8px 0;'>Genera un file di supporto con:</p><ul style='margin:0 0 8px 18px;padding:0;'><li>messaggi WebSocket RAW (60 secondi)</li><li>lista dispositivi rilevati</li><li>snapshot di stati e comandi principali</li></ul><p style='margin:0;'><strong>Importante:</strong> durante la cattura prova le entita che non funzionano dall'app Ksenia, cosi il trace include il comportamento reale del pannello.</p></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Strumento diagnostico completo</strong><p style='margin:8px 0 8px 0;'>Genera un file di supporto con:</p><ul style='margin:0 0 8px 18px;padding:0;'><li>messaggi WebSocket RAW (per la durata impostata in Durata cattura, default 60 secondi)</li><li>lista dispositivi rilevati</li><li>snapshot di stati e comandi principali</li></ul><p style='margin:0;'><strong>Importante:</strong> durante la cattura prova le entita che non funzionano dall'app Ksenia, cosi il trace include il comportamento reale del pannello.</p></div>"
                         },
                         {
                             "key": "telemetry",
@@ -1256,7 +1321,7 @@
                         },
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Procedura consigliata</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Attiva l'opzione e salva la configurazione</li><li>Riavvia Homebridge</li><li>Nei successivi 60 secondi testa le entita problematiche dall'app Ksenia</li><li>Attendi la conferma di fine cattura nei log</li><li>Recupera e condividi il file generato (PIN gia mascherati)</li></ol></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Procedura consigliata</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Attiva l'opzione e salva la configurazione</li><li>Riavvia Homebridge</li><li>Durante la cattura (Durata cattura, default 60 secondi) testa le entita problematiche dall'app Ksenia</li><li>Attendi la conferma di fine cattura nei log</li><li>Recupera e condividi il file generato (PIN gia mascherati)</li></ol></div>"
                         },
                         {
                             "type": "help",
