@@ -18,6 +18,7 @@ import { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { applyThermostatConfigSnapshot } from './thermostat-config-sync';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
+import { adoptDiscoveredDevice } from './discovered-device';
 import type {
     CallbackRegistry,
     RealtimeStatusData,
@@ -92,8 +93,7 @@ export class MessageService {
         if (message.PAYLOAD_TYPE === 'ZONES' && payload.ZONES) {
             this.deps.log.info(`Found ${payload.ZONES.length} zones`);
             payload.ZONES.forEach((zone: KseniaZoneData): void => {
-                const device = parseZoneData(zone);
-                this.deps.state.devices.set(device.id, device);
+                const device = adoptDiscoveredDevice(this.deps.state.devices, parseZoneData(zone));
                 this.deps.callbacks.onDeviceDiscovered?.(device);
                 this.deps.statusUpdater.applyPendingZoneStatus(zone.ID);
             });
@@ -115,9 +115,9 @@ export class MessageService {
                         );
                     }
 
-                    const device = parseOutputData(output);
-                    if (device) {
-                        this.deps.state.devices.set(device.id, device);
+                    const parsed = parseOutputData(output);
+                    if (parsed) {
+                        const device = adoptDiscoveredDevice(this.deps.state.devices, parsed);
                         this.deps.callbacks.onDeviceDiscovered?.(device);
                         this.deps.statusUpdater.applyPendingOutputStatus(output.ID);
                     }
@@ -132,9 +132,9 @@ export class MessageService {
                         return;
                     }
 
-                    const device = parseScenarioData(scenario);
-                    if (device) {
-                        this.deps.state.devices.set(device.id, device);
+                    const parsed = parseScenarioData(scenario);
+                    if (parsed) {
+                        const device = adoptDiscoveredDevice(this.deps.state.devices, parsed);
                         this.deps.callbacks.onDeviceDiscovered?.(device);
                     }
                 });
@@ -147,34 +147,31 @@ export class MessageService {
                     this.deps.state.domusSensors.set(normalizedSensorId, { ...sensor, ID: normalizedSensorId });
                     const baseName = normalizeDeviceName(sensor.DES) || `Sensor ${normalizedSensorId}`;
 
-                    const tempDevice = {
+                    const tempDevice = adoptDiscoveredDevice(this.deps.state.devices, {
                         id: `sensor_temp_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Temperatura`,
                         description: `${baseName} - Temperatura`,
                         status: { sensorType: 'temperature', value: 0, unit: 'C' },
-                    } as const;
-                    this.deps.state.devices.set(tempDevice.id, tempDevice);
+                    } as const);
                     this.deps.callbacks.onDeviceDiscovered?.(tempDevice);
 
-                    const humDevice = {
+                    const humDevice = adoptDiscoveredDevice(this.deps.state.devices, {
                         id: `sensor_hum_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Umidita`,
                         description: `${baseName} - Umidita`,
                         status: { sensorType: 'humidity', value: 50, unit: '%' },
-                    } as const;
-                    this.deps.state.devices.set(humDevice.id, humDevice);
+                    } as const);
                     this.deps.callbacks.onDeviceDiscovered?.(humDevice);
 
-                    const lightDevice = {
+                    const lightDevice = adoptDiscoveredDevice(this.deps.state.devices, {
                         id: `sensor_light_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Luminosita`,
                         description: `${baseName} - Luminosita`,
                         status: { sensorType: 'light', value: 100, unit: 'lux' },
-                    } as const;
-                    this.deps.state.devices.set(lightDevice.id, lightDevice);
+                    } as const);
                     this.deps.callbacks.onDeviceDiscovered?.(lightDevice);
                     this.deps.statusUpdater.applyPendingSensorStatus(normalizedSensorId);
                 });

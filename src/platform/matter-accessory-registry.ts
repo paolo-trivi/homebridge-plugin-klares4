@@ -12,6 +12,7 @@ import {
 } from './matter-registration-recovery';
 import { MatterRegistrationGate } from './matter-registration-gate';
 import { needsDimmableUpgrade, upgradeToDimmableLight, withCachedDimmable } from './matter-light-capability';
+import { hasObservedState, mergeKnownState } from '../device-observation';
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { MatterFallbackStore } from './matter-fallback-store';
 import { probeUntilQueryable } from './matter-register-probe';
@@ -206,7 +207,8 @@ export class MatterAccessoryRegistry {
 
     private async performRegistration(discovered: KseniaDevice, isRename: boolean): Promise<void> {
         const cached = this.cachedDevices.get(discovered.id);
-        const device = withCachedDimmable(discovered, cached);
+        // Discovery placeholders must not overwrite the state Homebridge restored from its cache.
+        const device = withCachedDimmable(hasObservedState(discovered) ? discovered : mergeKnownState(discovered, cached), cached);
         const persistedFallback = await resolvePersistedThermostatFallback(
             device.id,
             device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id),
@@ -230,7 +232,7 @@ export class MatterAccessoryRegistry {
             matterAccessory,
             status: 'pending',
             recoveryAttempts: 0,
-            pendingStateUpdates: buildStateUpdates(device, persistedFallback),
+            pendingStateUpdates: hasObservedState(device) ? buildStateUpdates(device, persistedFallback) : [],
         };
         this.registrations.set(device.id, reg);
 
@@ -303,7 +305,7 @@ export class MatterAccessoryRegistry {
 
     private enqueueStateFor(device: KseniaDevice): void {
         const reg = this.registrations.get(device.id);
-        if (!reg) return;
+        if (!reg || !hasObservedState(device)) return;
         reg.matterAccessory.context.device = device;
         const fallback = device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id);
         mergeStateUpdates(reg.pendingStateUpdates, device, fallback);

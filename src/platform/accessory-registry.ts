@@ -1,5 +1,6 @@
 import type { API, Logger, PlatformAccessory } from 'homebridge';
 import { sanitizeHapDisplayName } from '../display-name';
+import { hasObservedState, mergeKnownState } from '../device-observation';
 import type { KseniaDevice } from '../types';
 import type { AccessoryHandler } from './types';
 
@@ -56,6 +57,8 @@ export class AccessoryRegistry {
 
         if (existingAccessory) {
             this.options.log.info('Restoring existing accessory from cache:', device.name);
+            // Discovery placeholders must not overwrite the state cached from the last session.
+            if (!hasObservedState(device)) device = mergeKnownState(device, existingAccessory.context.device as KseniaDevice);
             existingAccessory.context.device = device;
             // Re-align cached displayNames created before the HAP name sanitiser
             // (e.g. "Balcone Sala " with trailing space) — UUID is untouched.

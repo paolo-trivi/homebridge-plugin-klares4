@@ -1,6 +1,7 @@
 import type { Logger } from 'homebridge';
 
 import { LogLevel, getEffectiveLogLevel } from '../log-levels';
+import { markStatusObserved } from '../device-observation';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { ProtocolRouter } from '../websocket/protocol-router';
 import { OutputCommandConfirmationTracker } from '../websocket/output-command-confirmation';
@@ -71,9 +72,7 @@ export class KseniaWebSocketClient {
             log: this.log,
             logLevel: this.logLevel,
             debugEnabled: this.options.debug ?? false,
-            emitDeviceStatusUpdate: (device: KseniaDevice): void => {
-                this.onDeviceStatusUpdate?.(device);
-            },
+            emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
             observeOutputStatus: (status): void => {
                 this.outputConfirmation.observe(status);
             },
@@ -87,16 +86,12 @@ export class KseniaWebSocketClient {
             emitDeviceDiscovered: (device: KseniaDevice): void => {
                 this.onDeviceDiscovered?.(device);
             },
-            emitDeviceStatusUpdate: (device: KseniaDevice): void => {
-                this.onDeviceStatusUpdate?.(device);
-            },
+            emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
         });
 
         this.thermostatStatusUpdater = new ThermostatStatusUpdater({
             state: this.state,
-            emitDeviceStatusUpdate: (device: KseniaDevice): void => {
-                this.onDeviceStatusUpdate?.(device);
-            },
+            emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
         });
 
         this.commandService = new CommandService({
@@ -121,7 +116,7 @@ export class KseniaWebSocketClient {
             state: this.state,
             callbacks: {
                 onDeviceDiscovered: (device: KseniaDevice): void => this.onDeviceDiscovered?.(device),
-                onDeviceStatusUpdate: (device: KseniaDevice): void => this.onDeviceStatusUpdate?.(device),
+                onDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
                 onInitialSyncComplete: (): void => this.onInitialSyncComplete?.(),
             },
             log: this.log,
@@ -245,6 +240,12 @@ export class KseniaWebSocketClient {
 
     public getAllDevices(): KseniaDevice[] {
         return Array.from(this.state.devices.values());
+    }
+
+    /** Every real status report goes through here: the device's state is now observed. */
+    private emitStatus(device: KseniaDevice): void {
+        markStatusObserved(device);
+        this.onDeviceStatusUpdate?.(device);
     }
 
     private emitRawMessage(direction: RawMessageDirection, rawMessage: string): void {
