@@ -25,10 +25,17 @@ interface ConnectionServiceDeps {
 
 export class ConnectionService {
     private readonly maxReconnectDelay = 60000;
+    /** Set by disconnect(): no reconnect may be scheduled after shutdown. */
+    private stopped = false;
 
     constructor(private readonly deps: ConnectionServiceDeps) {}
 
     public async connect(): Promise<void> {
+        this.stopped = false;
+        return this.open();
+    }
+
+    private async open(): Promise<void> {
         return new Promise((resolve, reject) => {
             let settled = false;
             const resolveOnce = (): void => {
@@ -215,6 +222,7 @@ export class ConnectionService {
     }
 
     public disconnect(): void {
+        this.stopped = true;
         if (this.deps.state.heartbeatTimer) {
             clearInterval(this.deps.state.heartbeatTimer);
         }
@@ -261,7 +269,7 @@ export class ConnectionService {
 
     private scheduleReconnect(): void {
         // Suspended after repeated login rejections (see login-rejection-guard).
-        if (this.deps.state.reconnectTimer || this.deps.state.reconnectSuspended) {
+        if (this.stopped || this.deps.state.reconnectTimer || this.deps.state.reconnectSuspended) {
             return;
         }
 
@@ -279,14 +287,17 @@ export class ConnectionService {
 
         this.deps.state.reconnectTimer = setTimeout((): void => {
             this.deps.state.reconnectTimer = undefined;
+            if (this.stopped) return;
             this.deps.state.reconnectAttempts++;
             this.deps.log.info(`Attempting reconnection (attempt ${this.deps.state.reconnectAttempts})...`);
-            this.connect()
+            this.open()
                 .then((): void => {
                     this.deps.state.reconnectAttempts = 0;
                     this.deps.log.info('Reconnection successful');
                 })
                 .catch((err: unknown): void => {
+                    // A shutdown aborts the attempt in progress: not a failure to retry.
+                    if (this.stopped) return;
                     this.deps.log.error(
                         'Reconnection failed:',
                         err instanceof Error ? err.message : String(err),
