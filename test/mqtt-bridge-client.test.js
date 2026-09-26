@@ -101,3 +101,24 @@ test('MqttBridge still honours an explicitly configured port', () => {
   const { call } = createBridge({ broker: 'mqtt://broker.example', port: 1884 });
   assert.equal(call.options.port, 1884);
 });
+
+test('MqttBridge sends a configured username even without a password', () => {
+  const { call } = createBridge({ broker: 'mqtt://broker.example', username: 'homebridge' });
+  assert.equal(call.options.username, 'homebridge');
+  assert.equal('password' in call.options, false);
+});
+
+test('MqttBridge sends username and password when both are configured', () => {
+  const { call } = createBridge({ broker: 'mqtt://broker.example', username: 'u', password: 'p' });
+  assert.equal(call.options.username, 'u');
+  assert.equal(call.options.password, 'p');
+});
+
+test('MqttBridge never logs credentials embedded in the broker URL', () => {
+  const { client, log } = createBridge({ broker: 'mqtt://mqttuser:s3cr3t-pass@broker.example:1883' });
+  client.simulateConnect();
+  const output = log.all();
+  assert.ok(!output.includes('s3cr3t-pass'), `password leaked in logs: ${output}`);
+  assert.ok(!output.includes('mqttuser'), `username leaked in logs: ${output}`);
+  assert.ok(output.includes('mqtt://***@broker.example:1883'), `masked broker URL missing: ${output}`);
+});

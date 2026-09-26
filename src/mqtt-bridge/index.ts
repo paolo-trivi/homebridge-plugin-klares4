@@ -4,6 +4,7 @@ import type { Logger } from 'homebridge';
 import type { KseniaDevice, MqttConfig } from '../types';
 import { buildStateTopic, createDeviceSlug, parseCommandTopic } from '../mqtt/topic-parser';
 import { createDeviceStatePayload } from '../mqtt/state-payload-mapper';
+import { maskBrokerUrl } from '../mqtt/broker-url';
 import type { Lares4Platform } from '../platform';
 import { FatalKlaresError, toErrorMessage } from '../errors';
 import { AccessoryIndexService } from './accessory-index-service';
@@ -52,9 +53,13 @@ export class MqttBridge {
             connectTimeout: 30000,
         };
 
-        if (this.config.username && this.config.password) {
+        // Username-only auth is valid MQTT; a password without a username is not
+        // (MQTT-3.1.2-22), so the password is sent only alongside a username.
+        if (this.config.username) {
             options.username = this.config.username;
-            options.password = this.config.password;
+            if (this.config.password) {
+                options.password = this.config.password;
+            }
         }
 
         try {
@@ -70,7 +75,7 @@ export class MqttBridge {
         if (!this.client) return;
 
         this.client.on('connect', (): void => {
-            this.log.info('MQTT: Connected to broker', this.config.broker);
+            this.log.info('MQTT: Connected to broker', maskBrokerUrl(this.config.broker));
             this.subscribeToCommands();
         });
 
