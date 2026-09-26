@@ -186,6 +186,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.wsClient.onInitialSyncComplete = (): void => {
                 this.handleInitialSyncComplete();
             };
+            this.wsClient.onConnected = (): void => this.matterRegistry.setPanelReachable(true);
+            this.wsClient.onDisconnected = (): void => this.matterRegistry.setPanelReachable(false);
             // MQTT and debug capture must not depend on the first connect: if the
             // panel is offline at boot, connect() rejects while the client keeps
             // reconnecting in the background.

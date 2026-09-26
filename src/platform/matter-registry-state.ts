@@ -1,8 +1,33 @@
-import type { Logger, MatterAccessory } from 'homebridge';
+import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import { hasAccessoryMetadataChanged } from './matter-device-mapper';
 import type { MatterRegistration } from './matter-registration-recovery';
+import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { mergeStateUpdates } from './matter-state-updates';
+import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+
+/**
+ * The queue records every thermostat-cluster push so the mapper's
+ * attribute-change handlers can recognise their own state echo and skip
+ * forwarding it back to Lares4. See matter-thermostat-echo-tracker.ts for the
+ * loop failure mode this prevents.
+ */
+export function createStateUpdateQueue(
+    api: API,
+    log: Logger,
+    registrations: Map<string, MatterRegistration>,
+    tracker: MatterThermostatEchoTracker,
+): MatterStateUpdateQueue {
+    return new MatterStateUpdateQueue(
+        api,
+        log,
+        registrations,
+        (err) => (err instanceof Error ? err.message : String(err)),
+        (uuid, clusterName, attrs) => {
+            if (clusterName === 'thermostat') tracker.recordPushed(uuid, attrs);
+        },
+    );
+}
 
 /**
  * Records the latest snapshot on the registration (handlers read it from

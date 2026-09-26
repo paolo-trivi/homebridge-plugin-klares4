@@ -5,7 +5,8 @@ import type { KseniaWebSocketClient } from '../websocket-client';
 import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates } from './matter-state-updates';
 import {
-    enqueueDeviceState, liveNodeLabel, logRegisterRequested, refreshRegistrationMetadata, type CachedEndpointLabel,
+    createStateUpdateQueue, enqueueDeviceState, liveNodeLabel, logRegisterRequested, refreshRegistrationMetadata,
+    type CachedEndpointLabel,
 } from './matter-registry-state';
 import {
     handleMissingRegisteredAccessory,
@@ -16,7 +17,8 @@ import {
 import { MatterRegistrationGate } from './matter-registration-gate';
 import { needsDimmableUpgrade, upgradeToDimmableLight, withCachedDimmable } from './matter-light-capability';
 import { hasObservedState, mergeKnownState } from '../device-observation';
-import { MatterStateUpdateQueue } from './matter-state-update-queue';
+import type { MatterStateUpdateQueue } from './matter-state-update-queue';
+import { MatterReachability } from './matter-reachability';
 import { MatterFallbackStore } from './matter-fallback-store';
 import { probeUntilQueryable } from './matter-register-probe';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
@@ -51,6 +53,7 @@ export class MatterAccessoryRegistry {
     private readonly topologyCoordinator: MatterTopologyCoordinator;
     private readonly recoveryRequests: Record<string, number>;
     private readonly registrationGate = new MatterRegistrationGate();
+    private readonly reachability: MatterReachability;
 
     constructor(deps: MatterRegistryDeps) {
         this.api = deps.api;
@@ -65,19 +68,13 @@ export class MatterAccessoryRegistry {
         this.topologyCoordinator = new MatterTopologyCoordinator(this.api, this.log, deps.unregisterTimeoutMs);
         for (const uuid of this.fallbackStore.load()) this.thermostatFallbackUUIDs.add(uuid);
 
-        this.stateUpdateQueue = new MatterStateUpdateQueue(
-            this.api,
-            this.log,
-            this.registrations,
-            (err) => this.fmtErr(err),
-            (uuid, clusterName, attrs) => {
-                // Record every thermostat-cluster push so the mapper's attribute-change
-                // handlers can recognise their own state echo and skip forwarding it
-                // back to Lares4. See matter-thermostat-echo-tracker.ts for the loop
-                // failure mode this prevents.
-                if (clusterName === 'thermostat') this.thermostatEchoTracker.recordPushed(uuid, attrs);
-            },
-        );
+        this.stateUpdateQueue = createStateUpdateQueue(this.api, this.log, this.registrations, this.thermostatEchoTracker);
+        this.reachability = new MatterReachability(this.api, this.log, this.registrations);
+    }
+
+    /** Mirrors the panel connection on every registered endpoint (`reachable`). */
+    public setPanelReachable(reachable: boolean): void {
+        if (this.api.matter) this.reachability.set(reachable);
     }
 
     public get isEnabled(): boolean {
@@ -306,6 +303,7 @@ export class MatterAccessoryRegistry {
         this.stateUpdateQueue.markReadyAfterBootstrap(reg);
         this.log.info(`[Matter] registered: ${reg.displayName}`);
         this.stateUpdateQueue.scheduleFlush(uuid);
+        this.reachability.onRegistered(uuid);
         // A level reported while the registration was pending was only queued.
         const latest = reg.matterAccessory.context?.device as KseniaDevice | undefined;
         if (latest && needsDimmableUpgrade(reg, latest)) void this.updateAccessoryState(latest);
