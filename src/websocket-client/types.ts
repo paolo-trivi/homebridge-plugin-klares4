@@ -17,6 +17,8 @@ export interface WebSocketConnectionOptions {
 }
 
 export interface PendingLoginRequest {
+    /** ID of the LOGIN sent for this attempt; only its LOGIN_RES may settle it. */
+    messageId?: string;
     resolve: () => void;
     reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;

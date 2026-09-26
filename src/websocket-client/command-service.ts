@@ -55,6 +55,7 @@ interface CommandServiceDeps {
         };
         loginMessage.CRC_16 = calculateCRC16(JSON.stringify(loginMessage));
         this.deps.commandDispatcher.noteFireAndForget(loginMessage.ID);
+        if (this.deps.state.pendingLogin) this.deps.state.pendingLogin.messageId = loginMessage.ID;
         this.deps.log.info('Executing login...');
         const messageStr = JSON.stringify(loginMessage);
         this.deps.log.info(`Sending: ${maskSensitiveData(messageStr)}`);

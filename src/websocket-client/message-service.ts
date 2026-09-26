@@ -65,6 +65,11 @@ export class MessageService {
     }
 
     public handleLoginResponse(message: KseniaMessage): void {
+        const pendingLogin = this.deps.state.pendingLogin;
+        if (!pendingLogin || pendingLogin.messageId === undefined || pendingLogin.messageId !== String(message.ID)) {
+            this.deps.log.warn('Ignoring LOGIN_RES that does not answer the LOGIN in progress');
+            return;
+        }
         if (message.PAYLOAD?.RESULT === 'OK') {
             this.deps.state.idLogin = String(message.PAYLOAD.ID_LOGIN ?? '1');
             this.deps.log.info(`Login completed, ID_LOGIN: ${this.deps.state.idLogin}`);
