@@ -848,6 +848,58 @@ Homebridge termina il processo entro 5 s, quindi l'impatto è limitato.
 
 ---
 
+# Compliance review (seconda fase, 2026-09-26)
+
+Dopo la verifica sul campo, revisione riga per riga di tutto `src/` (≈12k righe), schema, CI e documentazione. Quattro revisori indipendenti, uno per area (Matter, HAP, comunicazione/comandi, piattaforma/config/MQTT/telemetry), hanno confrontato il codice con il runtime installato (Homebridge 2.4.0, HAP-NodeJS 2.2.2, matter.js 0.17.9, mqtt.js 5.16, @sentry/node 10.75). Poi cinque implementazioni in TDD, ciascuna su un worktree separato, ognuna revisionata e integrata qui. Nessun refactoring strutturale: solo correzioni puntuali e l'estrazione di helper per restare sotto le 350 righe.
+
+**Esito dei gate:** 478/478 test (erano 287), tsc strict e max-lines OK; `npm test` non contatta più Sentry (0 tentativi, era 5 per esecuzione).
+
+## Nuovi finding (revisione) e stato
+
+| ID | Sev. | Area | Difetto | Stato |
+|---|---|---|---|---|
+| R1 | P1 | Sicurezza | Scenari PARTIAL (inserimento parziale, `PIN=P`) esposti a HomeKit/Matter/MQTT ed eseguiti con il PIN salvato; sul pannello reale erano 6, tutti su Matter (Apple/Alexa/Google) | FIXED: esclusi di default, opt-in `exposePartialArmScenarios`; `triggerScenario` rifiuta ARM/DISARM/PARTIAL a monte. Sul campo: non esposti, rimossi da HAP dopo 3 sync e da Matter (orfani rimossi da Homebridge al riavvio) |
+| R2 | P1 | Termostati | Stagione del setpoint cercata con l'id cfg in una mappa indicizzata per id sensore DOMUS (bug introdotto con F06) | FIXED: stagione realtime registrata per output |
+| R3 | P1 | MQTT | Porta del broker sempre 1883 (mqtt.js dà precedenza alle opzioni sull'URL) | FIXED |
+| R4 | P2 | Termostati | Il setpoint forzava `ACT_MODE=MAN` (accendeva un termostato OFF, cancellava AUTO) | FIXED (decisione dell'utente: modo invariato) |
+| R5 | P2 | Comandi | Risposte non sollecitate (il `READ_RES PRG_THERMOSTATS FAIL` di ogni login) chiudevano comandi utente pendenti; ID risposta del pannello modulo 65536 | FIXED |
+| R6 | P2 | Comandi | PIN errato ritentato all'infinito | FIXED (stop dopo 3 rifiuti) |
+| R7 | P2 | Matter | Target delle tapparelle appiattito sulla posizione corrente | FIXED |
+| R8 | P2 | Matter | Comandi obbligatori senza handler (Up/Down/Stop, Toggle, Move/Step/Stop) | FIXED; `stopMotion` in movimento rifiutato esplicitamente (il pannello non ha STOP); `moveWithOnOff`/`stepWithOnOff` gestiti da matter.js senza handler: limite di Homebridge |
+| R9 | P2 | Matter | Handler termostato su una copia congelata del device | FIXED (con F15, F21, F33 parziale) |
+| R10 | P2 | HAP | CurrentHeatingCoolingState senza lo stato reale dell'uscita | FIXED |
+| R11 | P2 | KSA | `applyExclusionSuggestions` svuotava le esclusioni; `applyCustomNames` sovrascriveva i nomi utente; room mapping con nomi non slug nei topic | FIXED |
+| R12 | P2 | MQTT | Comando termostato mode+setpoint in ordine sbagliato | FIXED |
+| R13 | P3 | vari | CRC16 per caratteri fuori BMP, LOGIN_RES non correlato, nomi HAP invalidi, Name non riallineato, TargetPosition HAP, TemperatureDisplayUnits, onSet chiamati nei costruttori, `reachable` mai aggiornato, placeholder come valori iniziali Matter, nome restorato da cache, retry dopo "server starting", porta 443 e clientId scritti dalla UI, chiavi schema mancanti, sensori di sistema non configurabili, ID esclusione nel riepilogo, path negli stack trace, nome piattaforma qualificato, username-only MQTT, credenziali broker nei log, drift documentazione | FIXED |
+
+## Nuovi finding trovati sul campo in questa fase
+
+- **F41 [P3]** La UI scriveva una riga `matterRecoveryRequests` spuria (`{generation:1}`) a ogni salvataggio, per il default dell'item. FIXED; verificato: nessuna riga dopo il salvataggio UI.
+- **F42 [P2]** Dopo un blackout la prima riconnessione veniva abbattuta dall'heartbeat del socket morto ("Heartbeat timeout" subito dopo "WebSocket connected", poi "Bye From Panel WSock Server" e un ciclo di backoff in più). FIXED; verificato: dopo circa 100 s di blocco, una sola riconnessione pulita.
+- **F43 [P3]** Gli endpoint Matter degli scenari nascosti dalla policy restavano in cache (`missingCandidates=0`). FIXED: contano come non esposti e seguono il prune a 3 cicli. Osservato inoltre: Homebridge 2.4 salva senza associazione plugin gli accessori ripristinati ma non rivendicati e li rimuove come orfani al riavvio successivo.
+
+## Stato dei finding del primo report
+
+| Finding | Stato |
+|---|---|
+| F15, F16, F17, F18, F19, F21, F23, F24, F25, F26, F27, F28, F29, F30, F31, F32, F34, F35, F36, F39, F41 | FIXED |
+| F33 | PARTIAL: l'intent si cancella dopo un errore; due raise/lower rapidi prima del feedback del pannello calcolano ancora dallo stesso target |
+| F20 | OPEN (NEEDS VERIFICATION): la cfg viene ancora riscritta per intero dalla cache; ora il modo non viene più forzato |
+
+## Verifica sul campo, fase 2 (build finale)
+
+| Check | Risultato |
+|---|---|
+| Boot | 103 endpoint (109 − 6 scenari PARTIAL), 0 `already registered`, 0 `No handler registered`, 0 `not queryable`; nessun re-register o rename di massa |
+| Scenari PARTIAL | log "not exposed"; HAP: rimossi al 3° sync; Matter: rimossi |
+| Reconnect (iptables 60-100 s) | timeout di connessione a 10 s (F39); `reachable:false` su 103 endpoint dopo 15 s di grace, `true` alla riconnessione; una sola riconnessione (F42); nessun placeholder verso Matter (F03) |
+| Salvataggio UI (schema finale, via browser headless) | `customNames` conservato, `exposed:true` su tutti gli override, nessuna riga di recovery spuria, `exposePartialArmScenarios:false`, altri plugin identici |
+| Stato finale dell'host | build finale installata, `config.json` originale ripristinato (hash identico al backup), boot pulito |
+
+**Non verificato sul campo:** comandi fisici (nessuno eseguito per scelta di sicurezza), termostati Matter nativi (i 6 sono in fallback TemperatureSensor), dimmer (assenti), MQTT (disabilitato), HAP (disabilitato sul child bridge). Sono coperti dai test.
+
+---
+
 # Tests missing
 
 | Area | Missing scenario | Risk | Suggested test |
