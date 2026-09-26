@@ -9,6 +9,7 @@ import type { ThermostatAccessory } from '../accessories/thermostat-accessory';
 import type { ZoneAccessory } from '../accessories/zone-accessory';
 import type { DomusThermostatConfig, KsaImportConfig, MqttConfig, RoomMappingConfig } from '../types';
 import type { MatterOverridesConfig, MatterRecoveryRequestsConfig } from './matter-override-config';
+import type { CustomNamesConfig } from './custom-names-config';
 
 export type AccessoryHandler =
     | LightAccessory
@@ -78,12 +79,8 @@ export interface Lares4Config extends PlatformConfig {
     matterRecoveryRequests?: MatterRecoveryRequestsConfig;
     /** Unregister observation budget in ms (default 3000). */
     matterUnregisterTimeoutMs?: number;
-    customNames?: {
-        zones?: Record<string, string>;
-        outputs?: Record<string, string>;
-        sensors?: Record<string, string>;
-        scenarios?: Record<string, string>;
-    };
+    /** Array of `{ deviceId, name }` (UI-safe) or the legacy category map. */
+    customNames?: CustomNamesConfig;
     scenarioAutoOffDelay?: number;
     coverStepSize?: number;
     temperatureDefaults?: {

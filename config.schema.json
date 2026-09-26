@@ -252,7 +252,9 @@
                         },
                         "exposed": {
                             "title": "Esposto su Matter",
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Deselezionare per nascondere il dispositivo solo da Matter. Se selezionato, il dispositivo resta esposto anche se la sua categoria e disattivata in Esposizione Matter."
                         }
                     }
                 }
@@ -289,30 +291,26 @@
                 "description": "Millisecondi di attesa perche un endpoint rimosso sparisca davvero, prima di rinunciare e mantenere il nome attuale"
             },
             "customNames": {
-                "type": "object",
-                "properties": {
-                    "zones": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "type": "string"
-                        }
-                    },
-                    "outputs": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "type": "string"
-                        }
-                    },
-                    "sensors": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "type": "string"
-                        }
-                    },
-                    "scenarios": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "type": "string"
+                "title": "Nomi personalizzati",
+                "description": "Rinomina i dispositivi su HomeKit, MQTT e Matter. Il vecchio formato a mappe per categoria resta accettato.",
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "deviceId": {
+                            "title": "Device ID",
+                            "type": "string",
+                            "required": true,
+                            "placeholder": "light_18",
+                            "pattern": "^(zone|light|cover|gate|thermostat|output|scenario)_[0-9]+$|^sensor_((temp|hum|light)_)?[0-9]+$",
+                            "description": "ID come appare in klares4-devices.json (per i sensori DOMUS anche sensor_<id>: il nome vale per temperatura, umidita e luminosita)"
+                        },
+                        "name": {
+                            "title": "Nome",
+                            "type": "string",
+                            "required": true,
+                            "minLength": 1,
+                            "placeholder": "Riscaldamento Soggiorno"
                         }
                     }
                 }
@@ -1006,54 +1004,17 @@
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Rinomina entita in HomeKit</strong><p style='margin:8px 0 0 0;'>Imposta coppie <code>ID: nome</code> per sovrascrivere i nomi trovati in automatico (esempio: <code>\"18\": \"Riscaldamento Soggiorno\"</code>).</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Rinomina entita in HomeKit</strong><p style='margin:8px 0 0 0;'>Una riga per dispositivo: device ID (come in <code>klares4-devices.json</code>, per esempio <code>light_18</code>) e nome. Il nome cambia anche lo slug dei topic MQTT e il nome su Matter.</p></div>"
                 },
                 {
-                    "type": "fieldset",
-                    "title": "Zone",
+                    "key": "customNames",
+                    "title": "Nomi per device ID",
+                    "type": "array",
+                    "orderable": false,
+                    "buttonText": "Aggiungi nome",
                     "items": [
-                        {
-                            "key": "customNames.zones",
-                            "title": "Mappa nomi zone",
-                            "type": "object",
-                            "description": "Esempio: { \"1\": \"Porta Ingresso\" }"
-                        }
-                    ]
-                },
-                {
-                    "type": "fieldset",
-                    "title": "Output (Luci/Cover/Thermostat/Gate)",
-                    "items": [
-                        {
-                            "key": "customNames.outputs",
-                            "title": "Mappa nomi output",
-                            "type": "object",
-                            "description": "Esempio: { \"18\": \"Riscaldamento Soggiorno\" }"
-                        }
-                    ]
-                },
-                {
-                    "type": "fieldset",
-                    "title": "Sensori Ambientali",
-                    "items": [
-                        {
-                            "key": "customNames.sensors",
-                            "title": "Mappa nomi sensori",
-                            "type": "object",
-                            "description": "Esempio: { \"1\": \"Termostato Sala\" }"
-                        }
-                    ]
-                },
-                {
-                    "type": "fieldset",
-                    "title": "Scenari",
-                    "items": [
-                        {
-                            "key": "customNames.scenarios",
-                            "title": "Mappa nomi scenari",
-                            "type": "object",
-                            "description": "Esempio: { \"3\": \"Buonanotte\" }"
-                        }
+                        "customNames[].deviceId",
+                        "customNames[].name"
                     ]
                 }
             ]

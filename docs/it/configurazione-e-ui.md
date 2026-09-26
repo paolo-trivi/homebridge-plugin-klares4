@@ -52,12 +52,12 @@ Comportamento:
 - `excludeZones`
 - `excludeSensors`
 - `excludeScenarios`
-- `customNames` per output, zone, sensori, scenari
+- `customNames` rinomina i dispositivi per HomeKit, MQTT e Matter; usa la forma array (`{ deviceId, name }`, per esempio `light_18`, `zone_3`, `sensor_1`), che la UI Homebridge conserva — la vecchia mappa per categoria viene ancora letta ma cancellata quando la UI riscrive config.json. Un import KSA con `applyCustomNames` scrive la forma array
 - `matterExposure` nasconde intere categorie soltanto da Matter
 - `matterOverrides` applica `name` / `exposed` solo su Matter; usa la forma array (`{ deviceId, name, exposed }`), che la UI Homebridge conserva — una mappa per device ID viene cancellata quando la UI riscrive config.json
 - `matterRecoveryRequests` associa un ID `thermostat_*` a una generazione positiva monotona
 
-La precedenza dell'esposizione e: esclusione globale, override per device, categoria, quindi default esistente (`true`). Gli override Matter non cambiano HAP/HomeKit o MQTT.
+La precedenza dell'esposizione e: esclusione globale, override per device, categoria, quindi default esistente (`true`). Gli override Matter non cambiano HAP/HomeKit o MQTT. Nella UI la casella "Esposto su Matter" di ogni riga e selezionata di default: deselezionala per nascondere il dispositivo; una riga selezionata mantiene esposto il dispositivo anche se la sua categoria e disattivata. Un salvataggio dalla UI con la 2.2.0-rc.3 o precedenti scriveva `exposed: false` su tutte le righe; ora il plugin elenca i dispositivi nascosti in un warning all'avvio.
 
 La generazione di recovery viene consumata una sola volta e persistita prima della modifica topologica. Incrementala soltanto per un nuovo tentativo deliberato. Se la recovery fallisce o viene interrotta, il plugin torna al fallback TemperatureSensor; non cancellare lo store fallback.
 

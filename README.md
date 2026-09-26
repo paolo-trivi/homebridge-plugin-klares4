@@ -192,19 +192,13 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 			"excludeZones": ["1", "5"],
 			"excludeOutputs": ["2", "7"],
 			"excludeSensors": ["3"],
-			"customNames": {
-				"zones": {
-					"1": "Main Door",
-					"2": "Kitchen Window"
-				},
-				"outputs": {
-					"9": "Living Room Light",
-					"1": "Office Blind"
-				},
-				"sensors": {
-					"1": "Living Room Thermometer"
-				}
-			}
+			"customNames": [
+				{ "deviceId": "zone_1", "name": "Main Door" },
+				{ "deviceId": "zone_2", "name": "Kitchen Window" },
+				{ "deviceId": "light_9", "name": "Living Room Light" },
+				{ "deviceId": "cover_1", "name": "Office Blind" },
+				{ "deviceId": "sensor_1", "name": "Living Room Thermometer" }
+			]
 		}
 	]
 }
@@ -232,9 +226,9 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `excludeOutputs`    | string[] | []           | Outputs to exclude              |
 | `excludeSensors`    | string[] | []           | Sensors to exclude              |
 | `matterExposure`    | object   | all `true`   | Per-type Matter exposure switches (`zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats`) — Matter side only, see [Voice commands](#voice-commands-alexa--siri--google) |
-| `matterOverrides`   | array    | []           | Per-device Matter-only `name` / `exposed` overrides (`{ deviceId, name, exposed }`) |
+| `matterOverrides`   | array    | []           | Per-device Matter-only `name` / `exposed` overrides (`{ deviceId, name, exposed }`). In the UI "Exposed on Matter" is ticked by default; a ticked row keeps the device exposed even if its category is off in `matterExposure` |
 | `matterRecoveryRequests` | object | {}         | Monotonic, one-shot Matter Thermostat recovery generation keyed by `thermostat_*` ID |
-| `customNames`       | object   | {}           | Custom names                    |
+| `customNames`       | array    | []           | Custom names shared by HomeKit, MQTT and Matter (`{ deviceId, name }`; `sensor_<id>` names all three readings of a DOMUS sensor). The legacy map form (`{ "outputs": { "9": "…" } }`) is still read, but the Homebridge UI deletes it on its next save |
 
 ### Supported Accessory Types
 
@@ -570,19 +564,13 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 			"excludeZones": ["1", "5"],
 			"excludeOutputs": ["2", "7"],
 			"excludeSensors": ["3"],
-			"customNames": {
-				"zones": {
-					"1": "Porta Principale",
-					"2": "Finestra Cucina"
-				},
-				"outputs": {
-					"9": "Luce Sala Custom",
-					"1": "Tapparella Studio"
-				},
-				"sensors": {
-					"1": "Termometro Sala"
-				}
-			}
+			"customNames": [
+				{ "deviceId": "zone_1", "name": "Porta Principale" },
+				{ "deviceId": "zone_2", "name": "Finestra Cucina" },
+				{ "deviceId": "light_9", "name": "Luce Sala Custom" },
+				{ "deviceId": "cover_1", "name": "Tapparella Studio" },
+				{ "deviceId": "sensor_1", "name": "Termometro Sala" }
+			]
 		}
 	]
 }
@@ -608,9 +596,9 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `excludeOutputs`    | string[] | []           | Output da escludere             |
 | `excludeSensors`    | string[] | []           | Sensori da escludere            |
 | `matterExposure`    | object   | tutti `true` | Esposizione Matter per categoria |
-| `matterOverrides`   | array    | []           | Override Matter-only `name` / `exposed` (`{ deviceId, name, exposed }`) |
+| `matterOverrides`   | array    | []           | Override Matter-only `name` / `exposed` (`{ deviceId, name, exposed }`). Nella UI "Esposto su Matter" e selezionato di default; una riga selezionata mantiene esposto il dispositivo anche se la sua categoria e disattivata in `matterExposure` |
 | `matterRecoveryRequests` | object | {}         | Generazione monotona one-shot per recovery di un `thermostat_*` |
-| `customNames`       | object   | {}           | Nomi personalizzati             |
+| `customNames`       | array    | []           | Nomi personalizzati condivisi da HomeKit, MQTT e Matter (`{ deviceId, name }`; `sensor_<id>` rinomina tutte e tre le letture di un sensore DOMUS). Il vecchio formato a mappe (`{ "outputs": { "9": "…" } }`) viene ancora letto, ma la UI Homebridge lo cancella al salvataggio successivo |
 
 ### Tipi di Accessori Supportati
 

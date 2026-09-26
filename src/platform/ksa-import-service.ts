@@ -7,6 +7,7 @@ import type { KsaImportResult } from '../ksa/types';
 import type { KsaSanitizedCache } from '../types';
 import type { PlatformConfigFileService } from './config-file-service';
 import type { Lares4Config } from './types';
+import { normalizeCustomNames, toCustomNameEntries } from './custom-names-config';
 
 export class KsaImportService {
     private readonly cacheService: KsaCacheService;
@@ -64,13 +65,10 @@ export class KsaImportService {
         }
 
         if (importConfig.applyCustomNames) {
-            config.customNames = {
-                ...(config.customNames ?? {}),
-                outputs: result.derivedConfig.customNames.outputs,
-                zones: result.derivedConfig.customNames.zones,
-                sensors: result.derivedConfig.customNames.sensors,
-                scenarios: result.derivedConfig.customNames.scenarios,
-            };
+            config.customNames = toCustomNameEntries({
+                ...normalizeCustomNames(config.customNames),
+                ...result.derivedConfig.customNames,
+            });
         }
     }
 
@@ -93,12 +91,8 @@ export class KsaImportService {
                 platformConfig.roomMapping = result.derivedConfig.roomMapping;
             }
             if (applyCustomNames) {
-                platformConfig.customNames = {
-                    outputs: result.derivedConfig.customNames.outputs,
-                    zones: result.derivedConfig.customNames.zones,
-                    sensors: result.derivedConfig.customNames.sensors,
-                    scenarios: result.derivedConfig.customNames.scenarios,
-                };
+                // Array form: the Homebridge UI drops the category map on its next save.
+                platformConfig.customNames = toCustomNameEntries(result.derivedConfig.customNames);
             }
             if (applyExclusionSuggestions) {
                 platformConfig.excludeOutputs = result.derivedConfig.suggestedExclusions.outputs;
