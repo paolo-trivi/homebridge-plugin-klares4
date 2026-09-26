@@ -64,6 +64,8 @@ export interface SendCommandOptions {
     responseCmds?: string[];
     requirePositiveResult?: boolean;
     allowGenericErrorFallback?: boolean;
+    /** Response PAYLOAD_TYPEs accepted when the response ID does not match exactly. */
+    responsePayloadTypes?: string[];
     stateConfirmation?: {
         outputId: string;
         matches: (status: KseniaOutputStatusRaw) => boolean;

@@ -135,7 +135,12 @@ export class ThermostatCommandService {
                 ID_LOGIN: 'true',
                 ID_READ: systemThermostatId,
                 ID_ITEMS_RANGE: [systemThermostatId, systemThermostatId],
-            }, { awaitResponse: true, responseCmds: ['READ_RES'], timeoutMs: ThermostatCommandService.THERMOSTAT_ACK_TIMEOUT_MS });
+            }, {
+                awaitResponse: true,
+                responseCmds: ['READ_RES'],
+                responsePayloadTypes: ['CFG_THERMOSTATS'],
+                timeoutMs: ThermostatCommandService.THERMOSTAT_ACK_TIMEOUT_MS,
+            });
             return this.deps.state.thermostatCfgById.has(systemThermostatId);
         } catch (error: unknown) {
             if (this.deps.state.thermostatCfgById.has(systemThermostatId)) return true;

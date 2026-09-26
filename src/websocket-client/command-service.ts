@@ -54,6 +54,7 @@ interface CommandServiceDeps {
             CRC_16: '0x0000',
         };
         loginMessage.CRC_16 = calculateCRC16(JSON.stringify(loginMessage));
+        this.deps.commandDispatcher.noteFireAndForget(loginMessage.ID);
         this.deps.log.info('Executing login...');
         const messageStr = JSON.stringify(loginMessage);
         this.deps.log.info(`Sending: ${maskSensitiveData(messageStr)}`);
@@ -219,7 +220,10 @@ interface CommandServiceDeps {
                 options.responseCmds,
                 options.requirePositiveResult,
                 options.allowGenericErrorFallback,
+                options.responsePayloadTypes,
             );
+        } else {
+            this.deps.commandDispatcher.noteFireAndForget(id);
         }
         if (options.stateConfirmation) {
             if (!this.deps.outputConfirmation) {
@@ -247,9 +251,11 @@ interface CommandServiceDeps {
         }
     }
     private createCommandId(): string {
+        // 16-bit IDs: the panel echoes the ID modulo 65536 (86152 comes back as
+        // 20616), so a larger ID could never be correlated exactly.
         for (let attempt = 0; attempt < 1000; attempt += 1) {
-            const candidate = Math.floor(Math.random() * 100000).toString();
-            if (!this.deps.commandDispatcher.hasPendingCommand(candidate)) return candidate;
+            const candidate = (1 + Math.floor(Math.random() * 65535)).toString();
+            if (!this.deps.commandDispatcher.isKnownCommandId(candidate)) return candidate;
         }
         throw new Error('Unable to allocate a unique command ID');
     }

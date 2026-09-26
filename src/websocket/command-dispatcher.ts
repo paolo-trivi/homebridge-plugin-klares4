@@ -15,6 +15,8 @@ interface PendingCommandRequest {
     expectedCmds?: Set<string>;
     requirePositiveResult: boolean;
     allowGenericErrorFallback: boolean;
+    /** When set, a response without an exact ID must carry one of these PAYLOAD_TYPEs. */
+    fallbackPayloadTypes?: Set<string>;
     registeredAt: number;
 }
 
@@ -56,6 +58,7 @@ export class CommandDispatcher {
         responseCmds?: string[],
         requirePositiveResult = false,
         allowGenericErrorFallback = false,
+        fallbackPayloadTypes?: string[],
     ): Promise<CommandAcknowledgement> {
         if (this.pendingCommands.has(commandId)) {
             return Promise.reject(new Error(`Command ID ${commandId} is already pending`));
@@ -87,6 +90,9 @@ export class CommandDispatcher {
                     responseCmds && responseCmds.length > 0 ? new Set(responseCmds) : undefined,
                 requirePositiveResult,
                 allowGenericErrorFallback,
+                fallbackPayloadTypes: fallbackPayloadTypes && fallbackPayloadTypes.length > 0
+                    ? new Set(fallbackPayloadTypes.map((type) => type.toUpperCase()))
+                    : undefined,
                 registeredAt: Date.now(),
             });
         });
@@ -122,6 +128,20 @@ export class CommandDispatcher {
 
     public hasPendingCommand(commandId: string): boolean {
         return this.pendingCommands.has(commandId);
+    }
+
+    /** Pending or recently finished: a new command must not reuse the ID. */
+    public isKnownCommandId(commandId: string): boolean {
+        return this.pendingCommands.has(commandId) || this.retiredCommandIds.has(commandId);
+    }
+
+    /**
+     * A command sent without awaiting its response (login data reads, realtime
+     * register). Its ID is remembered with the finished ones so its response is
+     * recognised and ignored instead of being handed to another pending command.
+     */
+    public noteFireAndForget(commandId: string): void {
+        if (!this.pendingCommands.has(commandId)) this.retire(commandId);
     }
 
     public clearPendingCommand(commandId: string): void {
@@ -160,9 +180,21 @@ export class CommandDispatcher {
         message: ResponseLikeMessage,
         exactId: boolean,
     ): boolean {
+        if (!exactId && !this.matchesFallbackPayloadType(pending, message)) return false;
         if (!pending.expectedCmds || pending.expectedCmds.has(message.CMD)) return true;
         if (!this.isExplicitFailure(message)) return false;
-        return exactId || pending.allowGenericErrorFallback;
+        if (exactId) return true;
+        // Without an exact ID, a typed response (READ_RES, WRITE_CFG_RES, ...) only
+        // answers its own command type: the READ_RES FAIL the panel sends for
+        // PRG_THERMOSTATS at every login must not reject a pending CMD_USR. Only an
+        // untyped error (GENERIC, PAYLOAD_TYPE ERROR) may stand in for the response.
+        return pending.allowGenericErrorFallback && !message.CMD.toUpperCase().endsWith('_RES');
+    }
+
+    private matchesFallbackPayloadType(pending: PendingCommandRequest, message: ResponseLikeMessage): boolean {
+        if (!pending.fallbackPayloadTypes) return true;
+        const payloadType = message.PAYLOAD_TYPE?.toUpperCase();
+        return payloadType !== undefined && pending.fallbackPayloadTypes.has(payloadType);
     }
 
     private isExplicitFailure(message: ResponseLikeMessage): boolean {
