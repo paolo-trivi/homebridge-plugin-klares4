@@ -6,7 +6,7 @@ import type { CommandDispatcher } from '../websocket/command-dispatcher';
 import { clampValue } from '../websocket/device-state-projector';
 import { ThermostatSeasonTracker } from './thermostat-write-payload';
 import { buildThermostatModeCommandPayload, buildThermostatSetpointCommandPayload } from './thermostat-command-payload';
-import { resolveThermostatCommandId } from './thermostat-command-id-resolver';
+import { findDegradedCommandIdConflict, resolveThermostatCommandId } from './thermostat-command-id-resolver';
 import type { KseniaCommandPayload, SendCommandOptions, WebSocketClientState } from './types';
 
 export type SendKseniaCommand = (
@@ -94,11 +94,13 @@ export class ThermostatCommandService {
             this.deps.state.missingThermostatProgramWarningOutputIds.add(outputThermostatId);
         }
 
+        const hasProgramMapping = this.deps.state.thermostatProgramById.size > 0;
+        const manualCommandId = this.getManualThermostatCommandId(outputThermostatId);
         const resolvedCommandId = await resolveThermostatCommandId({
             outputThermostatId,
-            hasProgramMapping: this.deps.state.thermostatProgramById.size > 0,
+            hasProgramMapping,
             cachedCommandId: this.deps.state.thermostatCommandIdByOutputId.get(outputThermostatId),
-            manualCommandId: this.getManualThermostatCommandId(outputThermostatId),
+            manualCommandId,
             programCommandId: this.deps.state.thermostatProgramIdByOutputId.get(outputThermostatId),
             mappedDomusSensorId: this.deps.state.thermostatToDomus.get(outputThermostatId),
             primeConfig: (candidateId): Promise<boolean> => this.primeThermostatConfigCache(candidateId),
@@ -106,7 +108,30 @@ export class ThermostatCommandService {
             onResolvedAlias: (resolvedCommandId): void => this.deps.log.info(`Thermostat command ID resolved thermostat_${outputThermostatId} -> ${resolvedCommandId}`),
         });
         this.logThermostatRouting(outputThermostatId);
+        if (!hasProgramMapping && manualCommandId === undefined) {
+            this.assertUnambiguousDegradedCommandId(outputThermostatId, resolvedCommandId);
+        }
         return resolvedCommandId;
+    }
+
+    /** Refuses a guessed cfg id that may belong to another thermostat (see findDegradedCommandIdConflict). */
+    private assertUnambiguousDegradedCommandId(outputThermostatId: string, commandId: string): void {
+        const routes = [...(this.deps.state.devices?.values() ?? [])]
+            .filter((device) => device.type === 'thermostat')
+            .map((device) => {
+                const outputId = stripDevicePrefix(device.id);
+                return { outputId, sensorId: this.deps.state.thermostatToDomus.get(outputId) };
+            });
+        const sensorId = this.deps.state.thermostatToDomus.get(outputThermostatId);
+        const conflict = findDegradedCommandIdConflict(commandId, { outputId: outputThermostatId, sensorId }, routes);
+        if (conflict === undefined) return;
+        this.deps.log.error(
+            `thermostat_${outputThermostatId}: write refused. Without PRG_THERMOSTATS the cfg id ${commandId} `
+            + `is guessed from ${sensorId ? `DOMUS sensor ${sensorId}` : 'the output id'} and may belong to `
+            + `thermostat_${conflict}. Set domusThermostat.manualCommandPairs, e.g. `
+            + `{ "thermostatOutputId": "${outputThermostatId}", "commandThermostatId": "<cfg id>" }.`,
+        );
+        throw new Error(`Thermostat cfg id for thermostat_${outputThermostatId} is ambiguous: set domusThermostat.manualCommandPairs`);
     }
 
     private logThermostatRouting(outputThermostatId: string): void {
