@@ -107,6 +107,9 @@ export class ConnectionService {
                         return;
                     }
                     this.deps.log.info('WebSocket connected');
+                    // A heartbeat left over from the previous socket would judge this one
+                    // by a PONG from before the outage; it restarts once the login completes.
+                    this.stopHeartbeat();
                     this.deps.state.isConnected = true;
                     this.deps.state.hasCompletedInitialSync = false;
                     this.deps.state.pendingOutputStatuses.clear();
@@ -156,6 +159,7 @@ export class ConnectionService {
                         return;
                     }
                     this.deps.log.warn(`WebSocket closed: ${code} - ${reason.toString()}`);
+                    this.stopHeartbeat();
                     this.deps.state.isConnected = false;
                     this.deps.state.idLogin = undefined;
                     this.deps.commandDispatcher.rejectAllPendingCommands(
@@ -256,6 +260,14 @@ export class ConnectionService {
         this.deps.state.idLogin = undefined;
         this.deps.commandDispatcher.clearCommandQueues();
         this.deps.commandDispatcher.rejectAllPendingCommands(new Error('Client disconnected'));
+    }
+
+    private stopHeartbeat(): void {
+        if (this.deps.state.heartbeatTimer) {
+            clearInterval(this.deps.state.heartbeatTimer);
+            this.deps.state.heartbeatTimer = undefined;
+        }
+        this.deps.state.heartbeatPending = false;
     }
 
     private forceReconnect(): void {
