@@ -10,7 +10,7 @@ export function captureRawMessage(direction: 'in' | 'out', rawData: string): Raw
             parsed = parsedMessage;
         }
 
-        if (parsed && isRecord(parsed.PAYLOAD) && typeof parsed.PAYLOAD.PIN === 'string') {
+        if (parsed && isRecord(parsed.PAYLOAD) && (typeof parsed.PAYLOAD.PIN === 'string' || typeof parsed.PAYLOAD.PIN === 'number')) {
             const maskedParsed = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>;
             const maskedPayload = maskedParsed.PAYLOAD as Record<string, unknown>;
             maskedPayload.PIN = '***MASKED***';

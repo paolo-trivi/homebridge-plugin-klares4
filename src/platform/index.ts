@@ -105,6 +105,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.log.error('PIN missing in configuration');
             return;
         }
+        // A PIN typed as a number in the JSON editor would escape every string-based mask and scrub.
+        this.config.pin = String(config.pin);
 
         initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW, [
             this.config.ip,
