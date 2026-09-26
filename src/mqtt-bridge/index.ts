@@ -17,6 +17,12 @@ export class MqttBridge {
     private readonly commandExecutor: CommandExecutor;
     /** Room names already reported as unsafe for a topic level (warn once each). */
     private readonly warnedRoomNames = new Set<string>();
+    /**
+     * Latest state per device ID. State topics are retained, so instead of
+     * letting mqtt.js queue every publish in memory while offline, only the
+     * newest state is kept and republished on each (re)connect.
+     */
+    private readonly latestDevices = new Map<string, KseniaDevice>();
 
     constructor(
         private readonly config: MqttConfig,
@@ -79,6 +85,7 @@ export class MqttBridge {
         this.client.on('connect', (): void => {
             this.log.info('MQTT: Connected to broker', maskBrokerUrl(this.config.broker));
             this.subscribeToCommands();
+            this.publishStateSnapshot();
         });
 
         this.client.on('error', (error: Error): void => {
@@ -184,12 +191,28 @@ export class MqttBridge {
     public publishDeviceState(device: KseniaDevice): void {
         if (!this.client || !this.config.enabled) return;
 
+        this.latestDevices.set(device.id, device);
+        if (!this.client.connected) {
+            return; // republished from latestDevices on the next 'connect'
+        }
+        this.publishState(this.client, device);
+    }
+
+    private publishStateSnapshot(): void {
+        const client = this.client;
+        if (!client) return;
+        for (const device of this.latestDevices.values()) {
+            this.publishState(client, device);
+        }
+    }
+
+    private publishState(client: mqtt.MqttClient, device: KseniaDevice): void {
         const room = this.getRoomForDevice(device.id);
         const deviceSlug = createDeviceSlug(device.name);
         const topic = buildStateTopic(this.topicPrefix, room, device.type, deviceSlug);
         const payload = createDeviceStatePayload(device);
 
-        this.client.publish(
+        client.publish(
             topic,
             JSON.stringify(payload),
             {

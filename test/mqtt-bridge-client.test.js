@@ -170,6 +170,55 @@ function createLight(id, name) {
   return { id, type: 'light', name, description: name, status: { on: true, dimmable: false } };
 }
 
+function withStatus(device, status) {
+  return { ...device, status: { ...device.status, ...status } };
+}
+
+function statePublishes(client) {
+  return client.published.filter((entry) => entry.payload !== '');
+}
+
+test('MqttBridge does not queue state publishes while the broker is disconnected', () => {
+  const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  bridge.publishDeviceState(withStatus(createLight('light_1', 'Luce Sala'), { on: false }));
+  assert.equal(client.published.length, 0, 'nothing may be handed to mqtt.js while offline');
+});
+
+test('MqttBridge republishes the latest state snapshot on connect', () => {
+  const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  bridge.publishDeviceState(withStatus(createLight('light_1', 'Luce Sala'), { on: false }));
+  bridge.publishDeviceState(createLight('light_2', 'Luce Cucina'));
+
+  client.simulateConnect();
+
+  const published = statePublishes(client);
+  assert.deepEqual(
+    published.map((entry) => entry.topic).sort(),
+    ['homebridge/klares4/light/luce_cucina/state', 'homebridge/klares4/light/luce_sala/state'],
+  );
+  const sala = published.find((entry) => entry.topic.endsWith('/luce_sala/state'));
+  assert.equal(JSON.parse(sala.payload).on, false, 'the snapshot must carry the latest state');
+  assert.equal(sala.options.retain, true);
+});
+
+test('MqttBridge publishes immediately while connected and replays after a reconnect', () => {
+  const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
+  client.simulateConnect();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  assert.equal(statePublishes(client).length, 1);
+
+  client.simulateOffline();
+  bridge.publishDeviceState(withStatus(createLight('light_1', 'Luce Sala'), { on: false }));
+  assert.equal(statePublishes(client).length, 1, 'no publish while offline');
+
+  client.simulateConnect();
+  const published = statePublishes(client);
+  assert.equal(published.length, 2);
+  assert.equal(JSON.parse(published[1].payload).on, false);
+});
+
 function roomMappingFor(roomName, deviceId) {
   return { enabled: true, rooms: [{ roomName, devices: [{ deviceId }] }] };
 }
