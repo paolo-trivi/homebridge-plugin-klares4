@@ -8,7 +8,41 @@ const {
   captureMessage,
   closeTelemetry,
   _resetForTesting,
+  _setTransportForTesting,
 } = require('../dist/telemetry.js');
+
+// ---------------------------------------------------------------------------
+// Mock transport: no test may ever reach the production Sentry project.
+// Installed before any initTelemetry call and never removed.
+// ---------------------------------------------------------------------------
+
+const transport = { created: 0, envelopes: [] };
+_setTransportForTesting(() => {
+  transport.created += 1;
+  return {
+    send: async (envelope) => {
+      transport.envelopes.push(envelope);
+      return { statusCode: 200 };
+    },
+    flush: async () => true,
+  };
+});
+
+function resetTransport() {
+  transport.created = 0;
+  transport.envelopes.length = 0;
+}
+
+/** Event payloads (not sessions or client reports) handed to the transport. */
+function sentEvents() {
+  const events = [];
+  for (const [, items] of transport.envelopes) {
+    for (const [header, payload] of items) {
+      if (header.type === 'event') events.push(payload);
+    }
+  }
+  return events;
+}
 
 // ---------------------------------------------------------------------------
 // sanitizeEventData
@@ -152,6 +186,43 @@ test('closeTelemetry does not throw', () => {
 test('closeTelemetry is safe to call when not initialized', () => {
   _resetForTesting();
   closeTelemetry(); // should not throw
+});
+
+test('telemetry:false never creates a transport nor sends anything', async () => {
+  _resetForTesting();
+  resetTransport();
+  initTelemetry(false, '1.0.0', ['lares.local']);
+  captureError(new Error('should be ignored'));
+  captureMessage('should be ignored', 'error');
+  await closeTelemetry();
+  assert.equal(transport.created, 0);
+  assert.equal(transport.envelopes.length, 0);
+});
+
+test('enabled telemetry sends only sanitized events through the transport', async () => {
+  _resetForTesting();
+  resetTransport();
+  initTelemetry(true, '9.9.9-test', ['lares.local', '123456']);
+  captureError(
+    new Error('connect ECONNREFUSED 192.168.1.10:443 (lares.local, pin 123456)'),
+    { context: 'initializeLares4', host: 'lares.local' },
+  );
+  captureMessage('ws closed by wss://192.168.1.10/KseniaWsock', 'warning');
+  await closeTelemetry();
+
+  const events = sentEvents();
+  assert.equal(events.length, 2, `expected 2 events, got ${events.length}`);
+  const serialized = JSON.stringify(events);
+  for (const secret of ['192.168.1.10', 'lares.local', '123456', 'KseniaWsock']) {
+    assert.ok(!serialized.includes(secret), `event leaks ${secret}: ${serialized}`);
+  }
+  const errorEvent = events.find((event) => event.exception);
+  assert.equal(errorEvent.exception.values[0].value, 'connect ECONNREFUSED [ip] ([redacted], pin [redacted])');
+  assert.equal(errorEvent.extra.context, 'initializeLares4');
+  assert.equal(errorEvent.extra.host, undefined);
+  assert.equal(errorEvent.server_name, undefined);
+  assert.equal(errorEvent.release, 'homebridge-plugin-klares4@9.9.9-test');
+  _resetForTesting();
 });
 
 // ---------------------------------------------------------------------------

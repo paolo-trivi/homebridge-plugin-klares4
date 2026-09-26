@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/node';
+import type { NodeOptions } from '@sentry/node';
 
 const SENTRY_DSN = 'https://6a99b131b91b591e7a98ea136e8c4837@o4511676680699904.ingest.de.sentry.io/4511676714647632';
 
@@ -12,6 +13,8 @@ const URL_PATTERN = /\b(?:wss?|https?):\/\/[^\s"')]+/gi;
 const IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g;
 
 let initialized = false;
+/** Test-only transport factory; production always uses Sentry's Node transport. */
+let transportOverride: NodeOptions['transport'] | undefined;
 /** Exact config-derived strings (panel IP/host, PIN, sender) scrubbed from every text field. */
 let sensitiveValues: string[] = [];
 
@@ -117,6 +120,7 @@ export function initTelemetry(telemetryEnabled: boolean | undefined, version: st
         release: `homebridge-plugin-klares4@${version}`,
         environment: 'production',
         sampleRate: 1.0,
+        ...(transportOverride ? { transport: transportOverride } : {}),
         // Disable all default integrations that could capture HTTP, console, etc.
         defaultIntegrations: false,
         integrations: [
@@ -152,14 +156,17 @@ export function captureMessage(msg: string, level?: 'info' | 'warning' | 'error'
 /**
  * Flushes pending events and closes Sentry.
  * Uses a short timeout to avoid blocking Homebridge shutdown.
- * Never throws.
+ * Never throws; the returned promise never rejects and may be ignored.
  */
-export function closeTelemetry(): void {
+export function closeTelemetry(): Promise<void> {
     if (!initialized) {
-        return;
+        return Promise.resolve();
     }
     initialized = false;
-    void Sentry.close(2000).catch(() => { /* swallow — never block shutdown */ });
+    return Sentry.close(2000).then(
+        () => undefined,
+        () => undefined, // swallow — never block shutdown
+    );
 }
 
 /**
@@ -169,4 +176,13 @@ export function closeTelemetry(): void {
 export function _resetForTesting(): void {
     initialized = false;
     sensitiveValues = [];
+}
+
+/**
+ * Replaces the Sentry transport so tests never reach the real DSN.
+ * Takes effect at the next `initTelemetry`; not cleared by `_resetForTesting`.
+ * @internal
+ */
+export function _setTransportForTesting(factory: NodeOptions['transport'] | undefined): void {
+    transportOverride = factory;
 }
