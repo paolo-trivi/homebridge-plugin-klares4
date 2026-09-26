@@ -73,6 +73,8 @@ export interface Lares4Config extends PlatformConfig {
     excludeOutputs?: string[];
     excludeSensors?: string[];
     excludeScenarios?: string[];
+    /** Expose PARTIAL (partial-arm) scenarios. Default false; ARM/DISARM are never exposed. */
+    exposePartialArmScenarios?: boolean;
     matterExposure?: MatterExposureConfig;
     /** Map keyed by device ID, or the array form the Homebridge UI preserves. */
     matterOverrides?: MatterOverridesConfig;

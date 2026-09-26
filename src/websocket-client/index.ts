@@ -61,6 +61,7 @@ export class KseniaWebSocketClient {
             commandTimeoutMs: 8000,
             allowInsecureTls: false,
             loginTimeoutMs: 10000,
+            exposePartialArmScenarios: false,
             ...options,
         };
         this.state = createInitialWebSocketClientState(this.options.domusThermostat, this.options.ksaCache);
@@ -122,6 +123,7 @@ export class KseniaWebSocketClient {
             log: this.log,
             logLevel: this.logLevel,
             debugEnabled: this.options.debug ?? false,
+            exposePartialArmScenarios: this.options.exposePartialArmScenarios ?? false,
             statusUpdater: this.statusUpdater,
             systemTemperatureUpdater: this.systemTemperatureUpdater,
             thermostatStatusUpdater: this.thermostatStatusUpdater,

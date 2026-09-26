@@ -203,6 +203,8 @@ export interface KseniaWebSocketOptions {
     commandTimeoutMs?: number;
     allowInsecureTls?: boolean;
     loginTimeoutMs?: number;
+    /** Expose PARTIAL (partial-arm) scenarios; ARM/DISARM are never exposed. Default false. */
+    exposePartialArmScenarios?: boolean;
     domusThermostat?: DomusThermostatConfig;
     ksaCache?: KsaSanitizedCache;
 }

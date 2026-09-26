@@ -6,11 +6,11 @@ import type {
     KseniaMessage,
     KseniaOutputStatusRaw,
     KseniaProgramThermostatRaw,
-    KseniaScenarioData,
     KseniaZoneData,
 } from '../types';
 import type { CommandService } from './command-service';
-import { determineOutputType, isIgnoredScenarioCategory, parseOutputData, parseScenarioData, parseZoneData } from './device-parsers';
+import { determineOutputType, parseOutputData, parseZoneData } from './device-parsers';
+import { discoverScenarios } from './scenario-discovery';
 import { normalizeDeviceName } from '../websocket/device-state-projector';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
@@ -30,6 +30,7 @@ interface MessageServiceDeps {
     log: Logger;
     logLevel: LogLevel;
     debugEnabled: boolean;
+    exposePartialArmScenarios?: boolean;
     statusUpdater: StatusUpdater;
     systemTemperatureUpdater: SystemTemperatureUpdater;
     thermostatStatusUpdater: ThermostatStatusUpdater;
@@ -125,18 +126,11 @@ export class MessageService {
             }
 
             if (payload.SCENARIOS) {
-                this.deps.log.info(`Found ${payload.SCENARIOS.length} scenarios`);
-                payload.SCENARIOS.forEach((scenario: KseniaScenarioData): void => {
-                    if (isIgnoredScenarioCategory(scenario.CAT)) {
-                        this.deps.log.debug(`Scenario ${scenario.DES} ignored (category ${scenario.CAT})`);
-                        return;
-                    }
-
-                    const parsed = parseScenarioData(scenario);
-                    if (parsed) {
-                        const device = adoptDiscoveredDevice(this.deps.state.devices, parsed);
-                        this.deps.callbacks.onDeviceDiscovered?.(device);
-                    }
+                discoverScenarios(payload.SCENARIOS, {
+                    state: this.deps.state,
+                    log: this.deps.log,
+                    exposePartialArmScenarios: this.deps.exposePartialArmScenarios,
+                    onDeviceDiscovered: (device): void => this.deps.callbacks.onDeviceDiscovered?.(device),
                 });
             }
 

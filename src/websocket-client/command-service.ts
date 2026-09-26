@@ -15,6 +15,7 @@ import { ThermostatCommandService } from './thermostat-command-service';
 import type { KseniaMessage, KseniaMessagePayload, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
+import { isIgnoredScenarioCategory } from './device-parsers';
 import { logMutationOutcome, mutationOptions } from './command-outcome';
 interface CommandServiceDeps {
     state: WebSocketClientState;
@@ -165,6 +166,7 @@ interface CommandServiceDeps {
     public async triggerScenario(scenarioId: string): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemScenarioId = stripDevicePrefix(scenarioId);
+        this.assertScenarioAllowed(systemScenarioId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(scenarioId, async (): Promise<void> => {
             const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_EXE_SCENARIO', {
                 ID_LOGIN: 'true',
@@ -175,6 +177,16 @@ interface CommandServiceDeps {
             }, mutationOptions());
             logMutationOutcome(this.deps.log, 'Scenario', systemScenarioId, 'trigger', outcome);
         });
+    }
+    /** Defense in depth: never run an arming scenario with the stored PIN, even if an accessory exists. */
+    private assertScenarioAllowed(systemScenarioId: string): void {
+        const category = this.deps.state.scenarioCategoryById?.get(systemScenarioId);
+        if (category === undefined) {
+            throw new Error(`Scenario ${systemScenarioId} refused: not listed by the panel`);
+        }
+        if (isIgnoredScenarioCategory(category, this.deps.options.exposePartialArmScenarios ?? false)) {
+            throw new Error(`Scenario ${systemScenarioId} refused: category ${category} arms or disarms the alarm`);
+        }
     }
     private async sendKseniaCommand(
         cmd: string,

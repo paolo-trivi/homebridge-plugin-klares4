@@ -60,5 +60,6 @@ export function createInitialWebSocketClientState(
         thermostatRealtimeByOutputId: new Map(),
         thermostatRealtimeSnapshotById: new Map(),
         missingThermostatProgramWarningOutputIds: new Set(),
+        scenarioCategoryById: new Map(),
     };
 }

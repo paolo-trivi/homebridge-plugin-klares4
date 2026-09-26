@@ -118,6 +118,8 @@ export interface WebSocketClientState {
         updatedAt: number;
     }>;
     missingThermostatProgramWarningOutputIds: Set<string>;
+    /** Normalized CAT of every scenario listed by MULTI_TYPES, exposed or not. */
+    scenarioCategoryById: Map<string, string>;
 }
 
 export interface MessagePipeline {
