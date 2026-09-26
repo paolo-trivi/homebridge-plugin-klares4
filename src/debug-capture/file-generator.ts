@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Logger } from 'homebridge';
 
+import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { analyzeMessages, countByCommand, extractCommands, getUniquePayloadTypes } from './analysis';
 import type { DeviceSnapshot, RawMessage } from './types';
 
@@ -25,7 +26,7 @@ export class DebugFileGenerator {
 
             const debugData = {
                 generated: new Date().toISOString(),
-                version: '1.1.9-beta0',
+                version: PLUGIN_VERSION_RAW,
                 captureInfo: {
                     duration: `${Math.max(1, Math.round(captureDurationMs / 1000))} seconds`,
                     totalRawMessages: rawMessages.length,
