@@ -260,7 +260,8 @@ export class ConnectionService {
     }
 
     private scheduleReconnect(): void {
-        if (this.deps.state.reconnectTimer) {
+        // Suspended after repeated login rejections (see login-rejection-guard).
+        if (this.deps.state.reconnectTimer || this.deps.state.reconnectSuspended) {
             return;
         }
 

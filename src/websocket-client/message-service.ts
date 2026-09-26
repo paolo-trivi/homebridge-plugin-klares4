@@ -19,6 +19,7 @@ import { applyThermostatConfigSnapshot } from './thermostat-config-sync';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
 import { adoptDiscoveredDevice } from './discovered-device';
+import { recordLoginRejection, resetLoginRejections } from './login-rejection-guard';
 import type {
     CallbackRegistry,
     RealtimeStatusData,
@@ -72,6 +73,7 @@ export class MessageService {
         }
         if (message.PAYLOAD?.RESULT === 'OK') {
             this.deps.state.idLogin = String(message.PAYLOAD.ID_LOGIN ?? '1');
+            resetLoginRejections(this.deps.state);
             this.deps.log.info(`Login completed, ID_LOGIN: ${this.deps.state.idLogin}`);
             this.deps.state.pendingLogin?.resolve();
             this.deps.onLoginCompleted();
@@ -84,6 +86,8 @@ export class MessageService {
         } else {
             const reason = String(message.PAYLOAD?.RESULT_DETAIL ?? 'Unknown error');
             this.deps.log.error('Login failed:', reason);
+            // Before the close below, whose handler schedules the reconnect.
+            recordLoginRejection(this.deps.state, this.deps.log, reason);
             this.deps.state.pendingLogin?.reject(new Error(`Login failed: ${reason}`));
             if (this.deps.state.ws && this.deps.state.ws.readyState === WebSocket.OPEN) {
                 this.deps.state.ws.close(1000, 'Login failed');

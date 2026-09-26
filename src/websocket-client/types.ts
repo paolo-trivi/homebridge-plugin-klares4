@@ -94,6 +94,10 @@ export interface WebSocketClientState {
     heartbeatPending: boolean;
     lastPongReceived: number;
     reconnectAttempts: number;
+    /** Explicit LOGIN_RES rejections since the last successful login. */
+    loginRejections: number;
+    /** Set after too many rejected logins: no automatic reconnection until restart. */
+    reconnectSuspended: boolean;
     isManualClose: boolean;
     pendingLogin?: PendingLoginRequest;
     hasCompletedInitialSync: boolean;

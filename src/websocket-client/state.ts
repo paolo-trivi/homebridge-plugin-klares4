@@ -39,6 +39,8 @@ export function createInitialWebSocketClientState(
         heartbeatPending: false,
         lastPongReceived: 0,
         reconnectAttempts: 0,
+        loginRejections: 0,
+        reconnectSuspended: false,
         isManualClose: false,
         hasCompletedInitialSync: false,
         pendingOutputStatuses: new Map(),
