@@ -22,6 +22,8 @@ import {
     sanitizeMatterAccessoryName,
     buildTypedSuffix,
     buildUuidFallbackSuffix,
+    buildFullIdFallbackName,
+    MAX_NUMERIC_FALLBACK,
     priorityOf,
 } from './matter-name-sanitizer';
 
@@ -59,10 +61,11 @@ function uniqueUuidFallback(base: string, uuid: string, taken: Set<string>): str
         if (!taken.has(candidate.toLowerCase())) return candidate;
     }
     // Theoretical last resort (uuid tags exhausted): disambiguate numerically.
-    for (let n = 2; ; n++) {
+    for (let n = 2; n <= MAX_NUMERIC_FALLBACK; n++) {
         const candidate = buildUuidFallbackSuffix(`${base} ${n}`, uuid);
         if (!taken.has(candidate.toLowerCase())) return candidate;
     }
+    return buildFullIdFallbackName(base, uuid, (candidate) => !taken.has(candidate.toLowerCase()));
 }
 
 /**
