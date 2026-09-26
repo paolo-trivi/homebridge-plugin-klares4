@@ -80,8 +80,13 @@ export class CoverAccessory {
 
     public async setTargetPosition(value: CharacteristicValue): Promise<void> {
         const targetPosition = value as number;
+        const moving = this.moveInterval !== undefined || this.positionState !== 2;
 
-        if (targetPosition === this.currentPosition) {
+        // Already there and at rest: nothing to send, but the target must follow.
+        // During a movement the command is still sent, so the cover stops here.
+        if (targetPosition === this.currentPosition && !moving) {
+            this.targetPosition = targetPosition;
+            this.service.updateCharacteristic(this.platform.Characteristic.TargetPosition, targetPosition);
             return;
         }
 
@@ -92,7 +97,7 @@ export class CoverAccessory {
         try {
             if (targetPosition > this.currentPosition) {
                 this.positionState = 1; // Opening
-            } else {
+            } else if (targetPosition < this.currentPosition) {
                 this.positionState = 0; // Closing
             }
 

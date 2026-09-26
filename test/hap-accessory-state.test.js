@@ -129,3 +129,38 @@ test('cover: without a panel target the TargetPosition falls back to the positio
     handler.updateStatus(coverDevice({ position: 30, state: 'stopped' }));
     assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 30);
 });
+
+test('cover: choosing the current position during a movement stops the cover there', async () => {
+    const moves = [];
+    const wsClient = { moveCover: async (id, position) => { moves.push(position); } };
+    const accessory = platformAccessory(coverDevice({ position: 20, state: 'stopped' }));
+    const handler = new CoverAccessory(platform(wsClient), accessory);
+    const covering = accessory.getService(Service.WindowCovering);
+    try {
+        await handler.setTargetPosition(80); // simulation now running from 20
+        await handler.setTargetPosition(20); // user changes their mind: stay here
+
+        assert.deepEqual(moves, [80, 20]);
+        assert.equal(await handler.getTargetPosition(), 20);
+        assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 20);
+        assert.equal(await handler.getPositionState(), Characteristic.PositionState.STOPPED);
+    } finally {
+        handler.dispose();
+    }
+});
+
+test('cover: choosing the current position at rest sends nothing and keeps the target aligned', async () => {
+    const moves = [];
+    const wsClient = { moveCover: async (id, position) => { moves.push(position); } };
+    const accessory = platformAccessory(coverDevice({ position: 20, state: 'stopped' }));
+    const handler = new CoverAccessory(platform(wsClient), accessory);
+    const covering = accessory.getService(Service.WindowCovering);
+    covering.updateCharacteristic(Characteristic.TargetPosition, 70); // stale controller value
+
+    await handler.setTargetPosition(20);
+
+    assert.deepEqual(moves, []);
+    assert.equal(await handler.getTargetPosition(), 20);
+    assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 20);
+    assert.equal(await handler.getPositionState(), Characteristic.PositionState.STOPPED);
+});
