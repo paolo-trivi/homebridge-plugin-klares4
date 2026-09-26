@@ -166,19 +166,33 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
     };
 }
 
+/**
+ * Lares4: 0=closed, 100=open. Matter: 0=open (0%), 10000=closed (100%).
+ * The target must be the panel's own target (TPOS): matter.js derives
+ * `operationalStatus` from target vs current, so a target equal to the current
+ * position hides every movement from the controllers.
+ */
+export function coverLiftPercent100ths(status: Partial<KseniaCover['status']> | undefined): {
+    currentPositionLiftPercent100ths: number;
+    targetPositionLiftPercent100ths: number;
+} {
+    const position = status?.position ?? 0;
+    const target = status?.targetPosition ?? position;
+    return {
+        currentPositionLiftPercent100ths: Math.round((100 - position) * 100),
+        targetPositionLiftPercent100ths: Math.round((100 - target) * 100),
+    };
+}
+
 function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
     const { api, getWsClient } = deps;
-    const pos = device.status?.position ?? 0;
-    // Lares4: 0=closed, 100=open. Matter: 0=open (0%), 10000=closed (100%).
-    const matterPos = Math.round((100 - pos) * 100);
 
     return {
         ...baseFields(device, deps),
         deviceType: api.matter!.deviceTypes.WindowCovering,
         clusters: {
             windowCovering: {
-                currentPositionLiftPercent100ths: matterPos,
-                targetPositionLiftPercent100ths: matterPos,
+                ...coverLiftPercent100ths(device.status),
                 configStatus: { liftPositionAware: true, operational: true },
             },
         },
