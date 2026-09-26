@@ -214,29 +214,35 @@ interface CommandServiceDeps {
         }
         let pendingResponsePromise: Promise<CommandAcknowledgement> | undefined;
         let stateConfirmation: OutputConfirmationHandle | undefined;
-        if (options.awaitResponse) {
-            pendingResponsePromise = this.deps.commandDispatcher.registerPendingCommand(
-                id,
-                options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                options.responseCmds,
-                options.requirePositiveResult,
-                options.allowGenericErrorFallback,
-                options.responsePayloadTypes,
-            );
-        } else {
-            this.deps.commandDispatcher.noteFireAndForget(id);
-        }
-        if (options.stateConfirmation) {
-            if (!this.deps.outputConfirmation) {
-                throw new Error('Output confirmation tracker not initialized');
-            }
-            stateConfirmation = this.deps.outputConfirmation.register(
-                options.stateConfirmation.outputId,
-                options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                options.stateConfirmation.matches,
-            );
-        }
+        // Both registrations sit inside the try so the finally always clears
+        // them, and each promise gets a no-op handler at creation: it can be
+        // rejected (timeout, disconnect) before or without being awaited, and
+        // Homebridge turns an unhandled rejection into a bridge restart.
         try {
+            if (options.awaitResponse) {
+                pendingResponsePromise = this.deps.commandDispatcher.registerPendingCommand(
+                    id,
+                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
+                    options.responseCmds,
+                    options.requirePositiveResult,
+                    options.allowGenericErrorFallback,
+                    options.responsePayloadTypes,
+                );
+                pendingResponsePromise.catch((): void => undefined);
+            } else {
+                this.deps.commandDispatcher.noteFireAndForget(id);
+            }
+            if (options.stateConfirmation) {
+                if (!this.deps.outputConfirmation) {
+                    throw new Error('Output confirmation tracker not initialized');
+                }
+                stateConfirmation = this.deps.outputConfirmation.register(
+                    options.stateConfirmation.outputId,
+                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
+                    options.stateConfirmation.matches,
+                );
+                stateConfirmation.promise.catch((): void => undefined);
+            }
             await this.sendRawMessage(jsonMessage);
             if (pendingResponsePromise && stateConfirmation) {
                 return await Promise.race([pendingResponsePromise, stateConfirmation.promise]);
@@ -244,8 +250,6 @@ interface CommandServiceDeps {
             if (pendingResponsePromise) return await pendingResponsePromise;
             if (stateConfirmation) return await stateConfirmation.promise;
             return undefined;
-        } catch (error: unknown) {
-            throw error;
         } finally {
             this.deps.commandDispatcher.clearPendingCommand(id);
             stateConfirmation?.cancel();
