@@ -231,6 +231,10 @@ export class Lares4Platform implements DynamicPlatformPlugin {
      * `matterExposure` opt-out. HAP and MQTT paths are NOT affected by this.
      */
     private isMatterEligible(device: KseniaDevice): boolean {
+        // Arming scenarios hidden by the security policy count as not exposed, so a
+        // cache-restored endpoint left from an older version is pruned like one of
+        // a disabled category.
+        if (device.type === 'scenario' && this.wsClient?.isScenarioSuppressed(device.id)) return false;
         return this.discoveryService.resolveMatterPolicy(device).exposed;
     }
 

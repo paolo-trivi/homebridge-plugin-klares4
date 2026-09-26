@@ -2,6 +2,8 @@ import type { Logger } from 'homebridge';
 
 import { LogLevel, getEffectiveLogLevel } from '../log-levels';
 import { markStatusObserved } from '../device-observation';
+import { stripDevicePrefix } from '../device-id';
+import { isIgnoredScenarioCategory } from './device-parsers';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { ProtocolRouter } from '../websocket/protocol-router';
 import { OutputCommandConfirmationTracker } from '../websocket/output-command-confirmation';
@@ -193,6 +195,13 @@ export class KseniaWebSocketClient {
         onLoginCompleted = (): void => {
             this.connectionService.startHeartbeat();
         };
+    }
+
+    /** True when the panel lists this scenario in a category the arming policy never exposes. */
+    public isScenarioSuppressed(scenarioId: string): boolean {
+        const category = this.state.scenarioCategoryById.get(stripDevicePrefix(scenarioId));
+        return category !== undefined
+            && isIgnoredScenarioCategory(category, this.options.exposePartialArmScenarios ?? false);
     }
 
     public async connect(): Promise<void> {
