@@ -112,6 +112,7 @@ export interface WebSocketClientState {
     thermostatRealtimeByOutputId: Map<string, number>;
     thermostatRealtimeSnapshotById: Map<string, {
         mode?: string;
+        season?: 'WIN' | 'SUM';
         targetTemperature?: number;
         hvacOutputActive?: boolean;
         updatedAt: number;

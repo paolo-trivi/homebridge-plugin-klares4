@@ -136,8 +136,10 @@ export class ThermostatStatusUpdater {
 
     private recordRealtimeSnapshot(entry: KseniaTemperatureStatusRaw): void {
         const previous = this.deps.state.thermostatRealtimeSnapshotById.get(entry.ID);
+        const actSea = entry.THERM?.ACT_SEA?.toUpperCase();
         const next = {
             mode: parseThermostatMode(entry),
+            season: actSea === 'SUM' ? 'SUM' as const : actSea === 'WIN' ? 'WIN' as const : undefined,
             targetTemperature: parseFloatInRange(entry.THERM?.TEMP_THR?.VAL, 5, 40),
             hvacOutputActive: parseThermostatOutputActive(entry.THERM?.OUT_STATUS),
             updatedAt: Date.now(),
@@ -145,6 +147,7 @@ export class ThermostatStatusUpdater {
         if (
             previous
             && previous.mode === next.mode
+            && previous.season === next.season
             && previous.targetTemperature === next.targetTemperature
             && previous.hvacOutputActive === next.hvacOutputActive
         ) {

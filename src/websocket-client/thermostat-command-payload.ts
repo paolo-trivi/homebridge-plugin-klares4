@@ -2,12 +2,14 @@ import type { ThermostatMode } from '../thermostat-mode';
 import {
     buildThermostatModeCfgPayload,
     buildThermostatSetpointCfgPayload,
+    type ThermostatSeason,
 } from './thermostat-write-payload';
 
 interface BuildSetpointPayloadInput {
     systemThermostatId: string;
     temperature: number;
-    seasonById: Map<string, 'WIN' | 'SUM'>;
+    /** Season the panel is in (see ThermostatSeasonTracker); defaults to the cfg's own. */
+    season?: ThermostatSeason;
     existingCfg?: Record<string, unknown>;
 }
 
@@ -34,14 +36,15 @@ export function buildThermostatModeCommandPayload(
 export function buildThermostatSetpointCommandPayload({
     systemThermostatId,
     temperature,
-    seasonById,
+    season,
     existingCfg,
 }: BuildSetpointPayloadInput): Record<string, unknown> {
-    const setpointPatch = buildThermostatSetpointCfgPayload(
-        seasonById,
-        systemThermostatId,
-        temperature,
-    );
+    const cfgSeason = String(existingCfg?.ACT_SEA ?? '').toUpperCase() === 'SUM' ? 'SUM' : 'WIN';
+    const activeSeason = season ?? cfgSeason;
+    // The patch must target the season that is actually active: writing the
+    // other season's block leaves the live setpoint unchanged while the panel
+    // still acknowledges the write.
+    const setpointPatch = buildThermostatSetpointCfgPayload(activeSeason, temperature);
     if (!existingCfg) {
         return {
             ID: systemThermostatId,
@@ -53,18 +56,10 @@ export function buildThermostatSetpointCommandPayload({
     const merged = cloneThermostatCfg(existingCfg);
     merged.ID = systemThermostatId;
     merged.ACT_MODE = 'MAN';
-    const activeSeason = String(
-        seasonById.get(systemThermostatId)
-        ?? merged.ACT_SEA
-        ?? (setpointPatch.ACT_SEA as string | undefined)
-        ?? 'WIN',
-    ).toUpperCase() === 'SUM' ? 'SUM' : 'WIN';
     merged.ACT_SEA = activeSeason;
-    const seasonPatch = toPlainObject(setpointPatch[activeSeason]);
-    const seasonCfg = toPlainObject(merged[activeSeason]);
     merged[activeSeason] = {
-        ...seasonCfg,
-        ...seasonPatch,
+        ...toPlainObject(merged[activeSeason]),
+        ...toPlainObject(setpointPatch[activeSeason]),
     };
     return merged;
 }
