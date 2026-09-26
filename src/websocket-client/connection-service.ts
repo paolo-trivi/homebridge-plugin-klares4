@@ -87,8 +87,20 @@ export class ConnectionService {
                 // Events of a socket replaced by a newer attempt must not touch the
                 // shared state of the live connection.
                 const isCurrent = (): boolean => this.deps.state.ws === ws;
+                // Without it a black-holed connect hangs until the kernel's TCP
+                // timeout (about 133 s observed); terminate() then emits error and
+                // close, and the close handler schedules the normal backoff.
+                const connectTimeoutMs = this.deps.options.connectTimeoutMs ?? 10000;
+                const connectTimer = setTimeout((): void => {
+                    if (ws.readyState !== WebSocket.CONNECTING) return;
+                    const timeoutError = new Error(`WebSocket connection timed out after ${connectTimeoutMs}ms`);
+                    this.deps.log.warn(timeoutError.message);
+                    rejectOnce(timeoutError);
+                    ws.terminate();
+                }, connectTimeoutMs);
 
                 ws.on('open', (): void => {
+                    clearTimeout(connectTimer);
                     if (!isCurrent()) {
                         ws.terminate();
                         rejectOnce(new Error('WebSocket superseded by a newer connection attempt'));
@@ -137,6 +149,7 @@ export class ConnectionService {
                 });
 
                 ws.on('close', (code: number, reason: Buffer): void => {
+                    clearTimeout(connectTimer);
                     const reasonText = reason.toString() || 'No reason';
                     if (!isCurrent()) {
                         rejectOnce(new Error(`WebSocket closed (${code} - ${reasonText})`));
@@ -163,6 +176,7 @@ export class ConnectionService {
                 });
 
                 ws.on('error', (error: Error): void => {
+                    clearTimeout(connectTimer);
                     if (!isCurrent()) {
                         rejectOnce(error);
                         return;

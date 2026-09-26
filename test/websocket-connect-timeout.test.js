@@ -63,3 +63,20 @@ test('F24: shutdown during an in-progress reconnect does not schedule another on
         await stop(server, sockets);
     }
 });
+
+test('F39: a connect whose handshake never completes times out and falls back to the normal backoff', { timeout: 5000 }, async () => {
+    const { server, sockets, port } = await startSilentServer();
+    const { client, logs } = createClient(port, { connectTimeoutMs: 150, reconnectInterval: 60_000 });
+    try {
+        const started = Date.now();
+        await assert.rejects(() => client.connect(), /timed out|timeout/i);
+        const elapsed = Date.now() - started;
+        assert.ok(elapsed >= 120 && elapsed < 2000, `elapsed ${elapsed}ms`);
+        await waitFor(() => client['state'].reconnectTimer !== undefined, 1000);
+        assert.ok(logs.some((line) => /Scheduling reconnection attempt 1/.test(line)));
+        assert.equal(client['state'].isConnected, false);
+    } finally {
+        client.disconnect();
+        await stop(server, sockets);
+    }
+});

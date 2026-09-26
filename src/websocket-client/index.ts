@@ -61,6 +61,7 @@ export class KseniaWebSocketClient {
             commandTimeoutMs: 8000,
             allowInsecureTls: false,
             loginTimeoutMs: 10000,
+            connectTimeoutMs: 10000,
             exposePartialArmScenarios: false,
             ...options,
         };

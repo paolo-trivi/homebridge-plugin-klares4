@@ -203,6 +203,8 @@ export interface KseniaWebSocketOptions {
     commandTimeoutMs?: number;
     allowInsecureTls?: boolean;
     loginTimeoutMs?: number;
+    /** TCP connect + TLS + WebSocket upgrade budget in ms (internal, default 10000). */
+    connectTimeoutMs?: number;
     /** Expose PARTIAL (partial-arm) scenarios; ARM/DISARM are never exposed. Default false. */
     exposePartialArmScenarios?: boolean;
     domusThermostat?: DomusThermostatConfig;
