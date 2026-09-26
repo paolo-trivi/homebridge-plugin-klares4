@@ -6,10 +6,12 @@ import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor, hasAccessory
 import { buildStateUpdates, mergeStateUpdates } from './matter-state-updates';
 import {
     handleMissingRegisteredAccessory,
+    handleRegisterFailure,
     isFallbackTemperatureSensor,
-    registerFallbackAccessory,
     type MatterRegistration,
 } from './matter-registration-recovery';
+import { MatterRegistrationGate } from './matter-registration-gate';
+import { needsDimmableUpgrade, upgradeToDimmableLight, withCachedDimmable } from './matter-light-capability';
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { MatterFallbackStore } from './matter-fallback-store';
 import { probeUntilQueryable } from './matter-register-probe';
@@ -43,6 +45,7 @@ export class MatterAccessoryRegistry {
     private readonly nameService: MatterNameService;
     private readonly topologyCoordinator: MatterTopologyCoordinator;
     private readonly recoveryRequests: Record<string, number>;
+    private readonly registrationGate = new MatterRegistrationGate();
 
     constructor(deps: MatterRegistryDeps) {
         this.api = deps.api;
@@ -127,6 +130,15 @@ export class MatterAccessoryRegistry {
             return;
         }
         if (existing.status === 'failed' || existing.status === 'skipped') return;
+        if (needsDimmableUpgrade(existing, device)) {
+            await this.registrationGate.run(device.id, () => upgradeToDimmableLight(device, {
+                log: this.log,
+                topologyCoordinator: this.topologyCoordinator,
+                registrations: this.registrations,
+                register: (d) => this.performRegistration(d, true),
+            }), () => this.updateAccessoryState(device));
+            return;
+        }
         this.enqueueStateFor(device);
         this.stateUpdateQueue.scheduleFlush(device.id);
     }
@@ -184,7 +196,17 @@ export class MatterAccessoryRegistry {
         };
     }
 
-    private async registerAccessory(device: KseniaDevice, isRename = false): Promise<void> {
+    private registerAccessory(device: KseniaDevice, isRename = false): Promise<void> {
+        return this.registrationGate.run(
+            device.id,
+            () => this.performRegistration(device, isRename),
+            () => this.updateAccessoryState(device),
+        );
+    }
+
+    private async performRegistration(discovered: KseniaDevice, isRename: boolean): Promise<void> {
+        const cached = this.cachedDevices.get(discovered.id);
+        const device = withCachedDimmable(discovered, cached);
         const persistedFallback = await resolvePersistedThermostatFallback(
             device.id,
             device.type === 'thermostat' && this.thermostatFallbackUUIDs.has(device.id),
@@ -249,7 +271,7 @@ export class MatterAccessoryRegistry {
             await this.topologyCoordinator.register(matterAccessory);
             reg.registeredDisplayName = matterAccessory.displayName;
         } catch (err) {
-            await this.handleRegisterFailure(device, err);
+            await handleRegisterFailure(device, reg, err, this.recoveryDeps());
             return;
         }
         if (isRename) await this.completeRegistration(device.id);
@@ -277,30 +299,6 @@ export class MatterAccessoryRegistry {
         this.stateUpdateQueue.markReadyAfterBootstrap(reg);
         this.log.info(`[Matter] registered: ${reg.displayName}`);
         this.stateUpdateQueue.scheduleFlush(uuid);
-    }
-
-    private async handleRegisterFailure(device: KseniaDevice, err: unknown): Promise<void> {
-        const reg = this.registrations.get(device.id)!;
-        const msg = this.fmtErr(err);
-
-        if (device.type === 'thermostat' && MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR) {
-            this.log.warn(
-                `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor. Error: ${msg}`,
-            );
-            try {
-                await registerFallbackAccessory(device as KseniaThermostat, reg, this.recoveryDeps());
-                return;
-            } catch (fbErr) {
-                this.log.warn(`[Matter] Fallback TemperatureSensor also failed for ${device.name}: ${this.fmtErr(fbErr)}`);
-            }
-        }
-
-        reg.status = 'failed';
-        this.topologyCoordinator.markFailed(device.id);
-        reg.failedAt = Date.now();
-        reg.lastError = msg;
-        reg.pendingStateUpdates = [];
-        this.log.warn(`[Matter] accessory failed: ${device.name} — ${msg}`);
     }
 
     private enqueueStateFor(device: KseniaDevice): void {

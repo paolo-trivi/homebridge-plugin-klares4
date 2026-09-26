@@ -19,6 +19,21 @@ export type MatterPublicationState =
  */
 const DEFAULT_UNREGISTER_TIMEOUT_MS = 3_000;
 
+/**
+ * Grace period after the endpoint first reads as absent. Homebridge 2.4
+ * `unregisterAccessory` awaits `endpoint.close()` before it deletes the UUID
+ * from its registry, and `getAccessoryState` already answers `undefined` while
+ * the endpoint is closing. A register issued in that window is rejected as
+ * "already registered" (only logged). Observed on a real bridge: close takes
+ * well under a second.
+ */
+const DEFAULT_UNREGISTER_SETTLE_MS = 1_000;
+
+function resolveSettleMs(): number {
+    const fromEnv = Number(process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS);
+    return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : DEFAULT_UNREGISTER_SETTLE_MS;
+}
+
 function resolveTimeout(configured?: number): number {
     if (Number.isFinite(configured) && (configured as number) > 0) return configured as number;
     const fromEnv = Number(process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS);
@@ -118,7 +133,10 @@ export class MatterTopologyCoordinator {
         while (Date.now() < deadline) {
             try {
                 const state = await this.api.matter!.getAccessoryState(uuid, clusterName);
-                if (state === undefined) return true;
+                if (state === undefined) {
+                    await new Promise((resolve): void => { setTimeout(resolve, resolveSettleMs()); });
+                    return true;
+                }
             } catch {
                 // An API error is not proof that the endpoint disappeared.
             }

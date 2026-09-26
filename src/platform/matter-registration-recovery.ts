@@ -93,33 +93,17 @@ export async function handleMissingRegisteredAccessory(
     }
 
     if (reg.recoveryAttempts <= MATTER_REGISTER_RECOVERY_LIMIT) {
-        // On the *second* attempt, force-clear any stale matter.js endpoint for
-        // this UUID before re-registering. Observed in production after the 32-char
-        // nodeLabel fix (2.1.3-rc.3): scenario_12 had a previous endpoint stored in
-        // matter.js with the old (over-limit) displayName, so `getAccessoryState`
-        // kept returning undefined for the new accessory even though register
-        // succeeded. unregister+register reuses the same UUID — Apple Home rooms
-        // and automations survive — but forces matter.js to recreate the endpoint
-        // record with the current sanitised displayName.
-        const stalePurge = reg.recoveryAttempts >= 2;
+        // Clear the endpoint for this UUID before re-registering. A stale matter.js
+        // endpoint (observed in 2.1.3-rc.3 after the 32-char nodeLabel fix) keeps
+        // the new accessory unqueryable, and Homebridge 2.4 rejects a second register
+        // of a UUID it still holds. unregister+register reuses the same UUID, so
+        // Apple Home rooms and automations survive.
         deps.log.warn(
             `[Matter] ${reg.displayName} was not queryable after registration; retrying registration `
-            + `(${reg.recoveryAttempts}/${MATTER_REGISTER_RECOVERY_LIMIT})${stalePurge ? ' [stale-endpoint purge]' : ''}.`,
+            + `(${reg.recoveryAttempts}/${MATTER_REGISTER_RECOVERY_LIMIT}) [stale-endpoint purge].`,
         );
         try {
-            if (stalePurge) {
-                try {
-                    await deps.topologyCoordinator.unregister(
-                        reg.uuid,
-                        registrationProbeCluster(reg.matterAccessory),
-                    );
-                } catch (unregErr) {
-                    // Unregister may legitimately fail if matter.js doesn't have an
-                    // endpoint for this UUID at all — that's exactly the state we
-                    // want, so we ignore and proceed to register.
-                    deps.log.debug(`[Matter] stale-endpoint unregister for ${reg.displayName} (${reg.uuid}) returned: ${deps.fmtErr(unregErr)}`);
-                }
-            }
+            await removeBeforeReregister(reg, deps);
             await deps.topologyCoordinator.register(reg.matterAccessory);
             reg.registeredDisplayName = reg.matterAccessory.displayName;
             deps.scheduleComplete(reg.uuid);
@@ -136,6 +120,34 @@ export async function handleMissingRegisteredAccessory(
     deps.log.warn(`[Matter] accessory failed: ${reg.displayName} — ${reg.lastError}`);
 }
 
+/** A register call that threw: thermostats fall back to TemperatureSensor, everything else fails. */
+export async function handleRegisterFailure(
+    device: KseniaDevice,
+    reg: MatterRegistration,
+    err: unknown,
+    deps: RecoveryDeps,
+): Promise<void> {
+    const msg = deps.fmtErr(err);
+    if (device.type === 'thermostat' && deps.thermostatFallbackEnabled) {
+        deps.log.warn(
+            `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor. Error: ${msg}`,
+        );
+        try {
+            await registerFallbackAccessory(device as KseniaThermostat, reg, deps);
+            return;
+        } catch (fbErr) {
+            deps.log.warn(`[Matter] Fallback TemperatureSensor also failed for ${device.name}: ${deps.fmtErr(fbErr)}`);
+        }
+    }
+
+    reg.status = 'failed';
+    deps.topologyCoordinator.markFailed(device.id);
+    reg.failedAt = Date.now();
+    reg.lastError = msg;
+    reg.pendingStateUpdates = [];
+    deps.log.warn(`[Matter] accessory failed: ${device.name} — ${msg}`);
+}
+
 export async function registerFallbackAccessory(
     device: KseniaThermostat,
     reg: MatterRegistration,
@@ -148,6 +160,7 @@ export async function registerFallbackAccessory(
         momentaryAutoOffMs: deps.momentaryAutoOffMs,
         resolveDisplayName: deps.resolveDisplayName,
     });
+    await removeBeforeReregister(reg, deps);
     await deps.topologyCoordinator.register(fallback);
     deps.thermostatFallbackUUIDs.add(device.id);
     deps.onFallbackPersist?.(device.id);
@@ -158,4 +171,17 @@ export async function registerFallbackAccessory(
     reg.pendingStateUpdates = buildStateUpdates(device, true);
     deps.log.debug(`[Matter] fallback registered, probing: ${device.name}`);
     deps.scheduleComplete(device.id);
+}
+
+/**
+ * Homebridge 2.4 rejects a register of a UUID it already holds, and only logs
+ * the error, so a re-register must first observe the previous endpoint gone.
+ * For a UUID Homebridge does not hold, the probe sees it absent at once.
+ */
+async function removeBeforeReregister(
+    reg: MatterRegistration,
+    deps: Pick<RecoveryDeps, 'topologyCoordinator'>,
+): Promise<void> {
+    const removed = await deps.topologyCoordinator.unregister(reg.uuid, registrationProbeCluster(reg.matterAccessory));
+    if (!removed) throw new Error(`previous Matter endpoint for ${reg.uuid} is still present`);
 }
