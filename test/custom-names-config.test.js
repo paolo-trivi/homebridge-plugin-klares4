@@ -67,6 +67,8 @@ test('F02/F38: no per-device setting in the UI schema is a free-form map or an u
             for (const [key, prop] of Object.entries(node.items.properties)) {
                 // The UI writes an untouched checkbox as false, which silently flips the setting.
                 if (prop.type === 'boolean' && prop.default === undefined) offenders.push(`${where}[].${key}: boolean without default`);
+                // F41: the UI renders one empty row and materializes item defaults, writing a junk row on every save.
+                if (prop.type !== 'boolean' && prop.default !== undefined) offenders.push(`${where}[].${key}: non-boolean default`);
             }
         }
         for (const [key, child] of Object.entries(node.properties ?? {})) walk(child, `${where}.${key}`);
