@@ -164,3 +164,19 @@ test('cover: choosing the current position at rest sends nothing and keeps the t
     assert.equal(covering.getCharacteristic(Characteristic.TargetPosition).value, 20);
     assert.equal(await handler.getPositionState(), Characteristic.PositionState.STOPPED);
 });
+
+test('thermostat: the chosen temperature display unit is kept and survives a restart', async () => {
+    const device = thermostatDevice({ currentTemperature: 20, targetTemperature: 21, mode: 'heat' });
+    const accessory = platformAccessory(device);
+    const handler = new ThermostatAccessory(platform(undefined), accessory);
+    const units = () => accessory.getService(Service.Thermostat).getCharacteristic(Characteristic.TemperatureDisplayUnits);
+    assert.equal(await handler.getTemperatureDisplayUnits(), Characteristic.TemperatureDisplayUnits.CELSIUS);
+
+    await units().handleSetRequest(Characteristic.TemperatureDisplayUnits.FAHRENHEIT);
+    assert.equal(await units().handleGetRequest(), Characteristic.TemperatureDisplayUnits.FAHRENHEIT);
+
+    // Restart: a new handler on the cached accessory (context persisted by Homebridge).
+    const restarted = new ThermostatAccessory(platform(undefined), accessory);
+    assert.equal(await restarted.getTemperatureDisplayUnits(), Characteristic.TemperatureDisplayUnits.FAHRENHEIT);
+    assert.equal(units().value, Characteristic.TemperatureDisplayUnits.FAHRENHEIT);
+});
