@@ -59,3 +59,19 @@ export function logRegisterRequested(
         + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.isRename ? ' [rename]' : ''}`,
     );
 }
+
+export interface CachedEndpointLabel {
+    displayName?: string;
+    deviceTypeName?: string;
+}
+
+/**
+ * The name a just-registered endpoint really shows. Homebridge 2.4 attaches a
+ * same-shaped registration to the endpoint restored from its cache and keeps
+ * that endpoint as it is, so its nodeLabel stays the cached displayName; only
+ * a fresh endpoint takes the new one. The name finalizer diffs against this.
+ */
+export function liveNodeLabel(accessory: MatterAccessory, cached: CachedEndpointLabel | undefined): string {
+    const attachedInPlace = !!cached?.displayName && cached.deviceTypeName === accessory.deviceType?.name;
+    return attachedInPlace ? cached.displayName as string : accessory.displayName;
+}

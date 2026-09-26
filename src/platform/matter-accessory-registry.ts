@@ -4,7 +4,9 @@ import type { KseniaDevice, KseniaThermostat } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates } from './matter-state-updates';
-import { enqueueDeviceState, logRegisterRequested, refreshRegistrationMetadata } from './matter-registry-state';
+import {
+    enqueueDeviceState, liveNodeLabel, logRegisterRequested, refreshRegistrationMetadata, type CachedEndpointLabel,
+} from './matter-registry-state';
 import {
     handleMissingRegisteredAccessory,
     handleRegisterFailure,
@@ -37,6 +39,7 @@ export class MatterAccessoryRegistry {
     private readonly isDeviceExposed?: (device: KseniaDevice) => boolean;
     private readonly cachedUUIDs: Set<string> = new Set();
     private readonly cachedDevices: Map<string, KseniaDevice> = new Map();
+    private readonly cachedLabels: Map<string, CachedEndpointLabel> = new Map();
     private readonly registrations: Map<string, MatterRegistration> = new Map();
     private readonly stateUpdateQueue: MatterStateUpdateQueue;
     private activeDiscoveredUUIDs: Set<string> = new Set();
@@ -83,6 +86,7 @@ export class MatterAccessoryRegistry {
 
     public configureCachedAccessory(accessory: MatterAccessory): void {
         this.cachedUUIDs.add(accessory.UUID);
+        this.cachedLabels.set(accessory.UUID, { displayName: accessory.displayName, deviceTypeName: accessory.deviceType?.name });
         this.topologyCoordinator.remember(accessory);
         const device = accessory.context?.device as KseniaDevice | undefined;
         if (device?.id && device.type) this.cachedDevices.set(accessory.UUID, device);
@@ -270,7 +274,9 @@ export class MatterAccessoryRegistry {
                 if (tc) this.thermostatEchoTracker.recordPushed(device.id, tc);
             }
             await this.topologyCoordinator.register(matterAccessory);
-            reg.registeredDisplayName = matterAccessory.displayName;
+            // Only the first registration can attach to the cache-restored endpoint.
+            reg.registeredDisplayName = liveNodeLabel(matterAccessory, this.cachedLabels.get(device.id));
+            this.cachedLabels.delete(device.id);
         } catch (err) {
             await handleRegisterFailure(device, reg, err, this.recoveryDeps());
             return;
