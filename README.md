@@ -109,7 +109,7 @@ In-place updates are safe by design: accessory UUIDs, serial numbers and Matter 
 
 Tested with **Ksenia Lares 4.0** central units (firmware exposing the `KS_WSOCK` WebSocket subprotocol on the panel's local IP, with a valid system PIN). If your specific Lares 4.0 model works or has issues, please open an issue so the compatibility list can grow.
 
-Requires Homebridge `>= 1.6.0` (also compatible with the 2.x beta line) and Node.js `>= 20`. **Matter support requires Homebridge 2.x.**
+Requires Homebridge `>= 1.6.0` (also compatible with the 2.x beta line) and Node.js `>= 22` (Homebridge 2.4 supports Node 22, 24 and 26). **Matter support requires Homebridge 2.x.**
 
 ---
 
@@ -144,7 +144,7 @@ If this plugin saves you time, please ⭐ the repo — it really helps others di
 ### Prerequisites
 
 - Homebridge >= 1.6.0 (Homebridge 2.x required for Matter)
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - Ksenia Lares4 system with WebSocket access enabled
 
 ### Installation
@@ -290,7 +290,6 @@ Enable the MQTT bridge in the "MQTT Bridge" configuration section:
 		"broker": "mqtt://192.168.1.100:1883",
 		"username": "mqtt_user",
 		"password": "mqtt_password",
-		"clientId": "homebridge-klares4",
 		"topicPrefix": "homebridge/klares4",
 		"qos": 1,
 		"retain": true
@@ -298,7 +297,14 @@ Enable the MQTT bridge in the "MQTT Bridge" configuration section:
 }
 ```
 
-`mqtt.port` (optional) takes precedence over the port in the broker URL. Set it whenever your broker does not listen on 1883 (for example 8883 with `mqtts://`).
+`mqtt.port` (optional) overrides the port in the broker URL. Leave it empty to use the URL's port, or the protocol default (1883 for `mqtt://`, 8883 for `mqtts://`). `clientId` must be unique per Homebridge instance on the same broker; leave it empty to get a random one.
+
+Behaviour worth knowing:
+
+- State topics are retained. While the broker is unreachable nothing is queued: the latest state of every device is republished on reconnect.
+- Commands must be published with `retain=false`. A retained command on a `/set` topic is ignored with a warning (the broker would replay it at every reconnect); clear it with an empty retained message.
+- Room names containing `+`, `#` or `/` are published with `_` in their place.
+- When a device is renamed while the plugin runs, the old retained state topic is cleared. Topics left over from before a restart are not known to the plugin.
 
 #### State Publishing
 
@@ -379,7 +385,7 @@ Telemetry is **on by default**: the plugin sends anonymous error reports to the 
 
 What is sent: only errors the plugin reports itself at a few explicit points (currently a failed platform start-up or connection initialisation), with the error type, message and stack trace, the plugin version and a short context label. There is no global capture of crashes or unhandled exceptions, and no analytics or usage data.
 
-Before sending, every event is sanitized: the PIN, panel IP/host and sender you configured, URLs and IPv4 addresses are scrubbed from the text, and fields such as names, rooms, devices, configuration and payloads are dropped. Stack frames can include the plugin's installation path on your system.
+Before sending, every event is sanitized: the PIN, panel IP/host and sender you configured, URLs and IPv4 addresses are scrubbed from the text, and fields such as names, rooms, devices, configuration and payloads are dropped. Stack-frame paths are shortened to the part inside the plugin or `node_modules`, and your home directory is replaced with `~`. Reports go through a private Sentry client that other plugins in the same Homebridge process can neither read nor replace.
 
 To opt out:
 
@@ -408,7 +414,7 @@ This runs:
 
 GitHub Actions workflows:
 
-- `CI` (`.github/workflows/ci.yml`): Node 20/22 validation, strict type-checks, tests, build artifact.
+- `CI` (`.github/workflows/ci.yml`): Node 22/24 validation, strict type-checks, tests, build artifact.
 - `Release Publish` (`.github/workflows/release-publish.yml`): npm publish with provenance from tags (`v*`) or manual dispatch.
 
 Trusted publishing:
@@ -524,7 +530,7 @@ Gli aggiornamenti sul posto sono sicuri per costruzione: UUID degli accessori, n
 
 Testato con centrali **Ksenia Lares 4.0** (firmware che espone il sottoprotocollo WebSocket `KS_WSOCK` sull'IP locale del pannello, con PIN di sistema valido). Se il tuo modello specifico Lares 4.0 funziona o ha problemi, apri una issue cosi possiamo ampliare la lista di compatibilita.
 
-Richiede Homebridge `>= 1.6.0` (compatibile anche con la linea 2.x beta) e Node.js `>= 20`. **Il supporto Matter richiede Homebridge 2.x.**
+Richiede Homebridge `>= 1.6.0` (compatibile anche con la linea 2.x beta) e Node.js `>= 22` (Homebridge 2.4 supporta Node 22, 24 e 26). **Il supporto Matter richiede Homebridge 2.x.**
 
 Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davvero altri a trovarlo.
 
@@ -546,7 +552,7 @@ Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davve
 ### Prerequisiti
 
 - Homebridge >= 1.6.0 (Homebridge 2.x richiesto per Matter)
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - Sistema Ksenia Lares4 con accesso WebSocket abilitato
 
 ### Installazione
@@ -692,7 +698,6 @@ Abilita il bridge MQTT nella sezione "MQTT Bridge" della configurazione:
 		"broker": "mqtt://192.168.1.100:1883",
 		"username": "mqtt_user",
 		"password": "mqtt_password",
-		"clientId": "homebridge-klares4",
 		"topicPrefix": "homebridge/klares4",
 		"qos": 1,
 		"retain": true
@@ -700,7 +705,14 @@ Abilita il bridge MQTT nella sezione "MQTT Bridge" della configurazione:
 }
 ```
 
-`mqtt.port` (opzionale) ha la precedenza sulla porta nell'URL del broker. Impostala ogni volta che il broker non ascolta su 1883 (per esempio 8883 con `mqtts://`).
+`mqtt.port` (opzionale) sostituisce la porta nell'URL del broker. Lasciala vuota per usare la porta dell'URL, o quella di default del protocollo (1883 per `mqtt://`, 8883 per `mqtts://`). `clientId` deve essere unico per ogni istanza di Homebridge sullo stesso broker; lascialo vuoto per averne uno casuale.
+
+Comportamenti da conoscere:
+
+- I topic di stato sono retained. Mentre il broker non e raggiungibile non viene accodato nulla: alla riconnessione viene ripubblicato l'ultimo stato di ogni dispositivo.
+- I comandi vanno pubblicati con `retain=false`. Un comando retained su un topic `/set` viene ignorato con un warning (il broker lo ripeterebbe a ogni riconnessione); cancellalo con un messaggio retained vuoto.
+- I nomi di stanza che contengono `+`, `#` o `/` vengono pubblicati con `_` al loro posto.
+- Se un dispositivo viene rinominato mentre il plugin e in esecuzione, il vecchio topic di stato retained viene cancellato. I topic rimasti da prima di un riavvio non sono noti al plugin.
 
 #### Pubblicazione Stati
 
@@ -781,7 +793,7 @@ La telemetry e **attiva di default**: il plugin invia allo sviluppatore segnalaz
 
 Cosa viene inviato: solo gli errori che il plugin stesso segnala in pochi punti espliciti (oggi un avvio della piattaforma o un'inizializzazione della connessione falliti), con tipo di errore, messaggio e stack trace, versione del plugin e una breve etichetta di contesto. Non c'e nessuna cattura globale di crash o eccezioni non gestite, e nessun dato di utilizzo o analytics.
 
-Prima dell'invio ogni evento viene sanitizzato: PIN, IP/host della centrale e sender configurati, URL e indirizzi IPv4 vengono rimossi dal testo, e campi come nomi, stanze, dispositivi, configurazione e payload vengono scartati. Gli stack frame possono contenere il percorso di installazione del plugin sul tuo sistema.
+Prima dell'invio ogni evento viene sanitizzato: PIN, IP/host della centrale e sender configurati, URL e indirizzi IPv4 vengono rimossi dal testo, e campi come nomi, stanze, dispositivi, configurazione e payload vengono scartati. I percorsi negli stack frame vengono ridotti alla parte interna al plugin o a `node_modules`, e la tua home directory viene sostituita da `~`. Le segnalazioni passano da un client Sentry privato, che gli altri plugin nello stesso processo Homebridge non possono leggere ne sostituire.
 
 Per disattivarla:
 

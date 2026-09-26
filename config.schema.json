@@ -522,9 +522,8 @@
                     "clientId": {
                         "title": "Client ID",
                         "type": "string",
-                        "default": "homebridge-klares4",
                         "placeholder": "homebridge-klares4",
-                        "description": "Identificativo univoco per il broker MQTT"
+                        "description": "Deve essere unico per ogni istanza sullo stesso broker. Lasciare vuoto per un ID casuale."
                     },
                     "topicPrefix": {
                         "title": "Prefisso Topic",

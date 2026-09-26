@@ -99,4 +99,4 @@ Telemetry is on by default and sends anonymous error reports via Sentry. Opt out
 
 - Only errors the plugin reports itself at explicit points are sent (currently a failed platform start-up or connection initialisation): error type, message, stack trace, plugin version and a short context label.
 - There is no global capture of crashes or unhandled exceptions, and no analytics or usage data.
-- Every event is sanitized first: the configured PIN, panel IP/host and sender, URLs and IPv4 addresses are scrubbed from the text; fields such as names, rooms, devices, configuration and payloads are dropped. Stack frames can include the plugin's installation path.
+- Every event is sanitized first: the configured PIN, panel IP/host and sender, URLs and IPv4 addresses are scrubbed from the text; fields such as names, rooms, devices, configuration and payloads are dropped. Stack-frame paths are shortened to the part inside the plugin or `node_modules`, and the home directory is replaced with `~`; reports use a private Sentry client, isolated from other plugins in the same process.
