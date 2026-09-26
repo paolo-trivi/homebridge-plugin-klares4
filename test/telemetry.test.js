@@ -340,3 +340,82 @@ test('sanitizeEventData scrubs tags merged from a shared global scope', () => {
   assert.equal(result.tags.note, 'seen at [ip]');
   assert.equal(result.tags.component, 'ws');
 });
+
+// ---------------------------------------------------------------------------
+// stack frame paths (home directories carry the user name)
+// ---------------------------------------------------------------------------
+
+function frameEvent(paths) {
+  return {
+    exception: { values: [{
+      type: 'Error',
+      value: 'x',
+      stacktrace: { frames: paths.map((p) => ({ filename: p, abs_path: p, function: 'f' })) },
+    }] },
+  };
+}
+
+test('sanitizeEventData keeps only the part after node_modules/ in frame paths', () => {
+  const result = sanitizeEventData(frameEvent([
+    '/home/mario/.homebridge/node_modules/homebridge-plugin-klares4/dist/platform/index.js',
+    '/var/lib/homebridge/node_modules/homebridge/node_modules/ws/lib/websocket.js',
+    'C:\\Users\\mario\\AppData\\Roaming\\npm\\node_modules\\homebridge\\dist\\api.js',
+  ]));
+  const frames = result.exception.values[0].stacktrace.frames;
+  assert.deepEqual(frames.map((f) => f.filename), [
+    'homebridge-plugin-klares4/dist/platform/index.js',
+    'ws/lib/websocket.js',
+    'homebridge/dist/api.js',
+  ]);
+  assert.deepEqual(frames.map((f) => f.abs_path), frames.map((f) => f.filename));
+});
+
+test('sanitizeEventData makes plugin paths relative and reduces other absolute paths to the file name', () => {
+  const path = require('node:path');
+  const pluginRoot = path.resolve(__dirname, '..');
+  const result = sanitizeEventData(frameEvent([
+    path.join(pluginRoot, 'dist', 'telemetry.js'),
+    '/Users/mario/scripts/start.js',
+    'file:///home/mario/app/main.mjs',
+    'node:internal/modules/cjs/loader',
+    'events.js',
+  ]));
+  assert.deepEqual(result.exception.values[0].stacktrace.frames.map((f) => f.filename), [
+    'homebridge-plugin-klares4/dist/telemetry.js',
+    'start.js',
+    'main.mjs',
+    'node:internal/modules/cjs/loader',
+    'events.js',
+  ]);
+});
+
+test('sanitizeEventData replaces the home directory in message text', () => {
+  const os = require('node:os');
+  const home = os.homedir();
+  const result = sanitizeEventData({
+    message: `ENOENT: no such file or directory, open '${home}/.homebridge/klares4.json'`,
+  });
+  assert.ok(!result.message.includes(home), result.message);
+  assert.ok(result.message.includes('~/.homebridge/klares4.json'), result.message);
+});
+
+test('events sent through the transport carry no absolute stack paths', async () => {
+  const os = require('node:os');
+  _resetForTesting();
+  resetTransport();
+  initTelemetry(true, '1.0.0');
+  captureError(new Error('with a stack'));
+  await closeTelemetry();
+
+  const [event] = sentEvents();
+  const frames = event.exception.values[0].stacktrace.frames;
+  assert.ok(frames.length > 0);
+  for (const frame of frames) {
+    for (const value of [frame.filename, frame.abs_path, frame.module]) {
+      if (value === undefined) continue;
+      assert.ok(!value.startsWith('/'), `absolute path in frame: ${value}`);
+      assert.ok(!value.includes(os.homedir()), `home directory in frame: ${value}`);
+    }
+  }
+  _resetForTesting();
+});

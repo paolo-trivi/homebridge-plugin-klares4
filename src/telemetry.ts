@@ -1,3 +1,5 @@
+import * as os from 'os';
+import * as path from 'path';
 import * as Sentry from '@sentry/node';
 import type { NodeOptions } from '@sentry/node';
 
@@ -12,6 +14,11 @@ const SENSITIVE_KEYS = /^(pin|password|token|secret|ip|ipaddress|host|hostname|u
 const URL_PATTERN = /\b(?:wss?|https?):\/\/[^\s"')]+/gi;
 const IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g;
 
+// Absolute paths carry the user name (/home/<user>, C:\Users\<user>).
+const PLUGIN_NAME = 'homebridge-plugin-klares4';
+const PLUGIN_ROOT = toPosixPath(path.resolve(__dirname, '..'));
+const HOME_DIR = readHomeDir();
+
 /**
  * Dedicated client + scope instead of `Sentry.init`: Homebridge runs many
  * plugins in one process, and `init` installs a process-global client that
@@ -25,6 +32,50 @@ let transportOverride: NodeOptions['transport'] | undefined;
 /** Exact config-derived strings (panel IP/host, PIN, sender) scrubbed from every text field. */
 let sensitiveValues: string[] = [];
 
+function toPosixPath(value: string): string {
+    return value.replace(/\\/g, '/');
+}
+
+function readHomeDir(): string | undefined {
+    try {
+        const home = os.homedir();
+        return home.length > 1 ? home : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Reduces a stack frame path to something without the user's directories:
+ * the part after the last node_modules/, the path inside this plugin, or
+ * the bare file name. Non-absolute paths (node:internal/...) are kept.
+ */
+function scrubFramePath(framePath: string): string {
+    const normalized = toPosixPath(framePath).replace(/^file:\/\//i, '');
+    const nodeModulesAt = normalized.lastIndexOf('/node_modules/');
+    if (nodeModulesAt !== -1) {
+        return normalized.slice(nodeModulesAt + '/node_modules/'.length);
+    }
+    if (normalized.startsWith(`${PLUGIN_ROOT}/`)) {
+        return `${PLUGIN_NAME}/${normalized.slice(PLUGIN_ROOT.length + 1)}`;
+    }
+    if (normalized.startsWith('/') || /^[a-z]:\//i.test(normalized)) {
+        return normalized.slice(normalized.lastIndexOf('/') + 1);
+    }
+    return framePath;
+}
+
+function scrubStackFrames(frames: Sentry.StackFrame[] | undefined): void {
+    for (const frame of frames ?? []) {
+        if (typeof frame.filename === 'string') {
+            frame.filename = scrubFramePath(frame.filename);
+        }
+        if (typeof frame.abs_path === 'string') {
+            frame.abs_path = scrubFramePath(frame.abs_path);
+        }
+    }
+}
+
 function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -32,6 +83,9 @@ function escapeRegExp(value: string): string {
 /** Scrub URLs, IPv4 addresses and configured sensitive strings from free text. */
 function scrubText(text: string): string {
     let out = text.replace(URL_PATTERN, '[url]').replace(IPV4_PATTERN, '[ip]');
+    if (HOME_DIR) {
+        out = out.split(HOME_DIR).join('~');
+    }
     for (const value of sensitiveValues) {
         out = out.replace(new RegExp(escapeRegExp(value), 'gi'), '[redacted]');
     }
@@ -70,6 +124,7 @@ export function sanitizeEventData(event: Sentry.ErrorEvent): Sentry.ErrorEvent |
             if (typeof ex.value === 'string') {
                 ex.value = scrubText(ex.value);
             }
+            scrubStackFrames(ex.stacktrace?.frames);
         }
     }
 
