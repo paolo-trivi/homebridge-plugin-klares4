@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0-rc.4] - 2026-09-26
+
 Stability and compliance release, validated on a real Lares4 panel with Homebridge 2.4.0 on Node 24 (Matter-only child bridge, 109 endpoints). Read **Security** and **Changed** before upgrading.
 
 ### Security
