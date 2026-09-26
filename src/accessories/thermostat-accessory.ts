@@ -248,11 +248,7 @@ export class ThermostatAccessory {
         );
         this.service.updateCharacteristic(
             this.platform.Characteristic.CurrentHeatingCoolingState,
-            deriveHomeKitCurrentState(
-                newDevice.mode,
-                newDevice.currentTemperature,
-                newDevice.targetTemperature,
-            ),
+            this.deriveCurrentState(newDevice),
         );
         if (newDevice.humidity !== undefined) {
             this.service.updateCharacteristic(
