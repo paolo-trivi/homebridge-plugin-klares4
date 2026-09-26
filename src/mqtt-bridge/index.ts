@@ -39,8 +39,11 @@ export class MqttBridge {
             return;
         }
 
+        // mqtt.js merges explicit options over the ones parsed from the URL, so a
+        // default port here would override mqtts://host:8883 or ws:// brokers.
+        // Without a port anywhere, mqtt.js picks the protocol default itself.
         const options: mqtt.IClientOptions = {
-            port: this.config.port ?? 1883,
+            ...(this.config.port !== undefined ? { port: this.config.port } : {}),
             clientId:
                 this.config.clientId ??
                 `homebridge-klares4-${Math.random().toString(16).substring(2, 10)}`,
