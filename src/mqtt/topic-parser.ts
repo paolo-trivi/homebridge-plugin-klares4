@@ -57,6 +57,16 @@ export function createDeviceSlug(deviceName: string): string {
         .replace(/^_|_$/g, '');
 }
 
+/**
+ * Makes a free-text value (e.g. a room name) safe as a single topic level:
+ * `+`, `#` and NUL are illegal in publish topics (MQTT-3.3.2-2, MQTT-4.7.3-2)
+ * and `/` would add a level. Each is replaced by `_`; valid values are
+ * returned unchanged.
+ */
+export function sanitizeTopicLevel(level: string): string {
+    return level.replace(/[+#/\u0000]/g, '_');
+}
+
 export function buildStateTopic(
     topicPrefix: string,
     room: string | null,

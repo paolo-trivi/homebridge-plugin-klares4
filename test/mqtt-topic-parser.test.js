@@ -5,7 +5,21 @@ const {
   parseCommandTopic,
   createDeviceSlug,
   buildStateTopic,
+  sanitizeTopicLevel,
 } = require('../dist/mqtt/topic-parser.js');
+
+test('sanitizeTopicLevel leaves valid topic levels untouched', () => {
+  assert.equal(sanitizeTopicLevel('sala'), 'sala');
+  assert.equal(sanitizeTopicLevel('Sala Grande'), 'Sala Grande');
+  assert.equal(sanitizeTopicLevel('Camera_1-è'), 'Camera_1-è');
+});
+
+test('sanitizeTopicLevel replaces wildcards, level separators and NUL (MQTT-3.3.2-2)', () => {
+  assert.equal(sanitizeTopicLevel('Sala+Cucina'), 'Sala_Cucina');
+  assert.equal(sanitizeTopicLevel('Piano/Terra'), 'Piano_Terra');
+  assert.equal(sanitizeTopicLevel('Box #1'), 'Box _1');
+  assert.equal(sanitizeTopicLevel('a\u0000b'), 'a_b');
+});
 
 test('parseCommandTopic supports direct and room command topics', () => {
   assert.deepEqual(

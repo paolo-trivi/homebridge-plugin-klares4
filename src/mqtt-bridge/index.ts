@@ -2,7 +2,7 @@ import * as mqtt from 'mqtt';
 import type { Logger } from 'homebridge';
 
 import type { KseniaDevice, MqttConfig } from '../types';
-import { buildStateTopic, createDeviceSlug, parseCommandTopic } from '../mqtt/topic-parser';
+import { buildStateTopic, createDeviceSlug, parseCommandTopic, sanitizeTopicLevel } from '../mqtt/topic-parser';
 import { createDeviceStatePayload } from '../mqtt/state-payload-mapper';
 import { maskBrokerUrl } from '../mqtt/broker-url';
 import type { Lares4Platform } from '../platform';
@@ -15,6 +15,8 @@ export class MqttBridge {
     private readonly topicPrefix: string;
     private readonly accessoryIndex: AccessoryIndexService;
     private readonly commandExecutor: CommandExecutor;
+    /** Room names already reported as unsafe for a topic level (warn once each). */
+    private readonly warnedRoomNames = new Set<string>();
 
     constructor(
         private readonly config: MqttConfig,
@@ -91,7 +93,17 @@ export class MqttBridge {
             this.log.warn('MQTT: Disconnected');
         });
 
-        this.client.on('message', (topic: string, payload: Buffer): void => {
+        this.client.on('message', (topic: string, payload: Buffer, packet?: mqtt.IPublishPacket): void => {
+            // The broker replays retained messages to every new subscription
+            // (MQTT-3.3.1-6): executing them would repeat the command at each
+            // (re)connect or Homebridge restart.
+            if (packet?.retain) {
+                this.log.warn(
+                    `MQTT: Ignoring retained command on ${topic}. Commands must be published with retain=false; ` +
+                        'clear it by publishing an empty retained message to that topic.',
+                );
+                return;
+            }
             this.handleIncomingMessage(topic, payload.toString());
         });
     }
@@ -147,7 +159,7 @@ export class MqttBridge {
                 if (room.devices) {
                     for (const device of room.devices) {
                         if (device.deviceId === deviceId) {
-                            return room.roomName;
+                            return this.toTopicRoom(room.roomName);
                         }
                     }
                 }
@@ -155,6 +167,18 @@ export class MqttBridge {
         }
 
         return null;
+    }
+
+    private toTopicRoom(roomName: string): string {
+        const safeRoom = sanitizeTopicLevel(roomName);
+        if (safeRoom !== roomName && !this.warnedRoomNames.has(roomName)) {
+            this.warnedRoomNames.add(roomName);
+            this.log.warn(
+                `MQTT: Room name "${roomName}" contains '+', '#' or '/', which are not allowed in a topic level; ` +
+                    `publishing under "${safeRoom}" instead.`,
+            );
+        }
+        return safeRoom;
     }
 
     public publishDeviceState(device: KseniaDevice): void {

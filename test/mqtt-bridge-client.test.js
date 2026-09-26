@@ -122,3 +122,83 @@ test('MqttBridge never logs credentials embedded in the broker URL', () => {
   assert.ok(!output.includes('mqttuser'), `username leaked in logs: ${output}`);
   assert.ok(output.includes('mqtt://***@broker.example:1883'), `masked broker URL missing: ${output}`);
 });
+
+function createScenarioHandler(calls) {
+  return {
+    device: { id: 'scenario_1', type: 'scenario', name: 'Buonanotte', status: { active: false } },
+    setOn: async (value) => { calls.push(value); },
+  };
+}
+
+test('MqttBridge ignores retained command messages and warns', () => {
+  const calls = [];
+  const handlers = new Map([['uuid-s1', createScenarioHandler(calls)]]);
+  const { client, log } = createBridge({ broker: 'mqtt://broker.example' }, { handlers });
+  client.simulateConnect();
+
+  client.emit(
+    'message',
+    'homebridge/klares4/scenario/scenario_1/set',
+    Buffer.from('{"active":true}'),
+    { cmd: 'publish', retain: true, topic: 'homebridge/klares4/scenario/scenario_1/set' },
+  );
+
+  assert.deepEqual(calls, [], 'a retained command must not be executed');
+  assert.ok(
+    log.lines.warn.some((line) => line.includes('retained') && line.includes('scenario/scenario_1/set')),
+    `missing retained warning: ${log.lines.warn.join(' | ')}`,
+  );
+});
+
+test('MqttBridge still executes live (non-retained) command messages', () => {
+  const calls = [];
+  const handlers = new Map([['uuid-s1', createScenarioHandler(calls)]]);
+  const { client } = createBridge({ broker: 'mqtt://broker.example' }, { handlers });
+  client.simulateConnect();
+
+  client.emit(
+    'message',
+    'homebridge/klares4/scenario/scenario_1/set',
+    Buffer.from('{"active":true}'),
+    { cmd: 'publish', retain: false, topic: 'homebridge/klares4/scenario/scenario_1/set' },
+  );
+
+  assert.deepEqual(calls, [true]);
+});
+
+function createLight(id, name) {
+  return { id, type: 'light', name, description: name, status: { on: true, dimmable: false } };
+}
+
+function roomMappingFor(roomName, deviceId) {
+  return { enabled: true, rooms: [{ roomName, devices: [{ deviceId }] }] };
+}
+
+test('MqttBridge keeps the topic of a valid room name unchanged', () => {
+  const { bridge, client, log } = createBridge(
+    { broker: 'mqtt://broker.example' },
+    { roomMapping: roomMappingFor('Sala Grande', 'light_1') },
+  );
+  client.simulateConnect();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  assert.equal(client.published.at(-1).topic, 'homebridge/klares4/Sala Grande/light/luce_sala/state');
+  assert.equal(log.lines.warn.length, 0);
+});
+
+test('MqttBridge never publishes a room name containing MQTT wildcards or level separators', () => {
+  const { bridge, client, log } = createBridge(
+    { broker: 'mqtt://broker.example' },
+    { roomMapping: roomMappingFor('Sala+Cucina/#1', 'light_1') },
+  );
+  client.simulateConnect();
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+  bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
+
+  const topics = client.published.map((entry) => entry.topic);
+  for (const topic of topics) {
+    assert.ok(!/[+#]/.test(topic), `wildcard in publish topic: ${topic}`);
+  }
+  assert.equal(topics.at(-1), 'homebridge/klares4/Sala_Cucina__1/light/luce_sala/state');
+  const roomWarnings = log.lines.warn.filter((line) => line.includes('Sala+Cucina/#1'));
+  assert.equal(roomWarnings.length, 1, `expected exactly one warning per room: ${log.lines.warn.join(' | ')}`);
+});
