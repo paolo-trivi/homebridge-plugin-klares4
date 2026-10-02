@@ -18,8 +18,8 @@ export enum LogLevel {
  * @returns The message with sensitive data masked
  */
 export function maskSensitiveData(message: string): string {
-    // Mask PIN in JSON-like structures: "PIN":"123456" -> "PIN":"***"
-    return message.replace(/"PIN"\s*:\s*"[^"]*"/gi, '"PIN":"***"');
+    // Mask PIN in JSON-like structures: "PIN":"123456" or "PIN":123456 -> "PIN":"***"
+    return message.replace(/"PIN"\s*:\s*("[^"]*"|-?\d[\d.eE+-]*)/gi, '"PIN":"***"');
 }
 
 /**
