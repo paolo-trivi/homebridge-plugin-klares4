@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import type { KsaSanitizedCache } from '../types';
+import { createDeviceSlug } from '../mqtt/topic-parser';
 import { determineOutputType } from '../websocket/device-state-projector';
 import type { KsaDerivedConfig, KsaImportResult, KsaMapRecord, ParsedKsaProgram } from './types';
 
@@ -8,6 +9,7 @@ export function deriveKsaImportResult(
     sourceFilePath: string | undefined,
     rawBytes: Buffer,
 ): KsaImportResult {
+    program = onlyRecordEntries(program);
     const cache = buildSanitizedCache(program, sourceFilePath, rawBytes);
     const derivedConfig = buildDerivedConfig(program, cache);
     return {
@@ -81,10 +83,12 @@ function buildDerivedConfig(program: ParsedKsaProgram, cache: KsaSanitizedCache)
     const roomDevices = new Map<string, Set<string>>();
 
     for (const map of cache.roomDeviceRefs) {
-        const roomName = roomNameById[map.roomId];
-        if (!roomName) {
+        const panelRoomName = ownValue(roomNameById, map.roomId);
+        if (!panelRoomName) {
             continue;
         }
+        // Room names end up in MQTT topics: '/', '+', '#' and spaces must never reach them.
+        const roomName = createDeviceSlug(panelRoomName) || `room_${createDeviceSlug(map.roomId) || 'unnamed'}`;
         const resolvedDeviceIds = resolveRoomMapToDeviceIds(map, outputById);
         if (resolvedDeviceIds.length === 0) {
             continue;
@@ -101,9 +105,9 @@ function buildDerivedConfig(program: ParsedKsaProgram, cache: KsaSanitizedCache)
             manualPairs: Object.entries(cache.thermostatProgramIdByOutputId)
                 .map(([outputId, thermostatProgramId]) => ({
                     thermostatOutputId: outputId,
-                    domusSensorId: cache.domusSensorIdByThermostatProgramId[thermostatProgramId],
+                    domusSensorId: ownValue(cache.domusSensorIdByThermostatProgramId, thermostatProgramId),
                 }))
-                .filter((pair) => Boolean(pair.domusSensorId)),
+                .filter((pair): pair is { thermostatOutputId: string; domusSensorId: string } => Boolean(pair.domusSensorId)),
             manualCommandPairs: Object.entries(cache.thermostatProgramIdByOutputId)
                 .map(([outputId, thermostatProgramId]) => ({
                     thermostatOutputId: outputId,
@@ -180,6 +184,29 @@ function toRoomDeviceRefs(maps: KsaMapRecord[]): Array<{ roomId: string; objectT
             objectType: string;
             objectId: string;
         }>;
+}
+
+function isRecord(value: unknown): boolean {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A `.ksa` file is untrusted input: one null or scalar entry must not abort the whole import. */
+function onlyRecordEntries(program: ParsedKsaProgram): ParsedKsaProgram {
+    const keep = <T>(entries: T[] | undefined): T[] => (Array.isArray(entries) ? entries.filter(isRecord) : []);
+    return {
+        outputs: keep(program.outputs),
+        zones: keep(program.zones),
+        scenarios: keep(program.scenarios),
+        busHas: keep(program.busHas),
+        thermostats: keep(program.thermostats),
+        rooms: keep(program.rooms),
+        maps: keep(program.maps),
+    };
+}
+
+/** Own-property lookup: an ID such as "constructor" must not resolve to an inherited member. */
+function ownValue(record: Record<string, string>, key: string): string | undefined {
+    return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
 }
 
 function asId(value: unknown): string {

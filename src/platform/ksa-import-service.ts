@@ -7,6 +7,8 @@ import type { KsaImportResult } from '../ksa/types';
 import type { KsaSanitizedCache } from '../types';
 import type { PlatformConfigFileService } from './config-file-service';
 import type { Lares4Config } from './types';
+import { mergeCustomNames, type CustomNamesConfig } from './custom-names-config';
+import { applyExclusionSuggestions, resolveKsaRoomMapping } from './ksa-config-merge';
 
 export class KsaImportService {
     private readonly cacheService: KsaCacheService;
@@ -60,17 +62,18 @@ export class KsaImportService {
         }
 
         if (importConfig.applyRoomMapping !== false) {
-            config.roomMapping = result.derivedConfig.roomMapping;
+            const roomMapping = resolveKsaRoomMapping(config.roomMapping, result.derivedConfig.roomMapping.rooms ?? []);
+            if (roomMapping) config.roomMapping = roomMapping;
         }
 
         if (importConfig.applyCustomNames) {
-            config.customNames = {
-                ...(config.customNames ?? {}),
-                outputs: result.derivedConfig.customNames.outputs,
-                zones: result.derivedConfig.customNames.zones,
-                sensors: result.derivedConfig.customNames.sensors,
-                scenarios: result.derivedConfig.customNames.scenarios,
-            };
+            // Per device, the user's own name wins over the panel's.
+            config.customNames = mergeCustomNames(config.customNames, result.derivedConfig.customNames);
+        }
+
+        if (importConfig.applyExclusionSuggestions) {
+            // Suggestions are added to the user's lists; they never replace them.
+            applyExclusionSuggestions(config as Record<string, unknown>, result.derivedConfig.suggestedExclusions);
         }
     }
 
@@ -80,7 +83,7 @@ export class KsaImportService {
             const applyDomusMappings = importConfig.applyDomusMappings !== false;
             const applyRoomMapping = importConfig.applyRoomMapping !== false;
             const applyCustomNames = importConfig.applyCustomNames === true;
-            const applyExclusionSuggestions = importConfig.applyExclusionSuggestions === true;
+            const applyExclusions = importConfig.applyExclusionSuggestions === true;
 
             if (applyDomusMappings) {
                 platformConfig.domusThermostat = {
@@ -90,21 +93,21 @@ export class KsaImportService {
                 };
             }
             if (applyRoomMapping) {
-                platformConfig.roomMapping = result.derivedConfig.roomMapping;
+                const roomMapping = resolveKsaRoomMapping(
+                    platformConfig.roomMapping,
+                    result.derivedConfig.roomMapping.rooms ?? [],
+                );
+                if (roomMapping) platformConfig.roomMapping = roomMapping;
             }
             if (applyCustomNames) {
-                platformConfig.customNames = {
-                    outputs: result.derivedConfig.customNames.outputs,
-                    zones: result.derivedConfig.customNames.zones,
-                    sensors: result.derivedConfig.customNames.sensors,
-                    scenarios: result.derivedConfig.customNames.scenarios,
-                };
+                // Array form: the Homebridge UI drops the category map on its next save.
+                platformConfig.customNames = mergeCustomNames(
+                    platformConfig.customNames as CustomNamesConfig | undefined,
+                    result.derivedConfig.customNames,
+                );
             }
-            if (applyExclusionSuggestions) {
-                platformConfig.excludeOutputs = result.derivedConfig.suggestedExclusions.outputs;
-                platformConfig.excludeZones = result.derivedConfig.suggestedExclusions.zones;
-                platformConfig.excludeSensors = result.derivedConfig.suggestedExclusions.sensors;
-                platformConfig.excludeScenarios = result.derivedConfig.suggestedExclusions.scenarios;
+            if (applyExclusions) {
+                applyExclusionSuggestions(platformConfig, result.derivedConfig.suggestedExclusions);
             }
 
             platformConfig.ksaImport = {

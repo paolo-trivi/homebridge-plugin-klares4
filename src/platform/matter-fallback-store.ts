@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Logger } from 'homebridge';
+import { writeJsonAtomicSync } from '../atomic-file';
 import { PLUGIN_VERSION_RAW } from '../plugin-version';
 
 const STORE_FILENAME = 'klares4-matter-fallback.json';
@@ -30,6 +31,8 @@ export class MatterFallbackStore {
     private readonly records = new Map<string, MatterFallbackRecord>();
     private loaded = false;
     private loadedLegacy = false;
+    /** Set when the file comes from a newer plugin version: it is never rewritten. */
+    private readOnly = false;
 
     constructor(storagePath: string, private readonly log: Logger) {
         this.filePath = path.join(storagePath, STORE_FILENAME);
@@ -115,6 +118,15 @@ export class MatterFallbackStore {
                 }
                 return;
             }
+            if ('version' in parsed && typeof parsed.version === 'number' && parsed.version > STORE_VERSION) {
+                // A downgrade must not destroy the newer store: keep state in memory only.
+                this.readOnly = true;
+                this.log.warn(
+                    `[Matter] Fallback store ${this.filePath} has unsupported version ${String(parsed.version)}; `
+                    + 'it will not be modified. Thermostat fallback state is kept in memory for this session.',
+                );
+                return;
+            }
             this.loadedLegacy = true;
             const legacyStore = parsed as LegacyStoreShape;
             const legacy = Array.isArray(legacyStore.thermostatAsTemperatureSensor)
@@ -146,6 +158,7 @@ export class MatterFallbackStore {
     }
 
     private write(): void {
+        if (this.readOnly) return;
         try {
             if (this.loadedLegacy && fs.existsSync(this.filePath)) {
                 const backup = `${this.filePath}.v1.bak`;
@@ -156,9 +169,7 @@ export class MatterFallbackStore {
                 version: STORE_VERSION,
                 thermostats: [...this.records.values()].sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
             };
-            const temporaryPath = `${this.filePath}.tmp`;
-            fs.writeFileSync(temporaryPath, JSON.stringify(payload, null, 2), 'utf8');
-            fs.renameSync(temporaryPath, this.filePath);
+            writeJsonAtomicSync(this.filePath, payload, 2);
         } catch (error: unknown) {
             this.log.warn(`[Matter] Could not write fallback store (${this.filePath}): ${error instanceof Error ? error.message : String(error)}`);
         }

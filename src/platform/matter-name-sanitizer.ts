@@ -118,6 +118,32 @@ export function buildUuidFallbackSuffix(name: string, uuid: string, tagLength = 
     return `${head}${tail}`;
 }
 
+/**
+ * Bound for the numeric last-resort candidates. With a base long enough to
+ * truncate the ` n` away, and an id so short that every tag length gives the
+ * same tag, every numeric candidate is the same string: an unbounded loop
+ * over them never ends when another device owns it (F34).
+ */
+export const MAX_NUMERIC_FALLBACK = 100;
+
+/**
+ * Final candidate once the numeric ones are exhausted: the full compact id as
+ * suffix, then that suffix numbered with the base truncated to make room.
+ * Every numbered candidate ends differently and only finitely many names are
+ * taken, so this always terminates.
+ */
+export function buildFullIdFallbackName(base: string, uuid: string, isFree: (candidate: string) => boolean): string {
+    const full = buildUuidFallbackSuffix(base, uuid, Math.max(1, uuid.length));
+    if (isFree(full)) return full;
+    const compactId = uuid.normalize('NFKC').replace(/[\p{P}\p{S}\s_]+/gu, '') || 'id';
+    const tag = Array.from(compactId).slice(-(MAX_NAME_LENGTH - 10)).join('');
+    for (let sequence = 2; ; sequence += 1) {
+        const tail = ` ${sequence}${SUFFIX_SEPARATOR}${tag}`;
+        const candidate = `${truncateDisplayName(base, Math.max(0, MAX_NAME_LENGTH - Array.from(tail).length))}${tail}`.trim();
+        if (isFree(candidate)) return candidate;
+    }
+}
+
 interface SlotOwner {
     uuid: string;
     deviceType: string | undefined;
@@ -253,10 +279,14 @@ export class MatterNameRegistry {
             const existing = this.slotOwners.get(this.slotKey(fallback));
             if (!existing || existing.uuid === uuid) return fallback;
         }
-        for (let sequence = 2; ; sequence += 1) {
+        for (let sequence = 2; sequence <= MAX_NUMERIC_FALLBACK; sequence += 1) {
             const fallback = buildUuidFallbackSuffix(`${base} ${sequence}`, uuid, 12);
             const existing = this.slotOwners.get(this.slotKey(fallback));
             if (!existing || existing.uuid === uuid) return fallback;
         }
+        return buildFullIdFallbackName(base, uuid, (candidate) => {
+            const existing = this.slotOwners.get(this.slotKey(candidate));
+            return !existing || existing.uuid === uuid;
+        });
     }
 }

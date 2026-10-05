@@ -9,6 +9,7 @@ process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS = '1000';
 process.env.KLARES4_MATTER_REGISTER_TIMEOUT_MS = '500';
 process.env.KLARES4_MATTER_REGISTER_POLL_MS = '10';
 process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '20';
+process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 
@@ -36,9 +37,11 @@ function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
 }
 
-function makeApi({ registerImpl, updateImpl, unregisterImpl } = {}) {
+function makeApi({ registerImpl, updateImpl, unregisterImpl, initiallyQueryable = [] } = {}) {
     const registered = [];
-    const queryable = new Set();
+    // Endpoints restored from the Homebridge Matter cache are live (and
+    // queryable) before the plugin registers anything in this session.
+    const queryable = new Set(initiallyQueryable);
     const updates = [];
     const metadataUpdates = [];
     const unregistered = [];
@@ -263,12 +266,13 @@ test('thermostat: async missing registration falls back before state updates', a
     assert.equal(updates[0].attributes.measuredValue, 1950);
 });
 
-test('stale matter.js endpoint: second recovery attempt unregisters before re-registering (UUID preserved)', async () => {
+test('stale matter.js endpoint: every recovery attempt unregisters before re-registering (UUID preserved)', async () => {
     // Production scenario after the 32-char nodeLabel fix (2.1.3-rc.3): a previous
     // boot left an endpoint in matter.js with the over-limit displayName; new
     // register() succeeds but getAccessoryState() keeps returning undefined
     // because matter.js holds the stale record. The recovery path's second
-    // attempt must purge the stale endpoint via unregister and then re-register.
+    // attempts purge the stale endpoint via unregister and then re-register
+    // (Homebridge 2.4 rejects a register of a UUID it still holds).
     let registerCount = 0;
     const { api, registered, unregistered } = makeApi({
         registerImpl: (acc) => {
@@ -292,7 +296,7 @@ test('stale matter.js endpoint: second recovery attempt unregisters before re-re
 
     assert.equal(registry.getStatus('scenario_stale'), 'registered');
     assert.equal(registerCount, 3, 'three register calls: initial + recovery#1 + recovery#2-after-purge');
-    assert.deepEqual(unregistered, ['scenario_stale'], 'recovery#2 must unregister the stale endpoint before re-registering');
+    assert.deepEqual(unregistered, ['scenario_stale', 'scenario_stale'], 'each recovery attempt unregisters before re-registering');
     // UUID is preserved across all attempts — Apple Home rooms survive.
     for (const r of registered) assert.equal(r.UUID, 'scenario_stale');
 });
@@ -873,4 +877,36 @@ test('failed explicit thermostat recovery rolls back once to TemperatureSensor',
     const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
     assert.equal(saved.thermostats[0].mode, 'fallback');
     assert.equal(saved.thermostats[0].lastProcessedRecoveryRequest, 1);
+});
+
+test('explicit thermostat recovery removes a cache-restored fallback endpoint under Homebridge 2.4 unregister semantics', async () => {
+    const storagePath = tmpStorage();
+    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
+        thermostatAsTemperatureSensor: ['thermostat_18'],
+    }));
+    const { api, registered } = makeApi({
+        // Homebridge 2.4.0 dereferences `accessory.deviceType.deviceType` before removing anything.
+        unregisterImpl: (accessories) => accessories.forEach((a) => a.deviceType.deviceType),
+        initiallyQueryable: ['thermostat_18'],
+    });
+    const registry = new MatterAccessoryRegistry({
+        api,
+        log: silentLog(),
+        getWsClient: () => undefined,
+        storagePath,
+        recoveryRequests: { thermostat_18: 1 },
+    });
+    registry.configureCachedAccessory({
+        UUID: 'thermostat_18',
+        displayName: 'Riscaldamento Sala',
+        deviceType: { name: 'TemperatureSensor', code: 770 },
+        context: { device: thermostatDevice() },
+    });
+
+    await registry.addOrUpdateAccessory(thermostatDevice());
+    await delay(250);
+
+    assert.equal(registered.at(-1).deviceType._t, 'Thermostat');
+    const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
+    assert.equal(saved.thermostats[0].mode, 'native');
 });
