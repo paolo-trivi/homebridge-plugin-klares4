@@ -14,6 +14,12 @@
  *
  * HAP-NodeJS `checkName` rule (Apple HomeKit naming guidance):
  *     ^[\p{L}\p{N}][\p{L}\p{N}’ '.,-]*[\p{L}\p{N}’]$
+ * HAP-NodeJS 2.2.2 tightened the end of that rule to a letter or digit only
+ * (no trailing ’) and, since first and last character are distinct, a name
+ * needs at least two characters. Those two extra rules are applied by
+ * `sanitizeHapDisplayName` alone: `cleanDisplayName` keeps its historical
+ * output because paired Matter endpoints and the persisted Matter name map
+ * are derived from it.
  *
  * Allowlist:
  *   \p{L}   Unicode letters (includes Italian accents à è é ì ò ù)
@@ -61,13 +67,32 @@ export function cleanDisplayName(raw: string, maxLength: number): string {
     return truncateDisplayName(s, maxLength);
 }
 
+// HAP-only: HAP-NodeJS 2.2.2 requires the last character to be a letter/digit.
+const HAP_BOUNDARY_RIGHT = /[^\p{L}\p{N}]+$/u;
+
+function cleanHapName(raw: string): string {
+    return cleanDisplayName(raw, HAP_MAX_NAME_LENGTH).replace(HAP_BOUNDARY_RIGHT, '');
+}
+
+function isHapNameLongEnough(name: string): boolean {
+    return Array.from(name).length >= 2;
+}
+
 /**
  * Sanitise a device name for the HAP path (PlatformAccessory displayName and
  * the `Name` characteristic set by the accessory handlers). Guaranteed to
- * satisfy the HAP-NodeJS `checkName` regex; never returns an empty string.
+ * satisfy the HAP-NodeJS 2.2.2 `checkName` regex; never returns an empty
+ * string. A one-character name is completed with the fallback (the device
+ * id), e.g. "A" -> "A zone 3".
  */
 export function sanitizeHapDisplayName(name: string, fallback = 'Device'): string {
-    const safe = cleanDisplayName(typeof name === 'string' ? name : '', HAP_MAX_NAME_LENGTH);
-    if (safe) return safe;
-    return cleanDisplayName(fallback, HAP_MAX_NAME_LENGTH) || 'Device';
+    const raw = typeof name === 'string' ? name : '';
+    const safe = cleanHapName(raw);
+    if (isHapNameLongEnough(safe)) return safe;
+    if (safe) {
+        const completed = cleanHapName(`${safe} ${fallback}`);
+        if (isHapNameLongEnough(completed)) return completed;
+    }
+    const safeFallback = cleanHapName(fallback);
+    return isHapNameLongEnough(safeFallback) ? safeFallback : 'Device';
 }

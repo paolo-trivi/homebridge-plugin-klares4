@@ -14,6 +14,8 @@ export class PlatformLifecycleService {
             callback();
             this.summaryTimeout = undefined;
         }, delayMs);
+        // A pending log summary must never delay Homebridge's exit.
+        this.summaryTimeout.unref?.();
     }
 
     public clearSummaryTimer(): void {

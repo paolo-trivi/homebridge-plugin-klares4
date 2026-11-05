@@ -109,7 +109,7 @@ In-place updates are safe by design: accessory UUIDs, serial numbers and Matter 
 
 Tested with **Ksenia Lares 4.0** central units (firmware exposing the `KS_WSOCK` WebSocket subprotocol on the panel's local IP, with a valid system PIN). If your specific Lares 4.0 model works or has issues, please open an issue so the compatibility list can grow.
 
-Requires Homebridge `>= 1.6.0` (also compatible with the 2.x beta line) and Node.js `>= 20`. **Matter support requires Homebridge 2.x.**
+Requires Homebridge `>= 1.6.0` (also compatible with the 2.x beta line) and Node.js `>= 22` (Homebridge 2.4 supports Node 22, 24 and 26). **Matter support requires Homebridge 2.x.**
 
 ---
 
@@ -144,7 +144,7 @@ If this plugin saves you time, please ⭐ the repo — it really helps others di
 ### Prerequisites
 
 - Homebridge >= 1.6.0 (Homebridge 2.x required for Matter)
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - Ksenia Lares4 system with WebSocket access enabled
 
 ### Installation
@@ -188,23 +188,17 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 			"maxSeconds": 30,
 			"reconnectInterval": 5000,
 			"heartbeatInterval": 30000,
-			"debug": false,
+			"logLevel": 1,
 			"excludeZones": ["1", "5"],
 			"excludeOutputs": ["2", "7"],
 			"excludeSensors": ["3"],
-			"customNames": {
-				"zones": {
-					"1": "Main Door",
-					"2": "Kitchen Window"
-				},
-				"outputs": {
-					"9": "Living Room Light",
-					"1": "Office Blind"
-				},
-				"sensors": {
-					"1": "Living Room Thermometer"
-				}
-			}
+			"customNames": [
+				{ "deviceId": "zone_1", "name": "Main Door" },
+				{ "deviceId": "zone_2", "name": "Kitchen Window" },
+				{ "deviceId": "light_9", "name": "Living Room Light" },
+				{ "deviceId": "cover_1", "name": "Office Blind" },
+				{ "deviceId": "sensor_1", "name": "Living Room Thermometer" }
+			]
 		}
 	]
 }
@@ -218,6 +212,8 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `ip`                | string   | required     | Lares4 system IP address        |
 | `sender`            | string   | "homebridge" | Unique WebSocket ID             |
 | `pin`               | string   | required     | Access PIN                      |
+| `port`              | number   | 443 / 80     | WebSocket port. Leave it unset: 443 with `https`, 80 without. Set it only if the panel uses another port |
+| `https`             | boolean  | true         | Encrypted WebSocket (`wss://`) |
 | `maxSeconds`        | number   | 30           | Max cover travel time (seconds) |
 | `reconnectInterval` | number   | 5000         | Reconnection interval (ms)      |
 | `heartbeatInterval` | number   | 30000        | Heartbeat interval (ms)         |
@@ -225,16 +221,25 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `allowInsecureTls`  | boolean  | false        | Disable TLS certificate validation (trusted LAN only) |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | enabled/freshness defaults | DOMUS thermostat mapping, manual overrides, freshness fallback |
-| `ksaImport`         | object   | disabled     | Import KSA backup metadata for thermostat routing, room mapping and optional config apply |
-| `debug`             | boolean  | false        | Detailed logging                |
-| `telemetry`         | boolean  | true         | Anonymous error reporting       |
-| `excludeZones`      | string[] | []           | Zones to exclude                |
-| `excludeOutputs`    | string[] | []           | Outputs to exclude              |
-| `excludeSensors`    | string[] | []           | Sensors to exclude              |
+| `ksaImport`         | object   | disabled     | Import KSA backup metadata for thermostat routing, room mapping and optional config apply. Imported names, rooms and exclusions are added without overriding yours, see [`docs/en/config-and-ui.md`](docs/en/config-and-ui.md#ksa-import-block) |
+| `debug`             | boolean  | false        | Legacy detailed logging, used only when `logLevel` is absent. The Homebridge UI always saves `logLevel`, so use `logLevel: 2` instead |
+| `telemetry`         | boolean  | true         | Anonymous error reporting (opt-out), see [Telemetry](#telemetry) |
+| `generateDebugFile` | boolean  | false        | Capture raw WebSocket traffic at the next start and write `klares4-debug-*.json` (PINs masked); resets itself to `false` |
+| `debugCaptureDurationMs` | number | 60000     | Length of that capture (10000–1800000 ms). Raise it to 300000–600000 on Matter-only setups where Apple Home needs minutes to respond after a restart |
+| `excludeZones`      | string[] | []           | Zones to exclude (numeric ID, e.g. `"5"` for `zone_5`) |
+| `excludeOutputs`    | string[] | []           | Outputs to exclude (numeric ID, e.g. `"37"` for `light_37`) |
+| `excludeSensors`    | string[] | []           | Sensors to exclude (numeric DOMUS ID, which hides all three readings, or `sensor_system_temp_in` / `sensor_system_temp_out`) |
+| `excludeScenarios`  | string[] | []           | Scenarios to exclude (numeric ID) |
+| `exposePartialArmScenarios` | boolean | false  | Expose partial-arm scenarios (category `PARTIAL`). Off by default: they are not exposed to HomeKit, Matter or MQTT and cannot be triggered, like ARM/DISARM scenarios, which are never exposed. Turn it on only if you accept that anyone who can operate the switch (voice assistants, scenes, automations, MQTT) can partially arm the alarm without a PIN prompt |
 | `matterExposure`    | object   | all `true`   | Per-type Matter exposure switches (`zones`, `sensors`, `scenarios`, `lights`, `covers`, `gates`, `thermostats`) — Matter side only, see [Voice commands](#voice-commands-alexa--siri--google) |
-| `matterOverrides`   | array    | []           | Per-device Matter-only `name` / `exposed` overrides (`{ deviceId, name, exposed }`) |
-| `matterRecoveryRequests` | object | {}         | Monotonic, one-shot Matter Thermostat recovery generation keyed by `thermostat_*` ID |
-| `customNames`       | object   | {}           | Custom names                    |
+| `matterOverrides`   | array    | []           | Per-device Matter-only `name` / `exposed` overrides (`{ deviceId, name, exposed }`). In the UI "Exposed on Matter" is ticked by default; a ticked row keeps the device exposed even if its category is off in `matterExposure` |
+| `matterRecoveryRequests` | array | []         | One-shot Matter Thermostat recovery requests (`{ deviceId, generation }`, `deviceId` a `thermostat_*` ID, `generation` an integer ≥ 1 that only ever increases). Rows without a `deviceId` or a valid `generation` are ignored |
+| `matterUnregisterTimeoutMs` | number | 3000   | How long (500–30000 ms) the plugin waits for a removed Matter endpoint to really disappear before giving up and keeping the current name |
+| `customNames`       | array    | []           | Custom names shared by HomeKit, MQTT and Matter (`{ deviceId, name }`; `sensor_<id>` names all three readings of a DOMUS sensor; `sensor_system_temp_in` / `_out` rename the panel's own temperature readings, name used as-is). The legacy map form (`{ "outputs": { "9": "…" } }`) is still read, but the Homebridge UI deletes it on its next save |
+| `roomMapping`       | object   | disabled     | Groups MQTT topics by room (`enabled`, `rooms[]` with `roomName` in `^[a-z0-9_]+$` and `devices[].deviceId`) |
+| `mqtt`              | object   | disabled     | Optional MQTT bridge, see [MQTT Bridge](#mqtt-bridge-optional) |
+
+The startup log prints every discovered device with its **ID** (for `customNames`, `matterOverrides`, `roomMapping`) and its **exclude** value (for the `exclude*` lists).
 
 ### Supported Accessory Types
 
@@ -285,13 +290,21 @@ Enable the MQTT bridge in the "MQTT Bridge" configuration section:
 		"broker": "mqtt://192.168.1.100:1883",
 		"username": "mqtt_user",
 		"password": "mqtt_password",
-		"clientId": "homebridge-klares4",
 		"topicPrefix": "homebridge/klares4",
 		"qos": 1,
 		"retain": true
 	}
 }
 ```
+
+`mqtt.port` (optional) overrides the port in the broker URL. Leave it empty to use the URL's port, or the protocol default (1883 for `mqtt://`, 8883 for `mqtts://`). `clientId` must be unique per Homebridge instance on the same broker; leave it empty to get a random one.
+
+Behaviour worth knowing:
+
+- State topics are retained. While the broker is unreachable nothing is queued: the latest state of every device is republished on reconnect.
+- Commands must be published with `retain=false`. A retained command on a `/set` topic is ignored with a warning (the broker would replay it at every reconnect); clear it with an empty retained message.
+- Room names containing `+`, `#` or `/` are published with `_` in their place.
+- When a device is renamed while the plugin runs, the old retained state topic is cleared. Topics left over from before a restart are not known to the plugin.
 
 #### State Publishing
 
@@ -350,22 +363,31 @@ If the plugin cannot connect:
 1. Verify the IP address is correct
 2. Check that the PIN is valid
 3. Ensure the Lares4 system accepts WebSocket connections
-4. Verify port 443 (HTTPS) or 80 (HTTP) is accessible
+4. Verify port 443 (HTTPS) or 80 (HTTP) is accessible. If you set `https: false`, leave `port` empty or set it to 80: an explicit `port: 443` is used as-is
 
 #### Debug
 
-Enable debug logging for detailed diagnostics:
+Set the log level to debug (in the UI: Advanced → Log level → 2):
 
 ```json
 {
-	"debug": true
+	"logLevel": 2
 }
 ```
 
+The legacy `"debug": true` only applies when `logLevel` is absent. The Homebridge UI always saves `logLevel` (default 1), so after any UI save `debug` alone has no effect.
+
+To capture the raw panel traffic for a bug report, enable `generateDebugFile` and restart: the plugin records for `debugCaptureDurationMs` (default 60 s), writes `klares4-debug-*.json` in the Homebridge storage folder with PINs masked, and switches the flag back off. If Homebridge restarts during the capture, the file is written at shutdown.
+
 #### Telemetry
 
-By default, the plugin anonymously reports technical errors to the developer via Sentry. This helps identify and fix bugs faster. Strict sanitization ensures your PIN, panel IP, tokens, client IP, configuration and custom device names are **never** transmitted. 
-If you prefer not to send error reports, you can opt out by adding:
+Telemetry is **on by default**: the plugin sends anonymous error reports to the developer via Sentry. Opt out with `"telemetry": false`.
+
+What is sent: only errors the plugin reports itself at a few explicit points (currently a failed platform start-up or connection initialisation), with the error type, message and stack trace, the plugin version and a short context label. There is no global capture of crashes or unhandled exceptions, and no analytics or usage data.
+
+Before sending, every event is sanitized: the PIN, panel IP/host and sender you configured, URLs and IPv4 addresses are scrubbed from the text, and fields such as names, rooms, devices, configuration and payloads are dropped. Stack-frame paths are shortened to the part inside the plugin or `node_modules`, and your home directory is replaced with `~`. Reports go through a private Sentry client that other plugins in the same Homebridge process can neither read nor replace.
+
+To opt out:
 
 ```json
 {
@@ -392,7 +414,7 @@ This runs:
 
 GitHub Actions workflows:
 
-- `CI` (`.github/workflows/ci.yml`): Node 20/22 validation, strict type-checks, tests, build artifact.
+- `CI` (`.github/workflows/ci.yml`): Node 22/24 validation, strict type-checks, tests, build artifact.
 - `Release Publish` (`.github/workflows/release-publish.yml`): npm publish with provenance from tags (`v*`) or manual dispatch.
 
 Trusted publishing:
@@ -494,13 +516,21 @@ Non serve nessuna configurazione aggiuntiva: abilita Matter in Homebridge e abbi
 
 `matterExposure` nasconde categorie complete solo da Matter. Per eccezioni puntuali usa `matterOverrides`, indicizzato per ID canonico: `name` ed `exposed` non modificano HomeKit/HAP o MQTT. L'analizzatore vocale segnala collisioni lessicali e semantiche con un sommario e un hash deterministico, senza rinominare automaticamente e senza fingere di osservare la cache interna di Alexa.
 
-I termostati persistiti come sensori temperatura fallback non vengono ritentati a ogni boot. Una voce `"thermostat_18": 1` in `matterRecoveryRequests` autorizza un solo tentativo controllato; incrementa il numero solo per un nuovo tentativo deliberato. In caso di fallimento o riavvio interrotto il fallback viene ripristinato automaticamente. Non cancellare lo store Matter.
+I termostati persistiti come sensori temperatura fallback non vengono ritentati a ogni boot. Una riga `{ "deviceId": "thermostat_18", "generation": 1 }` in `matterRecoveryRequests` autorizza un solo tentativo controllato; incrementa il numero solo per un nuovo tentativo deliberato. In caso di fallimento o riavvio interrotto il fallback viene ripristinato automaticamente. Non cancellare lo store Matter.
+
+### Aggiornare il plugin (importante)
+
+**Aggiorna sempre sul posto** (Homebridge UI → Plugin → Aggiorna, oppure `npm update -g homebridge-plugin-klares4`).
+
+**Non disinstallare e reinstallare mai il plugin e non cancellare o rigenerare mai il child bridge Matter** per "risolvere" un problema: cosi si rigenerano lo username del bridge e lo storage Matter, e si distruggono i fabric gia commissionati. Ogni controller (Apple Casa, Alexa, Google) vede un bridge nuovo e devi riabbinarlo e ricostruire stanze e automazioni da zero. Non e teoria: e successo su un'installazione reale il 2026-07-05.
+
+Gli aggiornamenti sul posto sono sicuri per costruzione: UUID degli accessori, numeri di serie e identita degli endpoint Matter restano stabili tra le versioni, e il plugin registra di nuovo gli stessi accessori a ogni avvio proprio perche abbinamenti, stanze e automazioni sopravvivano.
 
 ### Compatibilita
 
 Testato con centrali **Ksenia Lares 4.0** (firmware che espone il sottoprotocollo WebSocket `KS_WSOCK` sull'IP locale del pannello, con PIN di sistema valido). Se il tuo modello specifico Lares 4.0 funziona o ha problemi, apri una issue cosi possiamo ampliare la lista di compatibilita.
 
-Richiede Homebridge `>= 1.6.0` (compatibile anche con la linea 2.x beta) e Node.js `>= 20`. **Il supporto Matter richiede Homebridge 2.x.**
+Richiede Homebridge `>= 1.6.0` (compatibile anche con la linea 2.x beta) e Node.js `>= 22` (Homebridge 2.4 supporta Node 22, 24 e 26). **Il supporto Matter richiede Homebridge 2.x.**
 
 Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davvero altri a trovarlo.
 
@@ -522,7 +552,7 @@ Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davve
 ### Prerequisiti
 
 - Homebridge >= 1.6.0 (Homebridge 2.x richiesto per Matter)
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0
 - Sistema Ksenia Lares4 con accesso WebSocket abilitato
 
 ### Installazione
@@ -566,23 +596,17 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 			"maxSeconds": 30,
 			"reconnectInterval": 5000,
 			"heartbeatInterval": 30000,
-			"debug": false,
+			"logLevel": 1,
 			"excludeZones": ["1", "5"],
 			"excludeOutputs": ["2", "7"],
 			"excludeSensors": ["3"],
-			"customNames": {
-				"zones": {
-					"1": "Porta Principale",
-					"2": "Finestra Cucina"
-				},
-				"outputs": {
-					"9": "Luce Sala Custom",
-					"1": "Tapparella Studio"
-				},
-				"sensors": {
-					"1": "Termometro Sala"
-				}
-			}
+			"customNames": [
+				{ "deviceId": "zone_1", "name": "Porta Principale" },
+				{ "deviceId": "zone_2", "name": "Finestra Cucina" },
+				{ "deviceId": "light_9", "name": "Luce Sala Custom" },
+				{ "deviceId": "cover_1", "name": "Tapparella Studio" },
+				{ "deviceId": "sensor_1", "name": "Termometro Sala" }
+			]
 		}
 	]
 }
@@ -596,21 +620,34 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `ip`                | string   | obbligatorio | Indirizzo IP del sistema Lares4 |
 | `sender`            | string   | "homebridge" | ID univoco per WebSocket        |
 | `pin`               | string   | obbligatorio | PIN di accesso                  |
+| `port`              | number   | 443 / 80     | Porta WebSocket. Lasciala vuota: 443 con `https`, 80 senza. Impostala solo se la centrale usa un'altra porta |
+| `https`             | boolean  | true         | WebSocket cifrato (`wss://`)    |
 | `maxSeconds`        | number   | 30           | Tempo max tapparelle (secondi)  |
 | `reconnectInterval` | number   | 5000         | Intervallo riconnessione (ms)   |
 | `heartbeatInterval` | number   | 30000        | Intervallo heartbeat (ms)       |
+| `commandTimeoutMs`  | number   | 8000         | Timeout della risposta ai comandi API (ms) |
+| `allowInsecureTls`  | boolean  | false        | Disattiva la verifica del certificato TLS (solo su LAN fidata) |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | default attivi | Mapping termostati DOMUS, override manuali e fallback freshness |
-| `ksaImport`         | object   | disabilitato | Import metadata da backup KSA per routing termostati, room mapping e apply opzionale |
-| `debug`             | boolean  | false        | Logging dettagliato             |
-| `telemetry`         | boolean  | true         | Segnalazione anonima errori     |
-| `excludeZones`      | string[] | []           | Zone da escludere               |
-| `excludeOutputs`    | string[] | []           | Output da escludere             |
-| `excludeSensors`    | string[] | []           | Sensori da escludere            |
+| `ksaImport`         | object   | disabilitato | Import metadata da backup KSA per routing termostati, room mapping e apply opzionale. Nomi, stanze ed esclusioni importati si aggiungono ai tuoi senza sovrascriverli, vedi [`docs/it/configurazione-e-ui.md`](docs/it/configurazione-e-ui.md#blocco-import-ksa) |
+| `debug`             | boolean  | false        | Logging dettagliato legacy, usato solo se `logLevel` manca. La UI Homebridge salva sempre `logLevel`, quindi usa `logLevel: 2` |
+| `telemetry`         | boolean  | true         | Segnalazione anonima errori (opt-out), vedi [Telemetry](#telemetry-1) |
+| `generateDebugFile` | boolean  | false        | Cattura il traffico WebSocket al prossimo avvio e scrive `klares4-debug-*.json` (PIN mascherati); torna da solo a `false` |
+| `debugCaptureDurationMs` | number | 60000     | Durata della cattura (10000–1800000 ms). Alzala a 300000–600000 su installazioni solo Matter, dove Apple Casa impiega minuti a rispondere dopo un riavvio |
+| `excludeZones`      | string[] | []           | Zone da escludere (ID numerico, per esempio `"5"` per `zone_5`) |
+| `excludeOutputs`    | string[] | []           | Output da escludere (ID numerico, per esempio `"37"` per `light_37`) |
+| `excludeSensors`    | string[] | []           | Sensori da escludere (ID DOMUS numerico, che nasconde tutte e tre le letture, oppure `sensor_system_temp_in` / `sensor_system_temp_out`) |
+| `excludeScenarios`  | string[] | []           | Scenari da escludere (ID numerico) |
+| `exposePartialArmScenarios` | boolean | false  | Espone gli scenari di inserimento parziale (categoria `PARTIAL`). Disattivato di default: non vengono esposti a HomeKit, Matter o MQTT e non possono essere attivati, come gli scenari ARM/DISARM, che non vengono mai esposti. Attivalo solo se accetti che chiunque possa azionare l'interruttore (assistenti vocali, scene, automazioni, MQTT) possa inserire parzialmente l'allarme senza che venga chiesto il PIN |
 | `matterExposure`    | object   | tutti `true` | Esposizione Matter per categoria |
-| `matterOverrides`   | array    | []           | Override Matter-only `name` / `exposed` (`{ deviceId, name, exposed }`) |
-| `matterRecoveryRequests` | object | {}         | Generazione monotona one-shot per recovery di un `thermostat_*` |
-| `customNames`       | object   | {}           | Nomi personalizzati             |
+| `matterOverrides`   | array    | []           | Override Matter-only `name` / `exposed` (`{ deviceId, name, exposed }`). Nella UI "Esposto su Matter" e selezionato di default; una riga selezionata mantiene esposto il dispositivo anche se la sua categoria e disattivata in `matterExposure` |
+| `matterRecoveryRequests` | array | []         | Richieste one-shot di recovery del termostato Matter (`{ deviceId, generation }`, `deviceId` un ID `thermostat_*`, `generation` un intero ≥ 1 che puo solo crescere). Le righe senza `deviceId` o senza una `generation` valida vengono ignorate |
+| `matterUnregisterTimeoutMs` | number | 3000   | Quanto attendere (500–30000 ms) che un endpoint Matter rimosso sparisca davvero, prima di rinunciare e mantenere il nome attuale |
+| `customNames`       | array    | []           | Nomi personalizzati condivisi da HomeKit, MQTT e Matter (`{ deviceId, name }`; `sensor_<id>` rinomina tutte e tre le letture di un sensore DOMUS; `sensor_system_temp_in` / `_out` rinominano le temperature della centrale, nome usato cosi com'e). Il vecchio formato a mappe (`{ "outputs": { "9": "…" } }`) viene ancora letto, ma la UI Homebridge lo cancella al salvataggio successivo |
+| `roomMapping`       | object   | disabilitato | Raggruppa i topic MQTT per stanza (`enabled`, `rooms[]` con `roomName` in `^[a-z0-9_]+$` e `devices[].deviceId`) |
+| `mqtt`              | object   | disabilitato | Bridge MQTT opzionale, vedi [Bridge MQTT](#bridge-mqtt-opzionale) |
+
+Il log di avvio elenca ogni dispositivo trovato con il suo **ID** (per `customNames`, `matterOverrides`, `roomMapping`) e il valore **exclude** (per le liste `exclude*`).
 
 ### Tipi di Accessori Supportati
 
@@ -661,13 +698,21 @@ Abilita il bridge MQTT nella sezione "MQTT Bridge" della configurazione:
 		"broker": "mqtt://192.168.1.100:1883",
 		"username": "mqtt_user",
 		"password": "mqtt_password",
-		"clientId": "homebridge-klares4",
 		"topicPrefix": "homebridge/klares4",
 		"qos": 1,
 		"retain": true
 	}
 }
 ```
+
+`mqtt.port` (opzionale) sostituisce la porta nell'URL del broker. Lasciala vuota per usare la porta dell'URL, o quella di default del protocollo (1883 per `mqtt://`, 8883 per `mqtts://`). `clientId` deve essere unico per ogni istanza di Homebridge sullo stesso broker; lascialo vuoto per averne uno casuale.
+
+Comportamenti da conoscere:
+
+- I topic di stato sono retained. Mentre il broker non e raggiungibile non viene accodato nulla: alla riconnessione viene ripubblicato l'ultimo stato di ogni dispositivo.
+- I comandi vanno pubblicati con `retain=false`. Un comando retained su un topic `/set` viene ignorato con un warning (il broker lo ripeterebbe a ogni riconnessione); cancellalo con un messaggio retained vuoto.
+- I nomi di stanza che contengono `+`, `#` o `/` vengono pubblicati con `_` al loro posto.
+- Se un dispositivo viene rinominato mentre il plugin e in esecuzione, il vecchio topic di stato retained viene cancellato. I topic rimasti da prima di un riavvio non sono noti al plugin.
 
 #### Pubblicazione Stati
 
@@ -726,22 +771,31 @@ Se il plugin non riesce a connettersi:
 1. Verifica che l'IP sia corretto
 2. Controlla che il PIN sia valido
 3. Assicurati che il sistema Lares4 accetti connessioni WebSocket
-4. Verifica che la porta 443 (HTTPS) o 80 (HTTP) sia accessibile
+4. Verifica che la porta 443 (HTTPS) o 80 (HTTP) sia accessibile. Con `https: false` lascia `port` vuota o impostala a 80: un `port: 443` esplicito viene usato cosi com'e
 
 #### Debug
 
-Abilita il debug logging per diagnosi dettagliate:
+Imposta il livello di log a debug (nella UI: Avanzate → Livello Log → 2):
 
 ```json
 {
-	"debug": true
+	"logLevel": 2
 }
 ```
 
+Il vecchio `"debug": true` vale solo se `logLevel` manca. La UI Homebridge salva sempre `logLevel` (default 1), quindi dopo un salvataggio dalla UI `debug` da solo non ha effetto.
+
+Per catturare il traffico della centrale da allegare a una segnalazione, attiva `generateDebugFile` e riavvia: il plugin registra per `debugCaptureDurationMs` (default 60 s), scrive `klares4-debug-*.json` nella cartella storage di Homebridge con i PIN mascherati e rimette il flag a `false`. Se Homebridge si riavvia durante la cattura, il file viene scritto allo spegnimento.
+
 #### Telemetry
 
-Di default, il plugin segnala anonimamente gli errori tecnici allo sviluppatore tramite Sentry. Questo aiuta a identificare e risolvere i bug più velocemente. Una rigida sanitizzazione garantisce che PIN, IP della centrale, token, IP del client, configurazione e nomi personalizzati dei dispositivi non vengano **mai** trasmessi.
-Se preferisci non inviare segnalazioni di errore, puoi disattivare la funzione aggiungendo:
+La telemetry e **attiva di default**: il plugin invia allo sviluppatore segnalazioni anonime di errore tramite Sentry. Per disattivarla usa `"telemetry": false`.
+
+Cosa viene inviato: solo gli errori che il plugin stesso segnala in pochi punti espliciti (oggi un avvio della piattaforma o un'inizializzazione della connessione falliti), con tipo di errore, messaggio e stack trace, versione del plugin e una breve etichetta di contesto. Non c'e nessuna cattura globale di crash o eccezioni non gestite, e nessun dato di utilizzo o analytics.
+
+Prima dell'invio ogni evento viene sanitizzato: PIN, IP/host della centrale e sender configurati, URL e indirizzi IPv4 vengono rimossi dal testo, e campi come nomi, stanze, dispositivi, configurazione e payload vengono scartati. I percorsi negli stack frame vengono ridotti alla parte interna al plugin o a `node_modules`, e la tua home directory viene sostituita da `~`. Le segnalazioni passano da un client Sentry privato, che gli altri plugin nello stesso processo Homebridge non possono leggere ne sostituire.
+
+Per disattivarla:
 
 ```json
 {

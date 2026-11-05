@@ -79,9 +79,12 @@ export class ZoneAccessory {
         return this.device.status.fault ? 1 : 0;
     }
 
+    /**
+     * 0 = not tampered. The zone status exposes no tamper field, so this is
+     * never 1: a bypass is not a tamper and is expressed by StatusActive=false.
+     */
     public async getStatusTampered(): Promise<CharacteristicValue> {
-        // 0 = not tampered, 1 = tampered
-        return this.device.status.bypassed ? 1 : 0;
+        return 0;
     }
 
     private updateCharacteristics(): void {
@@ -100,10 +103,7 @@ export class ZoneAccessory {
             this.device.status.fault ? 1 : 0,
         );
 
-        this.service.updateCharacteristic(
-            this.platform.Characteristic.StatusTampered,
-            this.device.status.bypassed ? 1 : 0,
-        );
+        this.service.updateCharacteristic(this.platform.Characteristic.StatusTampered, 0);
     }
 
     public updateStatus(newDevice: KseniaZone): void {
@@ -143,11 +143,6 @@ export class ZoneAccessory {
         if (this.lastFault !== newFault && newFault) {
             this.platform.log.warn(`${this.device.name}: Fault detected`);
         }
-
-        this.service.updateCharacteristic(
-            this.platform.Characteristic.StatusTampered,
-            newBypassed ? 1 : 0,
-        );
 
         if (this.lastBypassed !== newBypassed && newBypassed) {
             this.platform.log.warn(`${this.device.name}: Zone bypassed`);

@@ -86,3 +86,52 @@ test('a throwing unregister that leaves the endpoint present still fails', async
   assert.equal(await coordinator.unregister('a', 'onOff'), false);
   assert.equal(coordinator.getState('a'), 'failed');
 });
+
+// Homebridge 2.4.0 `MatterAPIImpl.unregisterPlatformAccessories` evaluates
+// `requiresExternalBridge(accessory.deviceType)`, i.e. `deviceType.deviceType`,
+// *before* emitting the removal: a bare `{ UUID }` stub throws a TypeError and
+// nothing is removed. This mock reproduces that contract.
+function homebridge24Api(present) {
+  const received = [];
+  return {
+    received,
+    api: { matter: {
+      registerPlatformAccessories: async (_p, _pl, accessories) => {
+        for (const accessory of accessories) present.add(accessory.UUID);
+      },
+      unregisterPlatformAccessories: async (_p, _pl, accessories) => {
+        for (const accessory of accessories) {
+          if (accessory.deviceType.deviceType === 'RoboticVacuumCleaner') continue;
+        }
+        for (const accessory of accessories) {
+          received.push(accessory);
+          present.delete(accessory.UUID);
+        }
+      },
+      getAccessoryState: async (id) => present.has(id) ? {} : undefined,
+    } },
+  };
+}
+
+test('unregister hands Homebridge the registered accessory, not a bare UUID stub', async () => {
+  const present = new Set();
+  const { api, received } = homebridge24Api(present);
+  const coordinator = new MatterTopologyCoordinator(api, log);
+  const accessory = { UUID: 'light_1', deviceType: { deviceType: 0x0100 }, clusters: { onOff: {} } };
+
+  await coordinator.register(accessory);
+  assert.equal(await coordinator.unregister('light_1', 'onOff'), true);
+  assert.equal(present.has('light_1'), false);
+  assert.equal(received[0], accessory);
+});
+
+test('unregister works for an endpoint only known from the Homebridge cache', async () => {
+  const present = new Set(['thermostat_18']);
+  const { api } = homebridge24Api(present);
+  const coordinator = new MatterTopologyCoordinator(api, log);
+  // Cache-restored accessories carry `deviceType` as `{ name, code }`.
+  coordinator.remember({ UUID: 'thermostat_18', deviceType: { name: 'TemperatureSensor', code: 770 } });
+
+  assert.equal(await coordinator.unregister('thermostat_18', 'onOff'), true);
+  assert.equal(present.has('thermostat_18'), false);
+});

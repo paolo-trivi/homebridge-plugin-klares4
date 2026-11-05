@@ -11,6 +11,7 @@ import type {
     KseniaZone,
 } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
+import { hasObservedState } from '../device-observation';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import {
     buildThermostatMatterState, toMatterTemperatureCelsius, clampMatterTemperature,
@@ -19,6 +20,7 @@ import {
 import { sanitizeMatterAccessoryName, MatterNameRegistry } from './matter-name-sanitizer';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { buildThermostatHandlers } from './matter-thermostat-handlers';
+import { buildCoverHandlers, buildLightHandlers, buildMomentaryHandlers } from './matter-command-handlers';
 
 const matterNameRegistry = new MatterNameRegistry();
 
@@ -76,6 +78,18 @@ interface MapperDeps {
      * mapper falls back to the module-level incremental registry.
      */
     resolveDisplayName?: (device: KseniaDevice) => string;
+    /**
+     * Latest known snapshot for a device ID. Homebridge registers handlers once
+     * per endpoint, so they outlive the device captured at mapping time.
+     */
+    getLatestDevice?: (id: string) => KseniaDevice | undefined;
+    /** Re-publish the known state of a device after a command the panel refused. */
+    republishState?: (id: string) => void;
+}
+
+function latestSnapshot<T extends KseniaDevice>(device: T, deps: MapperDeps): T {
+    const latest = deps.getLatestDevice?.(device.id);
+    return latest?.type === device.type ? latest as T : device;
 }
 
 const DEFAULT_MOMENTARY_AUTO_OFF_MS = 500;
@@ -136,25 +150,9 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
         }
         : { onOff: { onOff } };
 
-    const handlers: MatterAccessory['handlers'] = {
-        onOff: {
-            on: async () => { await getWsClient()?.switchLight(device.id, true); },
-            off: async () => { await getWsClient()?.switchLight(device.id, false); },
-        },
-    };
-
-    if (isDimmable) {
-        handlers.levelControl = {
-            moveToLevel: async (args: { level: number }) => {
-                const pct = Math.round((args.level / 254) * 100);
-                await getWsClient()?.dimLight(device.id, pct);
-            },
-            moveToLevelWithOnOff: async (args: { level: number }) => {
-                const pct = Math.round((args.level / 254) * 100);
-                await getWsClient()?.dimLight(device.id, pct);
-            },
-        };
-    }
+    const handlers = buildLightHandlers(device, isDimmable, {
+        api, getWsClient, latest: () => latestSnapshot(device, deps),
+    });
 
     return {
         ...baseFields(device, deps),
@@ -166,30 +164,37 @@ function mapLight(device: KseniaLight, deps: MapperDeps): MatterAccessory {
     };
 }
 
+/**
+ * Lares4: 0=closed, 100=open. Matter: 0=open (0%), 10000=closed (100%).
+ * The target must be the panel's own target (TPOS): matter.js derives
+ * `operationalStatus` from target vs current, so a target equal to the current
+ * position hides every movement from the controllers.
+ */
+export function coverLiftPercent100ths(status: Partial<KseniaCover['status']> | undefined): {
+    currentPositionLiftPercent100ths: number;
+    targetPositionLiftPercent100ths: number;
+} {
+    const position = status?.position ?? 0;
+    const target = status?.targetPosition ?? position;
+    return {
+        currentPositionLiftPercent100ths: Math.round((100 - position) * 100),
+        targetPositionLiftPercent100ths: Math.round((100 - target) * 100),
+    };
+}
+
 function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
     const { api, getWsClient } = deps;
-    const pos = device.status?.position ?? 0;
-    // Lares4: 0=closed, 100=open. Matter: 0=open (0%), 10000=closed (100%).
-    const matterPos = Math.round((100 - pos) * 100);
 
     return {
         ...baseFields(device, deps),
         deviceType: api.matter!.deviceTypes.WindowCovering,
         clusters: {
             windowCovering: {
-                currentPositionLiftPercent100ths: matterPos,
-                targetPositionLiftPercent100ths: matterPos,
+                ...coverLiftPercent100ths(device.status),
                 configStatus: { liftPositionAware: true, operational: true },
             },
         },
-        handlers: {
-            windowCovering: {
-                goToLiftPercentage: async (args: { liftPercent100thsValue: number }) => {
-                    const targetPct = 100 - Math.round(args.liftPercent100thsValue / 100);
-                    await getWsClient()?.moveCover(device.id, targetPct);
-                },
-            },
-        },
+        handlers: buildCoverHandlers(device, { api, getWsClient, latest: () => latestSnapshot(device, deps) }),
     };
 }
 
@@ -209,7 +214,11 @@ function mapThermostat(device: KseniaThermostat, deps: MapperDeps): MatterAccess
         // `refreshAccessoryMetadata` — share its state, which is what makes the
         // echo-suppression survive the multi-second WRITE_CFG round-trip.
         handlers: {
-            thermostat: buildThermostatHandlers({ device, supportsCooling, log, getWsClient, tracker: thermostatEchoTracker }),
+            thermostat: buildThermostatHandlers({
+                device, supportsCooling, log, getWsClient, tracker: thermostatEchoTracker,
+                getDevice: () => latestSnapshot(device, deps),
+                republish: () => deps.republishState?.(device.id),
+            }),
         },
     };
 }
@@ -223,8 +232,17 @@ export function mapThermostatAsTemperatureSensor(device: KseniaThermostat, deps:
     return {
         ...baseFields(device, deps),
         deviceType: deps.api.matter!.deviceTypes.TemperatureSensor,
-        clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(currentC)) } },
+        clusters: { temperatureMeasurement: { measuredValue: measured(device, () => clampCentidegrees(toMatterTemperatureCelsius(currentC))) } },
     };
+}
+
+/**
+ * MeasuredValue is nullable ("unknown") in all three measurement clusters. A
+ * discovery placeholder (0 °C, 0 lux) with no cached state behind it must not
+ * become the endpoint's first reading; the first real value fills it in.
+ */
+function measured(device: KseniaDevice, value: () => number): number | null {
+    return hasObservedState(device) ? value() : null;
 }
 
 function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | undefined {
@@ -232,9 +250,9 @@ function mapSensor(device: KseniaSensor, deps: MapperDeps): MatterAccessory | un
     const bf = baseFields(device, deps);
     const val = device.status.value;
     switch (device.status.sensorType) {
-        case 'temperature': return { ...bf, deviceType: api.matter!.deviceTypes.TemperatureSensor, clusters: { temperatureMeasurement: { measuredValue: clampCentidegrees(toMatterTemperatureCelsius(val)) } } };
-        case 'humidity':    return { ...bf, deviceType: api.matter!.deviceTypes.HumiditySensor,    clusters: { relativeHumidityMeasurement: { measuredValue: Math.round(Math.max(0, Math.min(100, val)) * 100) } } };
-        case 'light':       return { ...bf, deviceType: api.matter!.deviceTypes.LightSensor,       clusters: { illuminanceMeasurement: { measuredValue: luxToMatterIlluminance(val) } } };
+        case 'temperature': return { ...bf, deviceType: api.matter!.deviceTypes.TemperatureSensor, clusters: { temperatureMeasurement: { measuredValue: measured(device, () => clampCentidegrees(toMatterTemperatureCelsius(val))) } } };
+        case 'humidity':    return { ...bf, deviceType: api.matter!.deviceTypes.HumiditySensor,    clusters: { relativeHumidityMeasurement: { measuredValue: measured(device, () => Math.round(Math.max(0, Math.min(100, val)) * 100)) } } };
+        case 'light':       return { ...bf, deviceType: api.matter!.deviceTypes.LightSensor,       clusters: { illuminanceMeasurement: { measuredValue: measured(device, () => luxToMatterIlluminance(val)) } } };
         case 'motion':      return { ...bf, deviceType: api.matter!.deviceTypes.MotionSensor,      clusters: { occupancySensing: { occupancy: { occupied: val > 0 } } } };
         case 'contact':     return { ...bf, deviceType: api.matter!.deviceTypes.ContactSensor,     clusters: { booleanState: { stateValue: val === 0 } } };
         default:            return undefined;
@@ -255,10 +273,7 @@ function mapMomentarySwitch(device: KseniaDevice, trigger: () => Promise<void>, 
         ...baseFields(device, deps),
         deviceType: deps.api.matter!.deviceTypes.OnOffOutlet,
         clusters: { onOff: { onOff: false } },
-        handlers: { onOff: {
-            on: async () => { await trigger(); scheduleMomentaryAutoOff(device.id, deps); },
-            off: async () => { /* momentary trigger — no-op */ },
-        } },
+        handlers: buildMomentaryHandlers(async () => { await trigger(); scheduleMomentaryAutoOff(device.id, deps); }),
     };
 }
 

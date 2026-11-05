@@ -80,6 +80,10 @@ function asObject(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
 }
 
+/** Only object entries: a null or scalar in a PRG_* array is dropped, not dereferenced. */
 function asArray<T>(value: unknown): T[] {
-    return Array.isArray(value) ? (value as T[]) : [];
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value.filter((entry) => typeof entry === 'object' && entry !== null && !Array.isArray(entry)) as T[];
 }

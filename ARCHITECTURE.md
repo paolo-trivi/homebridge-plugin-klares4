@@ -48,6 +48,7 @@ This document describes the modular architecture delivered for `2.0.0-beta.0` wi
   - Public facade: `Lares4Platform` (`platform/index.ts`)
   - Internal services:
     - `platform/accessory-registry.ts`: cache/add/update/remove/prune accessory lifecycle.
+    - `platform/hap-prune-policy.ts`: HAP prune guards (only answered discovery families, persisted consecutive-miss counter in the accessory context).
     - `platform/accessory-handler-service.ts`: handler factory + status dispatch by device type.
     - `platform/discovery-service.ts`: global exclusions, derived name provenance and the single per-device Matter policy resolver.
     - `platform/device-list-service.ts`: device persistence + summary logging + room mapping example generation.

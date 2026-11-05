@@ -67,6 +67,7 @@ export class ThermostatAccessory {
 
         this.service
             .getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits)
+            .onSet(this.setTemperatureDisplayUnits.bind(this))
             .onGet(this.getTemperatureDisplayUnits.bind(this));
 
         if (this.device.humidity !== undefined) {
@@ -99,7 +100,10 @@ export class ThermostatAccessory {
         const newMode = homeKitTargetToDomainMode(value as number);
 
         try {
-            await this.platform.wsClient?.setThermostatMode(this.device.id, newMode);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.setThermostatMode(this.device.id, newMode);
             updateThermostatStatus(this.device, { mode: newMode });
 
             this.platform.log.info(`${this.device.name}: Mode ${newMode}`);
@@ -151,7 +155,10 @@ export class ThermostatAccessory {
         const targetTemperature = value as number;
 
         try {
-            await this.platform.wsClient?.setThermostatTemperature(this.device.id, targetTemperature);
+            if (!this.platform.wsClient) {
+                throw new Error('WebSocket client not initialized');
+            }
+            await this.platform.wsClient.setThermostatTemperature(this.device.id, targetTemperature);
             updateThermostatStatus(this.device, { targetTemperature });
 
             this.platform.log.info(`${this.device.name}: Target temperature ${targetTemperature}C`);
@@ -166,8 +173,16 @@ export class ThermostatAccessory {
         }
     }
 
+    /**
+     * Display-only preference (the panel always works in Celsius): kept in the
+     * accessory context, which Homebridge persists with the cached accessory.
+     */
     public async getTemperatureDisplayUnits(): Promise<CharacteristicValue> {
-        return 0; // Celsius
+        return this.storedDisplayUnits();
+    }
+
+    public async setTemperatureDisplayUnits(value: CharacteristicValue): Promise<void> {
+        this.accessory.context.temperatureDisplayUnits = value === 1 ? 1 : 0;
     }
 
     public async getCurrentRelativeHumidity(): Promise<CharacteristicValue> {
@@ -188,6 +203,10 @@ export class ThermostatAccessory {
         this.service.updateCharacteristic(
             this.platform.Characteristic.TargetHeatingCoolingState,
             targetState,
+        );
+        this.service.updateCharacteristic(
+            this.platform.Characteristic.TemperatureDisplayUnits,
+            this.storedDisplayUnits(),
         );
 
         const currentTemp =
@@ -242,11 +261,7 @@ export class ThermostatAccessory {
         );
         this.service.updateCharacteristic(
             this.platform.Characteristic.CurrentHeatingCoolingState,
-            deriveHomeKitCurrentState(
-                newDevice.mode,
-                newDevice.currentTemperature,
-                newDevice.targetTemperature,
-            ),
+            this.deriveCurrentState(newDevice),
         );
         if (newDevice.humidity !== undefined) {
             this.service.updateCharacteristic(
@@ -258,6 +273,11 @@ export class ThermostatAccessory {
         this.platform.log.debug(
             `Updated thermostat ${this.device.name}: ${this.device.currentTemperature}C -> ${this.device.targetTemperature}C (${this.device.mode})`,
         );
+    }
+
+    /** 0 = Celsius (default), 1 = Fahrenheit. */
+    private storedDisplayUnits(): 0 | 1 {
+        return this.accessory.context.temperatureDisplayUnits === 1 ? 1 : 0;
     }
 
     private deriveTargetState(mode: 'off' | 'heat' | 'cool' | 'auto'): 0 | 1 | 2 | 3 {

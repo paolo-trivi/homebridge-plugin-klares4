@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { AccessoryRegistry } = require('../dist/platform/accessory-registry.js');
+const { HAP_PRUNE_STALE_THRESHOLD_CYCLES } = require('../dist/platform/hap-prune-policy.js');
 
 class FakeAccessory {
   constructor(name, uuid) {
@@ -86,7 +87,7 @@ test('AccessoryRegistry updates existing handler', () => {
   assert.deepEqual(updated, ['light_1']);
 });
 
-test('AccessoryRegistry prunes stale accessories', () => {
+test('AccessoryRegistry prunes stale accessories after consecutive missed syncs', () => {
   const { registry, accessories, handlers, active, unregistered } = createRegistryHarness();
   accessories.set('uuid-light_1', new FakeAccessory('Luce', 'uuid-light_1'));
   accessories.set('uuid-light_2', new FakeAccessory('Luce2', 'uuid-light_2'));
@@ -94,6 +95,10 @@ test('AccessoryRegistry prunes stale accessories', () => {
   handlers.set('uuid-light_2', { id: 'handler2' });
   active.add('uuid-light_1');
 
+  for (let cycle = 1; cycle < HAP_PRUNE_STALE_THRESHOLD_CYCLES; cycle += 1) {
+    registry.pruneStaleAccessories();
+    assert.deepEqual(unregistered, []);
+  }
   registry.pruneStaleAccessories();
 
   assert.equal(accessories.has('uuid-light_1'), true);
@@ -116,6 +121,6 @@ test('AccessoryRegistry skips prune entirely when discovery returned no devices'
 
   // Once discovery works again, prune behaves normally.
   active.add('uuid-light_1');
-  registry.pruneStaleAccessories();
+  for (let cycle = 0; cycle < HAP_PRUNE_STALE_THRESHOLD_CYCLES; cycle += 1) registry.pruneStaleAccessories();
   assert.deepEqual(unregistered, ['uuid-light_2']);
 });

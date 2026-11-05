@@ -11,12 +11,11 @@ import {
 } from '../websocket/output-command-confirmation';
 import { clampValue } from '../websocket/device-state-projector';
 import { WsTransport } from '../websocket/ws-transport';
-import { updateThermostatSeasonHint } from './thermostat-write-payload';
-import { buildThermostatModeCommandPayload, buildThermostatSetpointCommandPayload } from './thermostat-command-payload';
-import { resolveThermostatCommandId } from './thermostat-command-id-resolver';
+import { ThermostatCommandService } from './thermostat-command-service';
 import type { KseniaMessage, KseniaMessagePayload, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
+import { isIgnoredScenarioCategory } from './device-parsers';
 import { logMutationOutcome, mutationOptions } from './command-outcome';
 interface CommandServiceDeps {
     state: WebSocketClientState;
@@ -30,9 +29,17 @@ interface CommandServiceDeps {
     wsTransport: WsTransport;
     emitRawMessage: (direction: RawMessageDirection, rawMessage: string) => void;
 } export class CommandService {
-    constructor(private readonly deps: CommandServiceDeps) {}
-    private readonly thermostatWriteSeasonById: Map<string, 'WIN' | 'SUM'> = new Map();
-    private static readonly THERMOSTAT_ACK_TIMEOUT_MS = 2500;
+    private readonly thermostatCommands: ThermostatCommandService;
+    constructor(private readonly deps: CommandServiceDeps) {
+        // Late-bound so a replaced sendKseniaCommand (tests) is still the one used.
+        this.thermostatCommands = new ThermostatCommandService({
+            state: deps.state,
+            log: deps.log,
+            logLevel: deps.logLevel,
+            commandDispatcher: deps.commandDispatcher,
+            send: (cmd, payloadType, payload, options) => this.sendKseniaCommand(cmd, payloadType, payload, options),
+        });
+    }
     public async sendLoginCommand(): Promise<void> {
         const loginMessage: KseniaMessage = {
             SENDER: this.deps.sender,
@@ -47,6 +54,8 @@ interface CommandServiceDeps {
             CRC_16: '0x0000',
         };
         loginMessage.CRC_16 = calculateCRC16(JSON.stringify(loginMessage));
+        this.deps.commandDispatcher.noteFireAndForget(loginMessage.ID);
+        if (this.deps.state.pendingLogin) this.deps.state.pendingLogin.messageId = loginMessage.ID;
         this.deps.log.info('Executing login...');
         const messageStr = JSON.stringify(loginMessage);
         this.deps.log.info(`Sending: ${maskSensitiveData(messageStr)}`);
@@ -151,112 +160,15 @@ interface CommandServiceDeps {
         });
     }
     public async setThermostatMode(thermostatId: string, mode: ThermostatMode): Promise<void> {
-        if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const outputThermostatId = stripDevicePrefix(thermostatId);
-        const commandThermostatId = await this.resolveThermostatCommandId(outputThermostatId);
-        updateThermostatSeasonHint(this.thermostatWriteSeasonById, commandThermostatId, mode);
-        await this.deps.commandDispatcher.enqueueDeviceCommand(thermostatId, async (): Promise<void> => {
-            const cfgEntry = buildThermostatModeCommandPayload(
-                commandThermostatId,
-                mode,
-                this.deps.state.thermostatCfgById.get(commandThermostatId),
-            );
-            await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
-                ID_LOGIN: 'true',
-                CFG_THERMOSTATS: [cfgEntry],
-            }, {
-                awaitResponse: true,
-                responseCmds: ['WRITE_CFG_RES'],
-                timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
-                requirePositiveResult: true,
-                allowGenericErrorFallback: true,
-            });
-            this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
-        });
+        await this.thermostatCommands.setThermostatMode(thermostatId, mode);
     }
     public async setThermostatTemperature(thermostatId: string, temperature: number): Promise<void> {
-        if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const safeTemperature = clampValue(temperature, 5, 40);
-        const outputThermostatId = stripDevicePrefix(thermostatId);
-        const commandThermostatId = await this.resolveThermostatCommandId(outputThermostatId);
-        await this.deps.commandDispatcher.enqueueDeviceCommand(thermostatId, async (): Promise<void> => {
-            await this.primeThermostatConfigCache(commandThermostatId);
-            const cfgEntry = buildThermostatSetpointCommandPayload({
-                systemThermostatId: commandThermostatId,
-                temperature: safeTemperature,
-                seasonById: this.thermostatWriteSeasonById,
-                existingCfg: this.deps.state.thermostatCfgById.get(commandThermostatId),
-            });
-            await this.sendKseniaCommand('WRITE_CFG', 'CFG_ALL', {
-                ID_LOGIN: 'true',
-                CFG_THERMOSTATS: [cfgEntry],
-            }, {
-                awaitResponse: true,
-                responseCmds: ['WRITE_CFG_RES'],
-                timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS,
-                requirePositiveResult: true,
-                allowGenericErrorFallback: true,
-            });
-            this.deps.state.thermostatCfgById.set(commandThermostatId, cfgEntry);
-        });
-    }
-    private async resolveThermostatCommandId(outputThermostatId: string): Promise<string> {
-        if (
-            this.deps.state.thermostatProgramById.size === 0
-            && !this.deps.state.missingThermostatProgramWarningOutputIds.has(outputThermostatId)
-        ) {
-            this.deps.log.warn(
-                `PRG_THERMOSTATS unavailable for thermostat_${outputThermostatId}, using degraded command fallback`,
-            );
-            this.deps.state.missingThermostatProgramWarningOutputIds.add(outputThermostatId);
-        }
-
-        const resolvedCommandId = await resolveThermostatCommandId({
-            outputThermostatId,
-            hasProgramMapping: this.deps.state.thermostatProgramById.size > 0,
-            cachedCommandId: this.deps.state.thermostatCommandIdByOutputId.get(outputThermostatId),
-            manualCommandId: this.getManualThermostatCommandId(outputThermostatId),
-            programCommandId: this.deps.state.thermostatProgramIdByOutputId.get(outputThermostatId),
-            mappedDomusSensorId: this.deps.state.thermostatToDomus.get(outputThermostatId),
-            primeConfig: (candidateId): Promise<boolean> => this.primeThermostatConfigCache(candidateId),
-            rememberCommandId: (resolvedCommandId): void => { this.deps.state.thermostatCommandIdByOutputId.set(outputThermostatId, resolvedCommandId); },
-            onResolvedAlias: (resolvedCommandId): void => this.deps.log.info(`Thermostat command ID resolved thermostat_${outputThermostatId} -> ${resolvedCommandId}`),
-        });
-        this.logThermostatRouting(outputThermostatId);
-        return resolvedCommandId;
-    }
-    private logThermostatRouting(outputThermostatId: string): void {
-        if (this.deps.logLevel < LogLevel.DEBUG) {
-            return;
-        }
-        const configId = this.deps.state.thermostatProgramIdByOutputId.get(outputThermostatId)
-            ?? this.deps.state.thermostatCommandIdByOutputId.get(outputThermostatId)
-            ?? outputThermostatId;
-        const domusSensorId = this.deps.state.thermostatToDomus.get(outputThermostatId) ?? 'NA';
-        const source = this.deps.state.thermostatProgramIdByOutputId.has(outputThermostatId) ? 'prg_thermostats' : 'fallback';
-        this.deps.log.debug(`thermostat_${outputThermostatId} => cfg:${configId} domus:${domusSensorId} source:${source}`);
-    }
-    private getManualThermostatCommandId(outputThermostatId: string): string | undefined { const pair = this.deps.state.domusThermostatConfig.manualCommandPairs.find((item) => stripDevicePrefix(item.thermostatOutputId) === outputThermostatId); return pair ? stripDevicePrefix(pair.commandThermostatId) : undefined; }
-    private async primeThermostatConfigCache(systemThermostatId: string): Promise<boolean> {
-        if (this.deps.state.thermostatCfgById.has(systemThermostatId)) return true;
-        try {
-            await this.sendKseniaCommand('READ', 'CFG_THERMOSTATS', {
-                ID_LOGIN: 'true',
-                ID_READ: systemThermostatId,
-                ID_ITEMS_RANGE: [systemThermostatId, systemThermostatId],
-            }, { awaitResponse: true, responseCmds: ['READ_RES'], timeoutMs: CommandService.THERMOSTAT_ACK_TIMEOUT_MS });
-            return this.deps.state.thermostatCfgById.has(systemThermostatId);
-        } catch (error: unknown) {
-            if (this.deps.state.thermostatCfgById.has(systemThermostatId)) return true;
-            if (this.deps.logLevel >= LogLevel.DEBUG) this.deps.log.debug(`Unable to read CFG_THERMOSTATS for thermostat ${systemThermostatId}: ${error instanceof Error ? error.message : String(error)}`);
-            await new Promise((resolve): void => { setTimeout(resolve, 150); });
-            if (this.deps.state.thermostatCfgById.has(systemThermostatId)) return true;
-            return false;
-        }
+        await this.thermostatCommands.setThermostatTemperature(thermostatId, temperature);
     }
     public async triggerScenario(scenarioId: string): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemScenarioId = stripDevicePrefix(scenarioId);
+        this.assertScenarioAllowed(systemScenarioId);
         await this.deps.commandDispatcher.enqueueDeviceCommand(scenarioId, async (): Promise<void> => {
             const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_EXE_SCENARIO', {
                 ID_LOGIN: 'true',
@@ -267,6 +179,16 @@ interface CommandServiceDeps {
             }, mutationOptions());
             logMutationOutcome(this.deps.log, 'Scenario', systemScenarioId, 'trigger', outcome);
         });
+    }
+    /** Defense in depth: never run an arming scenario with the stored PIN, even if an accessory exists. */
+    private assertScenarioAllowed(systemScenarioId: string): void {
+        const category = this.deps.state.scenarioCategoryById?.get(systemScenarioId);
+        if (category === undefined) {
+            throw new Error(`Scenario ${systemScenarioId} refused: not listed by the panel`);
+        }
+        if (isIgnoredScenarioCategory(category, this.deps.options.exposePartialArmScenarios ?? false)) {
+            throw new Error(`Scenario ${systemScenarioId} refused: category ${category} arms or disarms the alarm`);
+        }
     }
     private async sendKseniaCommand(
         cmd: string,
@@ -292,26 +214,35 @@ interface CommandServiceDeps {
         }
         let pendingResponsePromise: Promise<CommandAcknowledgement> | undefined;
         let stateConfirmation: OutputConfirmationHandle | undefined;
-        if (options.awaitResponse) {
-            pendingResponsePromise = this.deps.commandDispatcher.registerPendingCommand(
-                id,
-                options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                options.responseCmds,
-                options.requirePositiveResult,
-                options.allowGenericErrorFallback,
-            );
-        }
-        if (options.stateConfirmation) {
-            if (!this.deps.outputConfirmation) {
-                throw new Error('Output confirmation tracker not initialized');
-            }
-            stateConfirmation = this.deps.outputConfirmation.register(
-                options.stateConfirmation.outputId,
-                options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                options.stateConfirmation.matches,
-            );
-        }
+        // Both registrations sit inside the try so the finally always clears
+        // them, and each promise gets a no-op handler at creation: it can be
+        // rejected (timeout, disconnect) before or without being awaited, and
+        // Homebridge turns an unhandled rejection into a bridge restart.
         try {
+            if (options.awaitResponse) {
+                pendingResponsePromise = this.deps.commandDispatcher.registerPendingCommand(
+                    id,
+                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
+                    options.responseCmds,
+                    options.requirePositiveResult,
+                    options.allowGenericErrorFallback,
+                    options.responsePayloadTypes,
+                );
+                pendingResponsePromise.catch((): void => undefined);
+            } else {
+                this.deps.commandDispatcher.noteFireAndForget(id);
+            }
+            if (options.stateConfirmation) {
+                if (!this.deps.outputConfirmation) {
+                    throw new Error('Output confirmation tracker not initialized');
+                }
+                stateConfirmation = this.deps.outputConfirmation.register(
+                    options.stateConfirmation.outputId,
+                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
+                    options.stateConfirmation.matches,
+                );
+                stateConfirmation.promise.catch((): void => undefined);
+            }
             await this.sendRawMessage(jsonMessage);
             if (pendingResponsePromise && stateConfirmation) {
                 return await Promise.race([pendingResponsePromise, stateConfirmation.promise]);
@@ -319,17 +250,17 @@ interface CommandServiceDeps {
             if (pendingResponsePromise) return await pendingResponsePromise;
             if (stateConfirmation) return await stateConfirmation.promise;
             return undefined;
-        } catch (error: unknown) {
-            throw error;
         } finally {
             this.deps.commandDispatcher.clearPendingCommand(id);
             stateConfirmation?.cancel();
         }
     }
     private createCommandId(): string {
+        // 16-bit IDs: the panel echoes the ID modulo 65536 (86152 comes back as
+        // 20616), so a larger ID could never be correlated exactly.
         for (let attempt = 0; attempt < 1000; attempt += 1) {
-            const candidate = Math.floor(Math.random() * 100000).toString();
-            if (!this.deps.commandDispatcher.hasPendingCommand(candidate)) return candidate;
+            const candidate = (1 + Math.floor(Math.random() * 65535)).toString();
+            if (!this.deps.commandDispatcher.isKnownCommandId(candidate)) return candidate;
         }
         throw new Error('Unable to allocate a unique command ID');
     }

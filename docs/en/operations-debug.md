@@ -2,7 +2,7 @@
 
 ## Fast Validation Checklist
 
-1. Set `logLevel=2`.
+1. Set `logLevel=2` (the legacy `debug: true` is ignored once the Homebridge UI has saved `logLevel`).
 2. Restart Homebridge and verify:
    - `Response received: MULTI_TYPES`
    - `Response received: STATUS_OUTPUTS`
@@ -39,6 +39,12 @@ Actions:
 
 - rely on KSA sanitized cache preload
 - confirm cache file exists under Homebridge storage
+
+## Debug Capture File
+
+- `generateDebugFile: true` records the raw WebSocket traffic at the next start and writes `klares4-debug-<timestamp>.json` in the Homebridge storage folder, with PINs masked. The flag resets itself to `false` in `config.json`.
+- `debugCaptureDurationMs` (default 60000, range 10000-1800000) sets the length of the capture. On Matter-only setups where Apple Home needs minutes to respond after a child-bridge restart, raise it to 300000-600000.
+- Reproduce the problem from the Ksenia app or from HomeKit while the capture runs. If Homebridge stops or restarts before the capture ends, the file is written at shutdown with what was recorded so far.
 
 ## Debug Script
 

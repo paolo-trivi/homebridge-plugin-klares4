@@ -10,6 +10,7 @@ import {
     toCentidegrees,
     clampCentidegrees,
     luxToMatterIlluminance,
+    coverLiftPercent100ths,
 } from './matter-device-mapper';
 import { buildThermostatMatterState } from './matter-thermostat-mapper';
 
@@ -27,8 +28,10 @@ export function mergeStateUpdates(
     pending: PendingMatterStateUpdate[],
     device: KseniaDevice,
     thermostatAsFallback: boolean,
+    hasCluster: (clusterName: string) => boolean = () => true,
 ): void {
     for (const update of buildStateUpdates(device, thermostatAsFallback)) {
+        if (!hasCluster(update.clusterName)) continue;
         const idx = pending.findIndex(
             (p) => p.clusterName === update.clusterName && p.partId === update.partId,
         );
@@ -63,17 +66,9 @@ export function buildStateUpdates(
             }
             break;
 
-        case 'cover': {
-            const matterPos = Math.round((100 - (device.status.position ?? 0)) * 100);
-            out.push({
-                clusterName: 'windowCovering',
-                attributes: {
-                    currentPositionLiftPercent100ths: matterPos,
-                    targetPositionLiftPercent100ths: matterPos,
-                },
-            });
+        case 'cover':
+            out.push({ clusterName: 'windowCovering', attributes: coverLiftPercent100ths(device.status) });
             break;
-        }
 
         case 'thermostat':
             if (thermostatAsFallback) {

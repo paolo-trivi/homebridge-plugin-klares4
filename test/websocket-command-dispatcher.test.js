@@ -131,3 +131,29 @@ test('CommandDispatcher rejects duplicate pending IDs', async () => {
   dispatcher.resolvePendingCommand({ ID: '106', CMD: 'WRITE_RES' });
   await first;
 });
+
+test('CommandDispatcher does not hand a late response for a finished command to another pending command', async () => {
+  const dispatcher = new CommandDispatcher();
+  // Light A finished early through realtime state confirmation, so its pending
+  // ACK was cleared; cover B is still waiting for its own CMD_USR_RES.
+  const lightA = dispatcher.registerPendingCommand('111', 500, ['CMD_USR_RES'], true, true);
+  dispatcher.clearPendingCommand('111');
+  void lightA;
+  const coverB = dispatcher.registerPendingCommand('222', 80, ['CMD_USR_RES'], true, true);
+
+  // A's own ACK arrives late, carrying A's ID.
+  dispatcher.resolvePendingCommand({ ID: '111', CMD: 'CMD_USR_RES', PAYLOAD: { RESULT: 'OK' } });
+
+  await assert.rejects(coverB, /timed out/);
+});
+
+test('CommandDispatcher ignores a late response arriving after its command timed out', async () => {
+  const dispatcher = new CommandDispatcher();
+  const first = dispatcher.registerPendingCommand('111', 10, ['CMD_USR_RES'], true, true);
+  await assert.rejects(first, /timed out/);
+  const second = dispatcher.registerPendingCommand('222', 80, ['CMD_USR_RES'], true, true);
+
+  dispatcher.resolvePendingCommand({ ID: '111', CMD: 'CMD_USR_RES', PAYLOAD: { RESULT: 'FAIL' } });
+
+  await assert.rejects(second, /timed out/);
+});

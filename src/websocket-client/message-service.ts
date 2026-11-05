@@ -6,11 +6,11 @@ import type {
     KseniaMessage,
     KseniaOutputStatusRaw,
     KseniaProgramThermostatRaw,
-    KseniaScenarioData,
     KseniaZoneData,
 } from '../types';
 import type { CommandService } from './command-service';
-import { determineOutputType, isIgnoredScenarioCategory, parseOutputData, parseScenarioData, parseZoneData } from './device-parsers';
+import { determineOutputType, parseOutputData, parseZoneData } from './device-parsers';
+import { discoverScenarios } from './scenario-discovery';
 import { normalizeDeviceName } from '../websocket/device-state-projector';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
@@ -18,6 +18,8 @@ import { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { applyThermostatConfigSnapshot } from './thermostat-config-sync';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
+import { adoptDiscoveredDevice } from './discovered-device';
+import { recordLoginRejection, resetLoginRejections } from './login-rejection-guard';
 import type {
     CallbackRegistry,
     RealtimeStatusData,
@@ -29,6 +31,7 @@ interface MessageServiceDeps {
     log: Logger;
     logLevel: LogLevel;
     debugEnabled: boolean;
+    exposePartialArmScenarios?: boolean;
     statusUpdater: StatusUpdater;
     systemTemperatureUpdater: SystemTemperatureUpdater;
     thermostatStatusUpdater: ThermostatStatusUpdater;
@@ -63,8 +66,14 @@ export class MessageService {
     }
 
     public handleLoginResponse(message: KseniaMessage): void {
+        const pendingLogin = this.deps.state.pendingLogin;
+        if (!pendingLogin || pendingLogin.messageId === undefined || pendingLogin.messageId !== String(message.ID)) {
+            this.deps.log.warn('Ignoring LOGIN_RES that does not answer the LOGIN in progress');
+            return;
+        }
         if (message.PAYLOAD?.RESULT === 'OK') {
             this.deps.state.idLogin = String(message.PAYLOAD.ID_LOGIN ?? '1');
+            resetLoginRejections(this.deps.state);
             this.deps.log.info(`Login completed, ID_LOGIN: ${this.deps.state.idLogin}`);
             this.deps.state.pendingLogin?.resolve();
             this.deps.onLoginCompleted();
@@ -77,6 +86,8 @@ export class MessageService {
         } else {
             const reason = String(message.PAYLOAD?.RESULT_DETAIL ?? 'Unknown error');
             this.deps.log.error('Login failed:', reason);
+            // Before the close below, whose handler schedules the reconnect.
+            recordLoginRejection(this.deps.state, this.deps.log, reason);
             this.deps.state.pendingLogin?.reject(new Error(`Login failed: ${reason}`));
             if (this.deps.state.ws && this.deps.state.ws.readyState === WebSocket.OPEN) {
                 this.deps.state.ws.close(1000, 'Login failed');
@@ -92,8 +103,7 @@ export class MessageService {
         if (message.PAYLOAD_TYPE === 'ZONES' && payload.ZONES) {
             this.deps.log.info(`Found ${payload.ZONES.length} zones`);
             payload.ZONES.forEach((zone: KseniaZoneData): void => {
-                const device = parseZoneData(zone);
-                this.deps.state.devices.set(device.id, device);
+                const device = adoptDiscoveredDevice(this.deps.state.devices, parseZoneData(zone));
                 this.deps.callbacks.onDeviceDiscovered?.(device);
                 this.deps.statusUpdater.applyPendingZoneStatus(zone.ID);
             });
@@ -115,9 +125,9 @@ export class MessageService {
                         );
                     }
 
-                    const device = parseOutputData(output);
-                    if (device) {
-                        this.deps.state.devices.set(device.id, device);
+                    const parsed = parseOutputData(output);
+                    if (parsed) {
+                        const device = adoptDiscoveredDevice(this.deps.state.devices, parsed);
                         this.deps.callbacks.onDeviceDiscovered?.(device);
                         this.deps.statusUpdater.applyPendingOutputStatus(output.ID);
                     }
@@ -125,18 +135,11 @@ export class MessageService {
             }
 
             if (payload.SCENARIOS) {
-                this.deps.log.info(`Found ${payload.SCENARIOS.length} scenarios`);
-                payload.SCENARIOS.forEach((scenario: KseniaScenarioData): void => {
-                    if (isIgnoredScenarioCategory(scenario.CAT)) {
-                        this.deps.log.debug(`Scenario ${scenario.DES} ignored (category ${scenario.CAT})`);
-                        return;
-                    }
-
-                    const device = parseScenarioData(scenario);
-                    if (device) {
-                        this.deps.state.devices.set(device.id, device);
-                        this.deps.callbacks.onDeviceDiscovered?.(device);
-                    }
+                discoverScenarios(payload.SCENARIOS, {
+                    state: this.deps.state,
+                    log: this.deps.log,
+                    exposePartialArmScenarios: this.deps.exposePartialArmScenarios,
+                    onDeviceDiscovered: (device): void => this.deps.callbacks.onDeviceDiscovered?.(device),
                 });
             }
 
@@ -147,34 +150,31 @@ export class MessageService {
                     this.deps.state.domusSensors.set(normalizedSensorId, { ...sensor, ID: normalizedSensorId });
                     const baseName = normalizeDeviceName(sensor.DES) || `Sensor ${normalizedSensorId}`;
 
-                    const tempDevice = {
+                    const tempDevice = adoptDiscoveredDevice(this.deps.state.devices, {
                         id: `sensor_temp_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Temperatura`,
                         description: `${baseName} - Temperatura`,
                         status: { sensorType: 'temperature', value: 0, unit: 'C' },
-                    } as const;
-                    this.deps.state.devices.set(tempDevice.id, tempDevice);
+                    } as const);
                     this.deps.callbacks.onDeviceDiscovered?.(tempDevice);
 
-                    const humDevice = {
+                    const humDevice = adoptDiscoveredDevice(this.deps.state.devices, {
                         id: `sensor_hum_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Umidita`,
                         description: `${baseName} - Umidita`,
                         status: { sensorType: 'humidity', value: 50, unit: '%' },
-                    } as const;
-                    this.deps.state.devices.set(humDevice.id, humDevice);
+                    } as const);
                     this.deps.callbacks.onDeviceDiscovered?.(humDevice);
 
-                    const lightDevice = {
+                    const lightDevice = adoptDiscoveredDevice(this.deps.state.devices, {
                         id: `sensor_light_${normalizedSensorId}`,
                         type: 'sensor',
                         name: `${baseName} - Luminosita`,
                         description: `${baseName} - Luminosita`,
                         status: { sensorType: 'light', value: 100, unit: 'lux' },
-                    } as const;
-                    this.deps.state.devices.set(lightDevice.id, lightDevice);
+                    } as const);
                     this.deps.callbacks.onDeviceDiscovered?.(lightDevice);
                     this.deps.statusUpdater.applyPendingSensorStatus(normalizedSensorId);
                 });
