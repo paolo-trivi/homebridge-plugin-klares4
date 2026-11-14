@@ -51,7 +51,11 @@ test('a fresh measurement endpoint starts with a null measuredValue, not the dis
 
 test('a thermostat TemperatureSensor fallback also starts with a null measuredValue', async (t) => {
     const storagePath = storage(t);
-    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({ thermostatAsTemperatureSensor: ['thermostat_5'] }));
+    // A fallback decided with the current Thermostat payload (a legacy one gets one native attempt, TH-01).
+    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
+        version: 2,
+        thermostats: [{ deviceId: 'thermostat_5', mode: 'fallback', reason: 'registration-failure', attempts: 0, nativeShapeRevision: 2, pluginVersion: '2.3.0' }],
+    }));
     const hb = makeHbMatterApi();
     const reg = registry(t, hb, storagePath);
     const device = {
