@@ -11,3 +11,5 @@ This folder is the reference for:
 - websocket protocol flow and payloads used by the plugin,
 - Domus thermostat routing and KSA import behavior,
 - configuration reference and troubleshooting.
+
+Past audit reports and remediation plans are archived in [docs/audit/](./audit/README.md).
