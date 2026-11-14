@@ -1,7 +1,12 @@
 export type ThermostatMode = 'off' | 'heat' | 'cool' | 'auto';
 
-export function kseniaModeToDomain(mode: string | undefined): ThermostatMode {
-    switch (mode?.toLowerCase()) {
+/**
+ * A Ksenia mode string as a domain mode, or `undefined` for a value the plugin
+ * does not know: an unknown state must not be shown as "off".
+ */
+export function parseKseniaMode(mode: unknown): ThermostatMode | undefined {
+    if (typeof mode !== 'string') return undefined;
+    switch (mode.trim().toLowerCase()) {
         case '1':
         case 'heat':
         case 'heating':
@@ -20,9 +25,15 @@ export function kseniaModeToDomain(mode: string | undefined): ThermostatMode {
         case '0':
         case 'off':
         case 'spento':
-        default:
             return 'off';
+        default:
+            return undefined;
     }
+}
+
+/** Legacy: unknown values become 'off'. Prefer parseKseniaMode. */
+export function kseniaModeToDomain(mode: string | undefined): ThermostatMode {
+    return parseKseniaMode(mode) ?? 'off';
 }
 
 export function domainModeToKsenia(mode: ThermostatMode): '0' | '1' | '2' | '3' {

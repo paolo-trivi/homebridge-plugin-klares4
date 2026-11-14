@@ -115,3 +115,28 @@ test('TH-05 data for Matter: season and output role are on the thermostat status
     assert.equal(h.device().status.outputRole, 'heating');
     assert.equal(typeof h.device().status.observedAt, 'number');
 });
+
+test('C contract: parseKseniaMode returns undefined for unknown values, kseniaModeToDomain keeps its legacy off', () => {
+    const { parseKseniaMode, kseniaModeToDomain } = require('../dist/thermostat-mode.js');
+    assert.equal(parseKseniaMode('MAN'), undefined);
+    assert.equal(parseKseniaMode(undefined), undefined);
+    assert.equal(parseKseniaMode(3), undefined);
+    assert.equal(parseKseniaMode(' Heat '), 'heat');
+    assert.equal(parseKseniaMode('0'), 'off');
+    assert.equal(parseKseniaMode('automatico'), 'auto');
+    assert.equal(kseniaModeToDomain('MAN'), 'off');
+});
+
+test('unreadable realtime values (NA, garbage) leave the thermostat state as it was', () => {
+    const h = client();
+    h.multi(); h.prg(); h.rt('MAN', '21.0', { temp: '19.5' });
+    h.emits.length = 0;
+    h.rt('MAN', 'x', { temp: 'NA' });
+    assert.equal(h.device().status.currentTemperature, 19.5);
+    assert.equal(h.device().status.targetTemperature, 21);
+    assert.equal(h.device().status.mode, 'heat');
+    h.cfg(realisticCfg('1', { mode: 'MAN', winTm: 'NA' }));
+    assert.equal(h.device().status.targetTemperature, 21);
+    h.system('NA');
+    assert.equal(h.device().status.currentTemperature, 19.5);
+});
