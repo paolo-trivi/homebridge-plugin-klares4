@@ -12,6 +12,8 @@ import {
 } from './config-values';
 import { parseCustomNames, type CustomNameRow, type CustomNamesConfig, type CustomNamesMap } from './custom-names-config';
 import { normalizeExclusionLists, type ExclusionKey } from './exclusion-lists';
+import { normalizeOutputOptIns, normalizeScenarioOptIns } from './exposure-opt-in-config';
+import type { OutputOptIn, ScenarioOptIn } from '../types';
 import {
     normalizeMatterOverrides,
     normalizeMatterRecoveryRequests,
@@ -75,6 +77,10 @@ export interface RuntimeConfig {
     /** Unset keeps the Matter coordinator's own resolution (environment variable, then 3000). */
     matterUnregisterTimeoutMs?: number;
     exposePartialArmScenarios: boolean;
+    /** Outputs of an unrecognized category exposed anyway, one row per output. Default none. */
+    exposeOutputs: OutputOptIn[];
+    /** Scenarios of an unrecognized category exposed anyway, one row per scenario. Default none. */
+    exposeScenarios: ScenarioOptIn[];
     /** Panel IDs, compared exactly. */
     exclusions: Record<ExclusionKey, string[]>;
     matterExposure: Record<keyof MatterExposureConfig, boolean>;
@@ -193,6 +199,8 @@ export function resolveRuntimeConfig(raw: RawLares4Config | undefined, log: Logg
         devicesSummaryDelay: number('devicesSummaryDelay'),
         ...(unregisterTimeout !== undefined ? { matterUnregisterTimeoutMs: unregisterTimeout } : {}),
         exposePartialArmScenarios: flag('exposePartialArmScenarios', false),
+        exposeOutputs: normalizeOutputOptIns(config.exposeOutputs, issues),
+        exposeScenarios: normalizeScenarioOptIns(config.exposeScenarios, issues),
         exclusions: normalizeExclusionLists(config, issues),
         matterExposure: exposure.exposure,
         matterExposureExplicit: exposure.explicit,
@@ -240,6 +248,8 @@ export function toPlatformConfig(raw: RawLares4Config | undefined, runtime: Runt
         devicesSummaryDelay: runtime.devicesSummaryDelay,
         matterUnregisterTimeoutMs: runtime.matterUnregisterTimeoutMs,
         exposePartialArmScenarios: runtime.exposePartialArmScenarios,
+        exposeOutputs: runtime.exposeOutputs.map((row) => ({ ...row })),
+        exposeScenarios: runtime.exposeScenarios.map((row) => ({ ...row })),
         excludeZones: runtime.exclusions.excludeZones,
         excludeOutputs: runtime.exclusions.excludeOutputs,
         excludeSensors: runtime.exclusions.excludeSensors,

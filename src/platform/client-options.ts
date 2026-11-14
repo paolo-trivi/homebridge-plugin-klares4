@@ -54,6 +54,9 @@ export function buildClientConnectionSettings(
             commandTimeoutMs: config.commandTimeoutMs,
             allowInsecureTls: config.allowInsecureTls,
             exposePartialArmScenarios: config.exposePartialArmScenarios,
+            // Absent rather than empty: the default options stay what they were before these keys.
+            ...(config.exposeOutputs.length > 0 ? { exposeOutputs: config.exposeOutputs } : {}),
+            ...(config.exposeScenarios.length > 0 ? { exposeScenarios: config.exposeScenarios } : {}),
             domusThermostat: config.domusThermostat,
             ksaCache,
         },
