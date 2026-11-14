@@ -13,7 +13,7 @@
         "release:dry-run": "npm publish --tag rc --dry-run",
         "test": "npm run build && node --test --test-timeout=30000 $(find test -name '*.test.js' -print)",
         "test:contract": "npm run build && node --test --test-timeout=60000 test/matter-real-stack-contract.test.js",
-        "test:coverage": "npm run build && node --test --test-timeout=30000 --enable-source-maps --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='scripts/**' --test-coverage-lines=88 --test-coverage-branches=83 --test-coverage-functions=88 $(find test -name '*.test.js' -print)",
+        "test:coverage": "npm run build && node --test --test-timeout=30000 --enable-source-maps --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='scripts/**' --test-coverage-lines=92 --test-coverage-branches=87 --test-coverage-functions=93 $(find test -name '*.test.js' -print)",
         "prepack": "npm run build:release"
     },
     "keywords": [

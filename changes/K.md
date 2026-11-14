@@ -2,7 +2,7 @@
 
 File toccati: `.github/**`, `tsconfig.json`, `package.json` (solo `files`, script nuovi o di packaging/CI), `scripts/release-guard.js`, `scripts/check-pack.js` e `scripts/clean-dist.js` (nuovi), test `test/release-guard.test.js` e `test/check-pack.test.js` (nuovi). Nessuna chiave di config, nessun cambio di comportamento del plugin a runtime. `engines` non è cambiato (vedi G-08).
 
-Nota per chi integra: `scripts/` è nel `.gitignore` (riga `scripts/`), i tre file nuovi sono stati aggiunti con `git add -f`. Il `.gitignore` non è di K: conviene sostituire `scripts/` con le sole voci locali (`scripts/reverse/`, `scripts/debug-thermostat-routing.js`, già presenti) altrimenti ogni futuro script richiede `-f`.
+Nota per chi integra: `.gitignore` conteneva la riga `scripts/`, che nascondeva ogni script nuovo (servivano `git add -f`). Rimossa: le uniche voci locali sono `scripts/reverse/` e `scripts/debug-thermostat-routing.js` (le sole cose in più nel checkout principale), già presenti. Ora `scripts/*.js` tracciati non sono più ignorati.
 
 ## Cosa fa ora la pipeline
 
@@ -19,7 +19,7 @@ Tutte le action sono pinnate per SHA con la versione esatta nel commento (`actio
 
 **Il nuovo check `Validate (Node 26)` va aggiunto alla protezione di `main`** (vedi sotto: i check obbligatori sono solo `Validate (Node 22)` e `Validate (Node 24)`).
 
-Soglie di copertura (nello script `test:coverage`, vale per ogni esecuzione): righe 88, rami 83, funzioni 88, solo `src/` (`test/**` e `scripts/**` esclusi). Misura su questa base (Node 22.19, 643 test): righe 90,72, rami 85,73, funzioni 91,04. Margine di circa 3 punti: l'ondata 1 aggiunge molto codice e rimuove la telemetria, quindi la soglia va rimisurata su `release/2.3.0` dopo i merge e alzata (ratchet) a 2 punti sotto la misura. `node --test` accetta soglie solo globali: non esiste una soglia per file critico.
+Soglie di copertura (nello script `test:coverage`, vale per ogni esecuzione): righe 92, rami 87, funzioni 93, solo `src/` (`test/**` e `scripts/**` esclusi). Misura su `release/2.3.0` con I, G e A integrati (Node 22.19, 753 test): righe 92,25, rami 87,60, funzioni 93,41; soglie appena sotto la misura, da rialzare a fine ondata. `node --test` accetta soglie solo globali: non esiste una soglia per file critico.
 
 ### `release-publish.yml` (tag `v*`)
 Due job, permessi di default nulli:
@@ -53,7 +53,7 @@ Decisione: le source map **non vengono pubblicate**. `src/` non è nel pacchetto
 - `prebuild` (`scripts/clean-dist.js`, solo Node, nessuna dipendenza) svuota `dist/` prima di ogni `npm run build`, quindi anche prima di `npm test`, `test:contract`, `test:coverage`, `verify`: tsc non cancella mai l'output di un sorgente rimosso e un `.js` orfano (successo con `telemetry.js` dopo il task I) veniva testato e sarebbe stato pubblicato. Il significato degli script `test*` non cambia.
 - `build:release` = `npm run build -- --sourceMap false` (quindi parte da `dist/` pulita), quindi anche i `.js` non hanno più il commento `//# sourceMappingURL`. `prepack` lo esegue: `npm pack` e `npm publish` da cartella producono sempre il tarball pulito, qualunque sia lo stato di `dist/`. `prepublishOnly` rimosso (con il tarball già pronto non viene eseguito, e `prepack` lo sostituisce).
 - `check:pack` (`scripts/check-pack.js [tarball]`): allowlist (`dist/**`, `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `config.schema.json`), nessun `.map`, nessun `sourceMappingURL` nei `.js`, `main` e `dist/index.d.ts` presenti, `config.schema.json` JSON valido, nessuno script `preinstall`/`install`/`postinstall`, **nessun file `dist/**/*.js` o `*.d.ts` senza il sorgente corrispondente in `src/`** (build non pulita). La verifica gira nel job `build` del release e nel job `Package` della CI (richiede `src/` nel checkout). Verificato in negativo: un `dist/` con un modulo orfano viene rifiutato e `npm run build` lo elimina; un tarball da build di sviluppo (con map) viene rifiutato.
-- Risultato (`npm pack --dry-run --json`): da 521 file, 345.634 byte compressi, 1.495.480 byte decompressi (258 `.map`) a 263 file, 240.499 byte, 941.717 byte (129 `.js`, 129 `.d.ts`, 5 file di radice).
+- Risultato (`npm pack --dry-run --json`): da 521 file, 345.634 byte compressi, 1.495.480 byte decompressi (258 `.map`, con `@sentry/node` ancora presente nel codice) a 269 file, 254.411 byte compressi, 988.422 decompressi, 0 `.map` (stato con I, G e A integrati).
 - `target` ES2022, `lib` ES2023 (Node 22 li supporta per intero), con `useDefineForClassFields: false` per conservare la semantica di emissione dei campi di classe di ES2020. Confrontato l'output di `tsc` prima/dopo: solo separatori numerici (`60_000`) e un `static { }` al posto dell'assegnazione statica in `command-dispatcher.js`; nessun altro cambio. Suite verde senza altre modifiche di codice. Lasciato al task Qualità dell'ondata 3: `noUncheckedIndexedAccess` (20 errori), `exactOptionalPropertyTypes` (61), `noImplicitOverride`, `noFallthroughCasesInSwitch`, `noImplicitReturns` (0 errori, attivabili subito).
 - Script rimossi: `release:rc` e `release:beta` (pubblicavano da una macchina locale, senza provenance e senza il gate dell'environment: ora si pubblica solo con il tag). `release:dry-run` resta.
 
@@ -64,7 +64,7 @@ Decisione: le source map **non vengono pubblicate**. `src/` non è nel pacchetto
 
 ## G-03 / TD-Q-06
 
-Node 26 è nella matrice. Suite completa (`npm run verify`, 648 test: 643 pass, 0 fail, 5 todo) eseguita in locale, con tsconfig ES2022, su Node 22.12.0, 24.22.3 e 26.13.1 (binari installati in una directory temporanea dal pacchetto npm `node`).
+Node 26 è nella matrice. Suite completa (`npm run verify`, 648 test: 643 pass, 0 fail, 5 todo, prima dell'integrazione) eseguita in locale, con tsconfig ES2022, su Node 22.12.0, 24.22.3 e 26.13.1 (binari installati in una directory temporanea dal pacchetto npm `node`).
 
 ## Job di contratto su Homebridge 2.4.x: esito locale e cosa serve
 
@@ -179,12 +179,15 @@ npm dist-tag rm homebridge-plugin-klares4 beta --otp=<codice>
 ```
 `debug` e `beta` sono rami abbandonati, precedenti alle correzioni di sicurezza: rimuoverli fa fallire `npm i …@beta`/`@debug` con un errore chiaro invece di installare codice vecchio. Se preferisci un tag che continui a esistere: `npm dist-tag add homebridge-plugin-klares4@<versione> beta --otp=<codice>`. `rc` si riallinea da solo alla prima `2.3.0-rc.N` pubblicata dal workflow; dopo la stable 2.3.0 puntarlo alla stable (`npm dist-tag add homebridge-plugin-klares4@2.3.0 rc --otp=<codice>`) o rimuoverlo, come preferisci. Verifica: `npm view homebridge-plugin-klares4 dist-tags --json`.
 
+## Integrazione con `release/2.3.0` (I, G, A)
+Merge senza conflitti (`package.json`: dipendenze di I e script/`files` di K si sono fusi da soli; `@sentry/node` assente, `npm ls` senza `@sentry/*`, lockfile non toccato). Da `dist/` pulita: `npm run verify` 753 test, 744 pass, 0 fail, 9 todo; `test:contract` 18 test, 17 pass, 1 todo (TH-01); `test:coverage` verde con le soglie nuove; `check:pack` verde (269 file). ES2022/ES2023 e `prebuild` reggono con tutto il codice integrato.
+
 ## G-09
 In CI e nei worktree il problema non esiste (`npm ci` pulito su Linux). Il checkout principale `/root/smarthome/homebridge-plugin-klares4` contiene ancora `node_modules/@typescript/typescript-darwin-arm64` e nessun binario Linux: prima di compilare lì serve `rm -rf node_modules && npm ci`. Non toccato da K.
 
 ## Voci di changelog (EN)
 Changed:
-- The npm package no longer ships source maps (they pointed at sources that are not published): 263 files instead of 521, 240 kB instead of 346 kB.
+- The npm package no longer ships source maps (they pointed at sources that are not published): 269 files instead of 521, 254 kB instead of 346 kB.
 - Compiled for ES2022 (Node 22 and later, as before).
 
 Internal (omit or put under "Changed" for contributors):
