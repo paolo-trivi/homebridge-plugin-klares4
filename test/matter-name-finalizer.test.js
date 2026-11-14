@@ -21,19 +21,19 @@ test('a failing rename does not abort the rest of the batch', async (t) => {
     const storage = tmpStorage(t, 'klares4-finalizer-');
     const log = silentLog();
     const devices = [
-        { id: 'zone_18', type: 'zone', name: 'Contatto Studio' },
-        { id: 'zone_27', type: 'zone', name: 'Sensore Tapparella Studio' },
+        { id: 'zone_18', type: 'zone', name: 'Contatto Solaio' },
+        { id: 'zone_27', type: 'zone', name: 'Sensore Tapparella Solaio' },
     ];
 
     const registrations = new Map([
         ['zone_18', {
             status: 'registered',
-            registeredDisplayName: 'Finestra Studio - Sens.',
+            registeredDisplayName: 'Finestra Solaio - Sens.',
             matterAccessory: { UUID: 'zone_18', clusters: { booleanState: {} } },
         }],
         ['zone_27', {
             status: 'registered',
-            registeredDisplayName: 'Tapparella Studio',
+            registeredDisplayName: 'Tapparella Solaio',
             matterAccessory: { UUID: 'zone_27', clusters: { booleanState: {} } },
         }],
     ]);
@@ -64,11 +64,11 @@ test('a failing rename does not abort the rest of the batch', async (t) => {
 test('an unobservable unregister skips that device without throwing', async (t) => {
     const storage = tmpStorage(t, 'klares4-finalizer-');
     const log = silentLog();
-    const devices = [{ id: 'zone_18', type: 'zone', name: 'Contatto Studio' }];
+    const devices = [{ id: 'zone_18', type: 'zone', name: 'Contatto Solaio' }];
     const registrations = new Map([
         ['zone_18', {
             status: 'registered',
-            registeredDisplayName: 'Finestra Studio - Sens.',
+            registeredDisplayName: 'Finestra Solaio - Sens.',
             matterAccessory: { UUID: 'zone_18', clusters: { booleanState: {} } },
         }],
     ]);

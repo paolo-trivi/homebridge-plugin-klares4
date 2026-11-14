@@ -12,7 +12,7 @@ const DEVICES = [
     { id: 'light_37', type: 'light', name: 'Luce Test', status: {} },
     { id: 'thermostat_18', type: 'thermostat', name: 'Termostato Test', status: {} },
     { id: 'zone_4', type: 'zone', name: 'Zona Test', status: {} },
-    { id: 'sensor_temp_5', type: 'sensor', name: 'Sala - Temperatura', status: {} },
+    { id: 'sensor_temp_5', type: 'sensor', name: 'Veranda - Temperatura', status: {} },
     { id: 'sensor_system_temp_in', type: 'sensor', name: 'Temperatura Interna', status: {} },
     { id: 'scenario_9', type: 'scenario', name: 'Scenario Test', status: {} },
 ];

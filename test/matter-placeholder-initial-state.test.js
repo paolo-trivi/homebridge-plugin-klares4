@@ -55,7 +55,7 @@ test('a thermostat TemperatureSensor fallback also starts with a null measuredVa
     const hb = makeHbMatterApi();
     const reg = registry(t, hb, storagePath);
     const device = {
-        id: 'thermostat_5', type: 'thermostat', name: 'Riscaldamento Bagno', description: '',
+        id: 'thermostat_5', type: 'thermostat', name: 'Riscaldamento Atrio', description: '',
         currentTemperature: 0, targetTemperature: 0, mode: 'off',
         status: { currentTemperature: 0, targetTemperature: 0, mode: 'off' },
     };
@@ -85,7 +85,7 @@ test('a thermostat that falls back during recovery does not publish its placehol
     const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_6'] });
     const reg = registry(t, hb);
     const device = {
-        id: 'thermostat_6', type: 'thermostat', name: 'Riscaldamento Studio', description: '',
+        id: 'thermostat_6', type: 'thermostat', name: 'Riscaldamento Solaio', description: '',
         currentTemperature: 0, targetTemperature: 0, mode: 'off',
         status: { currentTemperature: 0, targetTemperature: 0, mode: 'off' },
     };

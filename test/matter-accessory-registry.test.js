@@ -33,7 +33,7 @@ function thermostatDevice(id = 'thermostat_18', extras = {}) {
     return {
         id,
         type: 'thermostat',
-        name: 'Riscaldamento Sala',
+        name: 'Riscaldamento Veranda',
         description: '',
         currentTemperature: 21,
         targetTemperature: 20,
@@ -237,7 +237,7 @@ test('rediscovery updates in-memory Matter identity without updatePlatformAccess
 
     await registry.addOrUpdateAccessory({
         ...lightDevice('light_meta', { on: false }),
-        name: 'Luce Sala',
+        name: 'Luce Veranda',
     });
     assert.equal(metadataUpdates.length, 0, 'metadata changes must not overwrite Homebridge internal endpoint state');
 });
@@ -457,8 +457,8 @@ function cachedZone(id, name, device) {
 
 test('name-map: first boot resolves the cover/zone collision at finalize; second boot registers final names immediately with zero metadata churn', async (t) => {
     const storagePath = tmpStorage(t);
-    const zone = zoneDevice('zone_19', 'Finestra Cucina');
-    const cover = coverDevice('cover_1', 'Finestra Cucina');
+    const zone = zoneDevice('zone_19', 'Finestra Taverna');
+    const cover = coverDevice('cover_1', 'Finestra Taverna');
 
     // ---- Boot 1 (no persisted map yet): ZONES arrive before MULTI_TYPES ----
     const boot1 = makeHbMatterApi();
@@ -469,8 +469,8 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
     await delay(200);
 
     // Incremental fallback: the zone grabbed the clean name first.
-    assert.equal(boot1.registerCalls[0].displayName, 'Finestra Cucina');
-    assert.equal(boot1.registerCalls[1].displayName, 'Finestra Cucina');
+    assert.equal(boot1.registerCalls[0].displayName, 'Finestra Taverna');
+    assert.equal(boot1.registerCalls[1].displayName, 'Finestra Taverna');
 
     // Sync complete → batch name-map + targeted refresh of the outlier zone.
     await registry1.finalizeNameMap([zone, cover]);
@@ -478,7 +478,7 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
     assert.deepEqual(boot1.unregisterCalls, ['zone_19'], 'only the renamed zone is re-registered');
     const renamed = boot1.registerCalls[2];
     assert.equal(renamed.UUID, 'zone_19');
-    assert.equal(renamed.displayName, 'Finestra Cucina - Sens.');
+    assert.equal(renamed.displayName, 'Finestra Taverna - Sens.');
     assert.equal(registry1.getStatus('zone_19'), 'registered');
 
     // ---- Boot 2 (map persisted): same discovery order, fresh process ----
@@ -490,9 +490,9 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
     await registry2.addOrUpdateAccessory(cover);
     await delay(200);
 
-    assert.equal(boot2.registerCalls[0].displayName, 'Finestra Cucina - Sens.',
+    assert.equal(boot2.registerCalls[0].displayName, 'Finestra Taverna - Sens.',
         'zone must register with its final suffixed name from the FIRST register call');
-    assert.equal(boot2.registerCalls[1].displayName, 'Finestra Cucina',
+    assert.equal(boot2.registerCalls[1].displayName, 'Finestra Taverna',
         'cover owns the clean voice name from the first instant');
 
     // Re-discovery pass (production re-emits devices during the same sync).
@@ -518,8 +518,8 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
 
 test('name-map: discovery order does not matter once the map is persisted (covers-first boot after zones-first boot)', async (t) => {
     const storagePath = tmpStorage(t);
-    const zone = zoneDevice('zone_18', 'Finestra Studio');
-    const cover = coverDevice('cover_4', 'Finestra Studio');
+    const zone = zoneDevice('zone_18', 'Finestra Solaio');
+    const cover = coverDevice('cover_4', 'Finestra Solaio');
 
     const boot1 = makeHbMatterApi();
     const registry1 = new MatterAccessoryRegistry({ api: boot1.api, log: silentLog(), getWsClient: () => undefined, storagePath });
@@ -539,8 +539,8 @@ test('name-map: discovery order does not matter once the map is persisted (cover
     await delay(200);
 
     const byUuid = Object.fromEntries(boot2.registerCalls.map((r) => [r.UUID, r.displayName]));
-    assert.equal(byUuid.cover_4, 'Finestra Studio');
-    assert.equal(byUuid.zone_18, 'Finestra Studio - Sens.');
+    assert.equal(byUuid.cover_4, 'Finestra Solaio');
+    assert.equal(byUuid.zone_18, 'Finestra Solaio - Sens.');
     assert.equal(boot2.unregisterCalls.length, 0);
 });
 
@@ -558,7 +558,7 @@ test('matterExposure: disabled type is never registered, and status updates cann
         isDeviceExposed: (device) => device.type !== 'zone',
     });
     registry.startDiscoveryCycle();
-    await registry.addOrUpdateAccessory(zoneDevice('zone_1', 'Finestra Bagno'));
+    await registry.addOrUpdateAccessory(zoneDevice('zone_1', 'Finestra Atrio'));
     await registry.addOrUpdateAccessory(lightDevice('light_1'));
     await delay(200);
 
@@ -567,7 +567,7 @@ test('matterExposure: disabled type is never registered, and status updates cann
     assert.equal(registry.getStatus('zone_1'), undefined);
 
     // The status-update path must be gated too (no register-on-update leak).
-    await registry.updateAccessoryState(zoneDevice('zone_1', 'Finestra Bagno'));
+    await registry.updateAccessoryState(zoneDevice('zone_1', 'Finestra Atrio'));
     assert.equal(registered.length, 1, 'updateAccessoryState must not register a non-exposed device');
 });
 
@@ -581,7 +581,7 @@ test('matterExposure: a registered type disabled later is pruned after 3 consecu
         storagePath: tmpStorage(t),
         isDeviceExposed: (device) => device.type !== 'zone' || zonesExposed,
     });
-    const zone = zoneDevice('zone_1', 'Finestra Bagno');
+    const zone = zoneDevice('zone_1', 'Finestra Atrio');
 
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(zone);
@@ -694,8 +694,8 @@ test('prune: missing-cycle counters persist across boots (stable setups run one 
 
 test('prune: persisted counter is cleared when the device reappears on a later boot', async (t) => {
     const storagePath = tmpStorage(t);
-    const zone = zoneDevice('zone_5', 'Finestra Bagno');
-    const cache = cachedZone('zone_5', 'Finestra Bagno', zone);
+    const zone = zoneDevice('zone_5', 'Finestra Atrio');
+    const cache = cachedZone('zone_5', 'Finestra Atrio', zone);
     let zonesExposed = false;
     const exposure = (device) => device.type !== 'zone' || zonesExposed;
 
@@ -748,7 +748,7 @@ test('explicit thermostat recovery keeps the device ID and records native succes
     }));
     // The previous session's fallback endpoint, restored by Homebridge.
     const { api, registerCalls: registered, unregisterCalls: unregistered } = makeHbMatterApi({
-        restored: [{ UUID: 'thermostat_18', displayName: 'Riscaldamento Sala', deviceType: deviceTypes.TemperatureSensor,
+        restored: [{ UUID: 'thermostat_18', displayName: 'Riscaldamento Veranda', deviceType: deviceTypes.TemperatureSensor,
             clusters: { temperatureMeasurement: { measuredValue: 2100 } } }],
     });
     const registry = new MatterAccessoryRegistry({
@@ -761,7 +761,7 @@ test('explicit thermostat recovery keeps the device ID and records native succes
     // Homebridge hands the cached endpoint to configureMatterAccessory first.
     registry.configureCachedAccessory({
         UUID: 'thermostat_18',
-        displayName: 'Riscaldamento Sala',
+        displayName: 'Riscaldamento Veranda',
         deviceType: { name: 'TemperatureSensor', code: 770 },
         context: { device: thermostatDevice() },
     });
@@ -811,7 +811,7 @@ test('explicit thermostat recovery removes a cache-restored fallback endpoint (u
     // Homebridge restored the fallback endpoint from its cache; its unregister
     // dereferences `accessory.deviceType.deviceType` before removing anything.
     const { api, registerCalls: registered } = makeHbMatterApi({
-        restored: [{ UUID: 'thermostat_18', displayName: 'Riscaldamento Sala', deviceType: deviceTypes.TemperatureSensor,
+        restored: [{ UUID: 'thermostat_18', displayName: 'Riscaldamento Veranda', deviceType: deviceTypes.TemperatureSensor,
             clusters: { temperatureMeasurement: { measuredValue: 2100 } } }],
     });
     const registry = new MatterAccessoryRegistry({
@@ -823,7 +823,7 @@ test('explicit thermostat recovery removes a cache-restored fallback endpoint (u
     });
     registry.configureCachedAccessory({
         UUID: 'thermostat_18',
-        displayName: 'Riscaldamento Sala',
+        displayName: 'Riscaldamento Veranda',
         deviceType: { name: 'TemperatureSensor', code: 770 },
         context: { device: thermostatDevice() },
     });

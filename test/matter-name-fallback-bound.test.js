@@ -8,7 +8,7 @@ const { spawnSync } = require('node:child_process');
 // resort loop was the same string, already owned by another device, and the
 // loop never ended. Run in a child process so a regression fails instead of
 // hanging the suite.
-const BASE = 'Illuminazione Corridoio Superior'; // 32 chars
+const BASE = 'Illuminazione Soppalco Superiore'; // 32 chars
 const BLOCKER = `${BASE.slice(0, 27)} - x1`; // every tag and numeric candidate
 
 function runIsolated(source) {

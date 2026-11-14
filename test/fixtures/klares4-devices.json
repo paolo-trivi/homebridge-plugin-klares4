@@ -1,540 +1,540 @@
 {
-  "_source": "production deviceSnapshot (109 endpoints) from klares4-debug-2026-05-23T07-29-03.json — raw names as shipped by the panel (dirty spaces/`+`/parentheses included on purpose)",
+  "_comment": "Synthetic device list with invented names, shaped like a 109-endpoint installation: six cover/zone homonym pairs, dirty whitespace, \"+\", parentheses, apostrophes, accents, names over 32 characters.",
   "devices": [
     {
       "id": "zone_1",
       "type": "zone",
-      "name": "Pulsante Luce Cucina"
+      "name": "Pulsante Luce Dispensa"
     },
     {
       "id": "zone_2",
       "type": "zone",
-      "name": "Pulsante Lavanderia"
+      "name": "Porta Portico"
     },
     {
       "id": "zone_3",
       "type": "zone",
-      "name": "Pulsante Bagno"
+      "name": "Volumetrico Loggia"
     },
     {
       "id": "zone_4",
       "type": "zone",
-      "name": "Pulsante Matrimoniale"
+      "name": "Contatto Serra"
     },
     {
       "id": "zone_5",
       "type": "zone",
-      "name": "Pulsante Cabina Armadio"
+      "name": "Porta dell'Androne"
     },
     {
       "id": "zone_6",
       "type": "zone",
-      "name": "Pulsante Bagno Matrimoniale"
+      "name": "Volumetrico Passaggio Biblioteca Nord Est"
     },
     {
       "id": "zone_7",
       "type": "zone",
-      "name": "Pulsante Cameretta"
+      "name": "Sirena Pergolato Lato Strada"
     },
     {
       "id": "zone_8",
       "type": "zone",
-      "name": "Pulsante Pranzo"
+      "name": "Basculante Rimessa"
     },
     {
       "id": "zone_9",
       "type": "zone",
-      "name": "Pulsante Studio"
+      "name": "Porta Cantina"
     },
     {
       "id": "zone_10",
       "type": "zone",
-      "name": "Pulsante Corridoio 1"
+      "name": "Volumetrico Soppalco"
     },
     {
       "id": "zone_11",
       "type": "zone",
-      "name": "Pulsante Corridoio 2"
+      "name": "Barriera Giardino Retro"
     },
     {
       "id": "zone_12",
       "type": "zone",
-      "name": "Pulsante Disimpegno 1"
+      "name": "Contatto Lucernario"
     },
     {
       "id": "zone_13",
       "type": "zone",
-      "name": "Pulsante Disimpegno 2"
+      "name": "Tamper Centrale"
     },
     {
       "id": "zone_14",
       "type": "zone",
-      "name": "Pulsante Ingresso"
+      "name": "Volumetrico Taverna"
     },
     {
       "id": "zone_15",
       "type": "zone",
-      "name": "Pulsante Strisce Led"
+      "name": "Porta Sottoscala"
     },
     {
       "id": "zone_16",
       "type": "zone",
-      "name": "Pulsante Faretti TV"
+      "name": "Finestra Lavatoio"
     },
     {
       "id": "zone_17",
       "type": "zone",
-      "name": "Rivelatore Ingresso"
+      "name": "Volumetrico Guardaroba"
     },
     {
       "id": "zone_18",
       "type": "zone",
-      "name": "Finestra Studio"
+      "name": "Finestra Solaio"
     },
     {
       "id": "zone_19",
       "type": "zone",
-      "name": "Finestra Cucina"
+      "name": "Finestra Taverna"
     },
     {
       "id": "zone_20",
       "type": "zone",
-      "name": "Balcone CX Sala"
+      "name": "Porta Serra"
     },
     {
       "id": "zone_21",
       "type": "zone",
-      "name": "Balcone SX Sala"
+      "name": "Volumetrico Atrio"
     },
     {
       "id": "zone_22",
       "type": "zone",
-      "name": "Finestra Bagno"
+      "name": "Finestra Atrio"
     },
     {
       "id": "zone_23",
       "type": "zone",
-      "name": "Finestra Cab. Armadio"
+      "name": "Allagamento Lavatoio"
     },
     {
       "id": "zone_24",
       "type": "zone",
-      "name": "Finestra Matrimoniale"
+      "name": "Finestra Foresteria"
     },
     {
       "id": "zone_25",
       "type": "zone",
-      "name": "Finestra Bagno Matrimoniale"
+      "name": "Finestra Atrio Foresteria"
     },
     {
       "id": "zone_26",
       "type": "zone",
-      "name": "Finestra Cameretta"
+      "name": "Finestra Mansarda"
     },
     {
       "id": "zone_27",
       "type": "zone",
-      "name": "Tapparella Studio"
+      "name": "Volumetrico Mansarda"
     },
     {
       "id": "zone_28",
       "type": "zone",
-      "name": "Tapparella Cucina"
+      "name": "Fumo Dispensa"
     },
     {
       "id": "zone_29",
       "type": "zone",
-      "name": "Tapparella Balc. CX Sala"
+      "name": "Porta Rimessa Attrezzi"
     },
     {
       "id": "zone_30",
       "type": "zone",
-      "name": "Tapp. Balc. SX Sala"
+      "name": "Volumetrico Corte"
     },
     {
       "id": "zone_31",
       "type": "zone",
-      "name": "Tapparella Bagno"
+      "name": "Contatto Cassaforte"
     },
     {
       "id": "zone_32",
       "type": "zone",
-      "name": "Tapparella Cab. Armadio"
+      "name": "Pulsante Panico Foresteria"
     },
     {
       "id": "zone_33",
       "type": "zone",
-      "name": "Tapparella Matrimoniale"
+      "name": "Finestra  Biblioteca"
     },
     {
       "id": "zone_34",
       "type": "zone",
-      "name": "Tapparella Bagno Matrimoniale"
+      "name": "Porta Finestra Loggia"
     },
     {
       "id": "zone_35",
       "type": "zone",
-      "name": "Tapparella Cameretta"
+      "name": "Volumetrico Androne"
     },
     {
       "id": "zone_36",
       "type": "zone",
-      "name": "Volumetrico Matrimoniale"
+      "name": "Barriera Perimetrale Lato Pergolato Ovest"
     },
     {
       "id": "zone_37",
       "type": "zone",
-      "name": "Tamper Volumetrico Matrimoniale"
+      "name": "Contatto Abbaino"
     },
     {
       "id": "zone_38",
       "type": "zone",
-      "name": "Volumetrico Studio"
+      "name": "Gas Taverna"
     },
     {
       "id": "zone_39",
       "type": "zone",
-      "name": "Tamper Volumetrico Studio"
+      "name": "Volumetrico Biblioteca"
     },
     {
       "id": "cover_1",
       "type": "cover",
-      "name": "Finestra Cucina"
+      "name": "Finestra Taverna"
     },
     {
       "id": "cover_2",
       "type": "cover",
-      "name": "Balcone Sala Centrale"
+      "name": "Lucernario Soppalco"
     },
     {
       "id": "cover_3",
       "type": "cover",
-      "name": "Balcone Sala "
+      "name": "Balcone Veranda "
     },
     {
       "id": "cover_4",
       "type": "cover",
-      "name": "Finestra Studio"
+      "name": "Finestra Solaio"
     },
     {
       "id": "cover_5",
       "type": "cover",
-      "name": "Finestra Bagno"
+      "name": "Finestra Atrio"
     },
     {
       "id": "cover_6",
       "type": "cover",
-      "name": "Finestra Matrimoniale"
+      "name": "Finestra Foresteria"
     },
     {
       "id": "cover_7",
       "type": "cover",
-      "name": "Finestra Bagno Matrimoniale"
+      "name": "Finestra Atrio Foresteria"
     },
     {
       "id": "cover_8",
       "type": "cover",
-      "name": "Finestra Cameretta"
-    },
-    {
-      "id": "light_9",
-      "type": "light",
-      "name": "Cucina"
-    },
-    {
-      "id": "light_10",
-      "type": "light",
-      "name": "Pranzo"
-    },
-    {
-      "id": "light_11",
-      "type": "light",
-      "name": "Lavanderia"
-    },
-    {
-      "id": "light_12",
-      "type": "light",
-      "name": "Studio"
-    },
-    {
-      "id": "light_13",
-      "type": "light",
-      "name": "Bagno"
-    },
-    {
-      "id": "light_14",
-      "type": "light",
-      "name": "Matrimoniale"
-    },
-    {
-      "id": "light_15",
-      "type": "light",
-      "name": "Cabina Armadio"
-    },
-    {
-      "id": "light_16",
-      "type": "light",
-      "name": "Bagno Matrimoniale"
-    },
-    {
-      "id": "light_17",
-      "type": "light",
-      "name": "Cameretta"
-    },
-    {
-      "id": "thermostat_18",
-      "type": "thermostat",
-      "name": "Riscaldamento Sala"
-    },
-    {
-      "id": "thermostat_19",
-      "type": "thermostat",
-      "name": "Riscaldamento Studio"
-    },
-    {
-      "id": "thermostat_20",
-      "type": "thermostat",
-      "name": "Riscaldamento Bagno"
-    },
-    {
-      "id": "thermostat_21",
-      "type": "thermostat",
-      "name": "Riscaldamento Matrimoniale"
-    },
-    {
-      "id": "thermostat_22",
-      "type": "thermostat",
-      "name": "Riscaldamento Cameretta"
-    },
-    {
-      "id": "light_23",
-      "type": "light",
-      "name": "Corridoio"
-    },
-    {
-      "id": "light_24",
-      "type": "light",
-      "name": "Faretti"
-    },
-    {
-      "id": "light_25",
-      "type": "light",
-      "name": "Ingresso"
-    },
-    {
-      "id": "light_26",
-      "type": "light",
-      "name": "Strisce Led"
-    },
-    {
-      "id": "light_27",
-      "type": "light",
-      "name": "Faretti Televisione"
+      "name": "Finestra Mansarda"
     },
     {
       "id": "cover_28",
       "type": "cover",
-      "name": "Finestra Cabina Armadio"
+      "name": "Tenda  Pergolato"
     },
     {
-      "id": "gate_29",
-      "type": "gate",
-      "name": "Cancello"
+      "id": "light_9",
+      "type": "light",
+      "name": "Luce Portico"
     },
     {
-      "id": "gate_30",
-      "type": "gate",
-      "name": "Comando Cancelletto"
+      "id": "light_10",
+      "type": "light",
+      "name": "Faretti Biblioteca"
+    },
+    {
+      "id": "light_11",
+      "type": "light",
+      "name": "Guardaroba"
+    },
+    {
+      "id": "light_12",
+      "type": "light",
+      "name": "Solaio"
+    },
+    {
+      "id": "light_13",
+      "type": "light",
+      "name": "Applique Loggia"
+    },
+    {
+      "id": "light_14",
+      "type": "light",
+      "name": "Led Sottoscala"
+    },
+    {
+      "id": "light_15",
+      "type": "light",
+      "name": "Lampione Corte"
+    },
+    {
+      "id": "light_16",
+      "type": "light",
+      "name": "Luce Cantina"
+    },
+    {
+      "id": "light_17",
+      "type": "light",
+      "name": "Striscia Led Soppalco"
+    },
+    {
+      "id": "light_23",
+      "type": "light",
+      "name": "Luce Serra"
+    },
+    {
+      "id": "light_24",
+      "type": "light",
+      "name": "Plafoniera Androne"
+    },
+    {
+      "id": "light_25",
+      "type": "light",
+      "name": "Faretti Dispensa"
+    },
+    {
+      "id": "light_26",
+      "type": "light",
+      "name": "Luce Lavatoio"
+    },
+    {
+      "id": "light_27",
+      "type": "light",
+      "name": "Lanterna Pergolato"
     },
     {
       "id": "light_31",
       "type": "light",
-      "name": "Sirena Esterna"
+      "name": "Luce Taverna"
     },
     {
       "id": "light_32",
       "type": "light",
-      "name": "Attiva allarme"
+      "name": "Abat-jour Mansarda"
     },
     {
       "id": "light_33",
       "type": "light",
-      "name": "TV"
-    },
-    {
-      "id": "thermostat_34",
-      "type": "thermostat",
-      "name": "Raffrescamento Sala"
+      "name": "Luce Libreria Più Alta"
     },
     {
       "id": "light_37",
       "type": "light",
-      "name": "PC"
+      "name": "Presa Comandata Atrio"
+    },
+    {
+      "id": "thermostat_18",
+      "type": "thermostat",
+      "name": "Riscaldamento Solaio"
+    },
+    {
+      "id": "thermostat_19",
+      "type": "thermostat",
+      "name": "Riscaldamento Taverna"
+    },
+    {
+      "id": "thermostat_20",
+      "type": "thermostat",
+      "name": "Riscaldamento Atrio"
+    },
+    {
+      "id": "thermostat_21",
+      "type": "thermostat",
+      "name": "Riscaldamento Foresteria"
+    },
+    {
+      "id": "thermostat_22",
+      "type": "thermostat",
+      "name": "Riscaldamento Mansarda"
+    },
+    {
+      "id": "thermostat_34",
+      "type": "thermostat",
+      "name": "Raffrescamento Solaio"
+    },
+    {
+      "id": "gate_29",
+      "type": "gate",
+      "name": "Cancello Carraio"
+    },
+    {
+      "id": "gate_30",
+      "type": "gate",
+      "name": "Cancelletto Pedonale"
     },
     {
       "id": "scenario_3",
       "type": "scenario",
-      "name": "Inserisci Tapparelle"
+      "name": "Notte"
     },
     {
       "id": "scenario_4",
       "type": "scenario",
-      "name": "Inserisci Finestre+Tapparelle"
+      "name": "Inserisci Perimetro+Rimessa"
     },
     {
       "id": "scenario_5",
       "type": "scenario",
-      "name": "Chiudi Zona Giorno"
+      "name": "Disinserisci Perimetro+Rimessa"
     },
     {
       "id": "scenario_6",
       "type": "scenario",
-      "name": "Chiudi Zona Notte"
+      "name": "Inserisci Totale+Sirene"
     },
     {
       "id": "scenario_7",
       "type": "scenario",
-      "name": "Apri Zona Giorno"
+      "name": "Rientro"
     },
     {
       "id": "scenario_8",
       "type": "scenario",
-      "name": "Apri Zona Notte"
+      "name": "Uscita"
     },
     {
       "id": "scenario_9",
       "type": "scenario",
-      "name": "Spegni Tutto"
+      "name": "Vacanza"
     },
     {
       "id": "scenario_10",
       "type": "scenario",
-      "name": "Spegni Zona Giorno"
+      "name": "Chiudi Tutto"
     },
     {
       "id": "scenario_11",
       "type": "scenario",
-      "name": "Spegni Zona Notte"
+      "name": "Spegni Luci Esterne"
     },
     {
       "id": "scenario_12",
       "type": "scenario",
-      "name": "Inserisci Tapparelle+Volumetrici"
+      "name": "Accendi Portico"
     },
     {
       "id": "scenario_13",
       "type": "scenario",
-      "name": "Inserisci Finestre+Volumetrici"
+      "name": "Buonanotte all'Atrio"
     },
     {
       "id": "scenario_14",
       "type": "scenario",
-      "name": "Apri Cancello"
+      "name": "Modalità Cinema"
     },
     {
       "id": "scenario_15",
       "type": "scenario",
-      "name": "Apri Mattina (estate)"
+      "name": "Alza Tende (estate)"
     },
     {
       "id": "scenario_16",
       "type": "scenario",
-      "name": "Apri Pomeriggio (estate)"
+      "name": "Ombra Pomeriggio (estate)"
     },
     {
       "id": "scenario_17",
       "type": "scenario",
-      "name": "Apri Cancello Grande"
+      "name": "Abbassa Tapparelle Zona Ospiti Primo Piano"
     },
     {
       "id": "scenario_18",
       "type": "scenario",
-      "name": "Mood Cena"
+      "name": "Aperitivo"
     },
     {
       "id": "scenario_19",
       "type": "scenario",
-      "name": "Inserisci Volumetrici"
+      "name": "Pulizie"
     },
     {
       "id": "scenario_20",
       "type": "scenario",
-      "name": "Inserisci Finestre"
+      "name": "Risveglio"
     },
     {
       "id": "sensor_temp_1",
       "type": "sensor",
-      "name": "Term. Sala - Temperatura"
+      "name": "Sensore Solaio - Temperatura"
     },
     {
       "id": "sensor_hum_1",
       "type": "sensor",
-      "name": "Term. Sala - Umidita"
+      "name": "Sensore Solaio - Umidità"
     },
     {
       "id": "sensor_light_1",
       "type": "sensor",
-      "name": "Term. Sala - Luminosita"
+      "name": "Sensore Solaio - Luminosità"
     },
     {
       "id": "sensor_temp_2",
       "type": "sensor",
-      "name": "Term. Cameretta - Temperatura"
+      "name": "Sensore Taverna - Temperatura"
     },
     {
       "id": "sensor_hum_2",
       "type": "sensor",
-      "name": "Term. Cameretta - Umidita"
+      "name": "Sensore Taverna - Umidità"
     },
     {
       "id": "sensor_light_2",
       "type": "sensor",
-      "name": "Term. Cameretta - Luminosita"
+      "name": "Sensore Taverna - Luminosità"
     },
     {
       "id": "sensor_temp_3",
       "type": "sensor",
-      "name": "Term. Bagno Grande - Temperatura"
+      "name": "Sensore Atrio - Temperatura"
     },
     {
       "id": "sensor_hum_3",
       "type": "sensor",
-      "name": "Term. Bagno Grande - Umidita"
+      "name": "Sensore Atrio - Umidità"
     },
     {
       "id": "sensor_light_3",
       "type": "sensor",
-      "name": "Term. Bagno Grande - Luminosita"
+      "name": "Sensore Atrio - Luminosità"
     },
     {
       "id": "sensor_temp_4",
       "type": "sensor",
-      "name": "Term. Matrimoniale - Temperatura"
+      "name": "Sensore Foresteria - Temperatura"
     },
     {
       "id": "sensor_hum_4",
       "type": "sensor",
-      "name": "Term. Matrimoniale - Umidita"
+      "name": "Sensore Foresteria - Umidità"
     },
     {
       "id": "sensor_light_4",
       "type": "sensor",
-      "name": "Term. Matrimoniale - Luminosita"
+      "name": "Sensore Foresteria - Luminosità"
     },
     {
       "id": "sensor_temp_5",
       "type": "sensor",
-      "name": "Term. Studio - Temperatura"
+      "name": "Sensore Mansarda - Temperatura"
     },
     {
       "id": "sensor_hum_5",
       "type": "sensor",
-      "name": "Term. Studio - Umidita"
+      "name": "Sensore Mansarda - Umidità"
     },
     {
       "id": "sensor_light_5",
       "type": "sensor",
-      "name": "Term. Studio - Luminosita"
+      "name": "Sensore Mansarda - Luminosità"
     },
     {
       "id": "sensor_system_temp_in",

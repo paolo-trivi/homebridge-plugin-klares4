@@ -90,9 +90,9 @@ async function setup(t) {
     const { api, registered, updates } = makeApi();
     const ws = makeWsClient();
     const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => ws, storagePath: tmpStorage(t, 'klares4-echo-') });
-    // Heating-only Matrimoniale (cmd 3) and heating-only Bagno (cmd 4)
-    await registry.addOrUpdateAccessory(thermostat('thermostat_21', 'Riscaldamento Matrimoniale'));
-    await registry.addOrUpdateAccessory(thermostat('thermostat_20', 'Riscaldamento Bagno'));
+    // Heating-only Foresteria (cmd 3) and heating-only Atrio (cmd 4)
+    await registry.addOrUpdateAccessory(thermostat('thermostat_21', 'Riscaldamento Foresteria'));
+    await registry.addOrUpdateAccessory(thermostat('thermostat_20', 'Riscaldamento Atrio'));
     await new Promise(r => setTimeout(r, 50)); // wait for probe-settle
     return { registry, api, registered, updates, ws };
 }
@@ -108,7 +108,7 @@ test('echo-loop fix: internal state push (matter.js re-firing handler) does NOT 
     // The plugin pushes new state for thermostat_21 (e.g. centrale broadcast after a CFG change).
     // The mock api's updateAccessoryState records but doesn't actually re-fire the handler —
     // we simulate that by invoking the handler directly with the same value that was pushed.
-    await registry.updateAccessoryState(thermostat('thermostat_21', 'Riscaldamento Matrimoniale', 'heat', 24, 21));
+    await registry.updateAccessoryState(thermostat('thermostat_21', 'Riscaldamento Foresteria', 'heat', 24, 21));
     await new Promise(r => setTimeout(r, 50));
 
     const handlers = getThermostatHandlers(registered, 'thermostat_21');

@@ -120,8 +120,8 @@ test('F06: an acknowledged "cool" is used for the next setpoint before realtime 
     assert.equal(last.SUM.TM, '25.0');
 });
 
-// Swapped (cfg, sensor) pairs, as on real installs: Matrimoniale output 21 is
-// cfg 3 with DOMUS sensor 4, Bagno output 20 is cfg 4 with DOMUS sensor 3.
+// Swapped (cfg, sensor) pairs, as on real installs: Foresteria output 21 is
+// cfg 3 with DOMUS sensor 4, Atrio output 20 is cfg 4 with DOMUS sensor 3.
 // STATUS_TEMPERATURES is keyed by the DOMUS sensor id, never by the cfg id.
 function makeSwappedPairs() {
     const state = createInitialWebSocketClientState();

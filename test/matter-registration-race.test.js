@@ -25,7 +25,7 @@ function thermostat(extras = {}) {
     return {
         id: 'thermostat_18',
         type: 'thermostat',
-        name: 'Riscaldamento Sala',
+        name: 'Riscaldamento Veranda',
         description: '',
         currentTemperature: 21,
         targetTemperature: 20,
@@ -53,7 +53,7 @@ function recoveryRegistry(api, storagePath) {
     });
     registry.configureCachedAccessory({
         UUID: 'thermostat_18',
-        displayName: 'Riscaldamento Sala',
+        displayName: 'Riscaldamento Veranda',
         deviceType: deviceTypes.TemperatureSensor,
         clusters: { temperatureMeasurement: { measuredValue: 2100 } },
         context: { device: thermostat() },
@@ -137,7 +137,7 @@ test('F14: registration retry unregisters the stale endpoint on the first attemp
     });
 
     await registry.addOrUpdateAccessory({
-        id: 'light_9', type: 'light', name: 'Cucina', description: '', status: { on: true, dimmable: false },
+        id: 'light_9', type: 'light', name: 'Taverna', description: '', status: { on: true, dimmable: false },
     });
     await delay(1500);
 

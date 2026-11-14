@@ -58,9 +58,9 @@ async function setup(t, device, ws = wsClient()) {
 }
 
 test('handlers read the latest snapshot: a value the panel changed is no longer "already current"', async (t) => {
-    const { registry, ws, invoke } = await setup(t, thermostat('Riscaldamento Sala', 'heat', 20));
+    const { registry, ws, invoke } = await setup(t, thermostat('Riscaldamento Veranda', 'heat', 20));
     // The panel moves the setpoint to 22 °C; the plugin pushes it to Matter.
-    await registry.updateAccessoryState(thermostat('Riscaldamento Sala', 'heat', 22));
+    await registry.updateAccessoryState(thermostat('Riscaldamento Veranda', 'heat', 22));
     await delay(30);
     // The user sets 20 °C again from a controller.
     await invoke('occupiedHeatingSetpointChange', { occupiedHeatingSetpoint: 2000 });
@@ -68,15 +68,15 @@ test('handlers read the latest snapshot: a value the panel changed is no longer 
 });
 
 test('handlers read the latest mode: switching back to the original mode is forwarded', async (t) => {
-    const { registry, ws, invoke } = await setup(t, thermostat('Riscaldamento Sala', 'heat', 20));
-    await registry.updateAccessoryState(thermostat('Riscaldamento Sala', 'off', 20));
+    const { registry, ws, invoke } = await setup(t, thermostat('Riscaldamento Veranda', 'heat', 20));
+    await registry.updateAccessoryState(thermostat('Riscaldamento Veranda', 'off', 20));
     await delay(30);
     await invoke('systemModeChange', { systemMode: 4 });
     assert.deepEqual(ws.calls, [{ op: 'mode', id: 'thermostat_3', mode: 'heat' }]);
 });
 
 test('setpointRaiseLower honours args.mode: a Cool adjustment never moves the heating target', async (t) => {
-    const { ws, invoke } = await setup(t, thermostat('Climatizzazione Sala', 'heat', 22));
+    const { ws, invoke } = await setup(t, thermostat('Climatizzazione Veranda', 'heat', 22));
     await invoke('setpointRaiseLower', { mode: COOL, amount: 10 });
     assert.deepEqual(ws.calls, []);
     await invoke('setpointRaiseLower', { mode: HEAT, amount: 10 });
@@ -84,8 +84,8 @@ test('setpointRaiseLower honours args.mode: a Cool adjustment never moves the he
 });
 
 test('setpointRaiseLower in cool mode adjusts the cooling target from the latest value', async (t) => {
-    const { registry, ws, invoke } = await setup(t, thermostat('Climatizzazione Sala', 'cool', 26));
-    await registry.updateAccessoryState(thermostat('Climatizzazione Sala', 'cool', 25));
+    const { registry, ws, invoke } = await setup(t, thermostat('Climatizzazione Veranda', 'cool', 26));
+    await registry.updateAccessoryState(thermostat('Climatizzazione Veranda', 'cool', 25));
     await delay(30);
     await invoke('setpointRaiseLower', { mode: HEAT, amount: 10 });
     assert.deepEqual(ws.calls, []);
@@ -94,7 +94,7 @@ test('setpointRaiseLower in cool mode adjusts the cooling target from the latest
 });
 
 test('F15: a rejected setpoint re-publishes the known state to Matter', async (t) => {
-    const { hb, invoke } = await setup(t, thermostat('Riscaldamento Sala', 'heat', 20), wsClient({ failTimes: 1 }));
+    const { hb, invoke } = await setup(t, thermostat('Riscaldamento Veranda', 'heat', 20), wsClient({ failTimes: 1 }));
     const before = hb.updates.length;
     await assert.doesNotReject(() => invoke('occupiedHeatingSetpointChange', { occupiedHeatingSetpoint: 2300 }));
     await delay(30);
@@ -104,7 +104,7 @@ test('F15: a rejected setpoint re-publishes the known state to Matter', async (t
 });
 
 test('F15: a rejected mode change re-publishes the known mode', async (t) => {
-    const { hb, invoke } = await setup(t, thermostat('Riscaldamento Sala', 'heat', 20), wsClient({ failTimes: 1 }));
+    const { hb, invoke } = await setup(t, thermostat('Riscaldamento Veranda', 'heat', 20), wsClient({ failTimes: 1 }));
     const before = hb.updates.length;
     await invoke('systemModeChange', { systemMode: 0 });
     await delay(30);
@@ -113,7 +113,7 @@ test('F15: a rejected mode change re-publishes the known mode', async (t) => {
 });
 
 test('F33: after a failure the same value retried within the echo TTL is forwarded again', async (t) => {
-    const { ws, invoke } = await setup(t, thermostat('Riscaldamento Sala', 'heat', 20), wsClient({ failTimes: 1 }));
+    const { ws, invoke } = await setup(t, thermostat('Riscaldamento Veranda', 'heat', 20), wsClient({ failTimes: 1 }));
     await invoke('occupiedHeatingSetpointChange', { occupiedHeatingSetpoint: 2300 });
     await delay(30);
     await invoke('occupiedHeatingSetpointChange', { occupiedHeatingSetpoint: 2300 });
@@ -121,22 +121,22 @@ test('F33: after a failure the same value retried within the echo TTL is forward
 });
 
 test('F21: in cool mode the Ksenia target is the cooling setpoint', (t) => {
-    const { base } = buildThermostatMatterState(thermostat('Climatizzazione Sala', 'cool', 26));
+    const { base } = buildThermostatMatterState(thermostat('Climatizzazione Veranda', 'cool', 26));
     assert.equal(base.occupiedCoolingSetpoint, 2600);
     assert.ok(base.occupiedCoolingSetpoint - base.occupiedHeatingSetpoint >= 200, 'deadband respected');
-    const heat = buildThermostatMatterState(thermostat('Climatizzazione Sala', 'heat', 21)).base;
+    const heat = buildThermostatMatterState(thermostat('Climatizzazione Veranda', 'heat', 21)).base;
     assert.equal(heat.occupiedHeatingSetpoint, 2100);
-    const heatingOnly = buildThermostatMatterState(thermostat('Riscaldamento Sala', 'cool', 21)).base;
+    const heatingOnly = buildThermostatMatterState(thermostat('Riscaldamento Veranda', 'cool', 21)).base;
     assert.equal(heatingOnly.occupiedHeatingSetpoint, 2100, 'heating-only zones keep the heating mapping');
 });
 
 test('F21: deadband adjustments of the non-active setpoint are not forwarded to the panel', async (t) => {
-    const heat = await setup(t, thermostat('Climatizzazione Sala', 'heat', 23));
+    const heat = await setup(t, thermostat('Climatizzazione Veranda', 'heat', 23));
     // matter.js pushed cooling up to keep the deadband after the user set heating.
     await heat.invoke('occupiedCoolingSetpointChange', { occupiedCoolingSetpoint: 2500 });
     assert.deepEqual(heat.ws.calls, []);
 
-    const cool = await setup(t, thermostat('Climatizzazione Sala', 'cool', 26));
+    const cool = await setup(t, thermostat('Climatizzazione Veranda', 'cool', 26));
     await cool.invoke('occupiedHeatingSetpointChange', { occupiedHeatingSetpoint: 2300 });
     assert.deepEqual(cool.ws.calls, []);
     await cool.invoke('occupiedCoolingSetpointChange', { occupiedCoolingSetpoint: 2700 });

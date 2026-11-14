@@ -44,8 +44,8 @@ async function setup(t, device) {
     return { hb, ws, registry };
 }
 
-const light = (status) => ({ id: 'light_4', type: 'light', name: 'Luce Cucina', description: '', status });
-const cover = (status) => ({ id: 'cover_9', type: 'cover', name: 'Tapparella Studio', description: '', status });
+const light = (status) => ({ id: 'light_4', type: 'light', name: 'Luce Taverna', description: '', status });
+const cover = (status) => ({ id: 'cover_9', type: 'cover', name: 'Tapparella Solaio', description: '', status });
 
 test('OnOff toggle on a light switches it exactly once', async (t) => {
     const { hb, ws } = await setup(t, light({ on: false, dimmable: false }));
