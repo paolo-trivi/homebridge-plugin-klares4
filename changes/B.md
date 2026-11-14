@@ -9,7 +9,8 @@ None added or changed. The queue deadline is the existing `commandTimeoutMs` (de
 ### Security
 - The PIN is masked in the plugin log whatever it contains and wherever it is: a PIN with quotes or backslashes, a PIN that is a number, a list or an object, a truncated frame, and a payload carried as a JSON string. Every credential-like key is masked the same way (`PIN`, `PIN_CODE`, `USER_PIN`, `PASSWORD`, `CODE`, `TOKEN`, ...). (WS-11)
 - The LOGIN frame is no longer written to the log at every (re)connection; with `logLevel: 2` it is logged at debug, masked. (WS-11)
-- Commands only reach outputs and scenarios the plugin discovered on the panel with that kind: a command for an output the plugin does not expose (for example through an MQTT topic or a stale cached accessory) is refused. (WS-01, defense in depth)
+- Commands only reach outputs and scenarios the plugin discovered on the panel with that kind: a command for an output the plugin does not expose (for example through an MQTT topic or a stale cached accessory of an output now hidden by the fail-closed exposure) is refused and nothing is sent to the panel. (WS-01, defense in depth)
+- Running a scenario follows the same policy as exposing it, `exposeScenarios` included: a scenario of an unknown category runs only when listed there, ARM/DISARM never run. The refusal says why (arming, partial arming, unknown category) instead of always "arms or disarms the alarm". (WS-02, defense in depth)
 
 ### Fixed
 - Commands no longer go out late. A command still queued after `commandTimeoutMs` is refused with an error instead of being sent when the panel finally answers the previous one. (WS-04, SP-05)
