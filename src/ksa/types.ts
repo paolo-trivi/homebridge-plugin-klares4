@@ -70,12 +70,6 @@ export interface KsaDerivedConfig {
         sensors: Record<string, string>;
         scenarios: Record<string, string>;
     };
-    suggestedExclusions: {
-        outputs: string[];
-        zones: string[];
-        sensors: string[];
-        scenarios: string[];
-    };
 }
 
 export interface KsaImportSummary {

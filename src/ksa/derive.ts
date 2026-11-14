@@ -89,6 +89,9 @@ function buildDerivedConfig(program: ParsedKsaProgram, cache: KsaSanitizedCache)
         }
         // Room names end up in MQTT topics: '/', '+', '#' and spaces must never reach them.
         const roomName = createDeviceSlug(panelRoomName) || `room_${createDeviceSlug(map.roomId) || 'unnamed'}`;
+        if (!ROOM_NAME_PATTERN.test(roomName)) {
+            continue;
+        }
         const resolvedDeviceIds = resolveRoomMapToDeviceIds(map, outputById);
         if (resolvedDeviceIds.length === 0) {
             continue;
@@ -126,12 +129,6 @@ function buildDerivedConfig(program: ParsedKsaProgram, cache: KsaSanitizedCache)
             zones: cache.zoneNamesById,
             sensors: cache.domusSensorNamesById,
             scenarios: cache.scenarioNamesById,
-        },
-        suggestedExclusions: {
-            outputs: [],
-            zones: [],
-            sensors: [],
-            scenarios: [],
         },
     };
 }
@@ -209,28 +206,34 @@ function ownValue(record: Record<string, string>, key: string): string | undefin
     return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
 }
 
+/**
+ * The `.ksa` is untrusted input and its IDs end up in `config.json` and in
+ * device IDs: only what `config.schema.json` accepts for an ID (digits) gets through.
+ */
+const PANEL_ID_PATTERN = /^[0-9]{1,9}$/;
+const ROOM_NAME_PATTERN = /^[a-z0-9_]+$/;
+/** The longest name HomeKit accepts. */
+const MAX_NAME_LENGTH = 64;
+
 function asId(value: unknown): string {
+    let text = '';
     if (typeof value === 'string') {
-        return value.trim();
+        text = value.trim();
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+        text = Math.trunc(value).toString();
     }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        return Math.trunc(value).toString();
-    }
-    return '';
+    return PANEL_ID_PATTERN.test(text) ? text : '';
 }
 
+/** Unused links are written `NU` or `NA` by the panel: not digits, so they come out as null. */
 function normalizeNullableId(value: unknown): string | null {
-    const normalized = asId(value);
-    if (!normalized || normalized.toUpperCase() === 'NU' || normalized.toUpperCase() === 'NA') {
-        return null;
-    }
-    return normalized;
+    return asId(value) || null;
 }
 
 function normalizeLabel(value: unknown): string | null {
     if (typeof value !== 'string') {
         return null;
     }
-    const normalized = value.trim();
+    const normalized = Array.from(value.trim()).slice(0, MAX_NAME_LENGTH).join('').trim();
     return normalized ? normalized : null;
 }

@@ -219,9 +219,46 @@ export function resolveRuntimeConfig(raw: RawLares4Config | undefined, log: Logg
     return runtime;
 }
 
+/** Keys removed from the plugin: still accepted in an existing config.json, never read. */
+const DEPRECATED_KEYS: ReadonlyArray<{ key: keyof RawLares4Config & string; message: string }> = [
+    {
+        key: 'telemetry',
+        message: 'error reporting was removed in 2.3.0; the `telemetry` key is ignored and can be deleted',
+    },
+];
+
 /**
- * `platform.config`: the raw config (unknown keys such as `platform`, `name`
- * or `telemetry` untouched) with every key this plugin reads replaced by its
+ * The KSA import may change a few sections of `platform.config` after the
+ * first resolution. Only those are read again, so the problems of every other
+ * key (already reported once at startup) are not reported twice; what the
+ * import introduced in its own sections is.
+ */
+export function refreshKsaSections(previous: RuntimeConfig, raw: RawLares4Config, log: Logger): RuntimeConfig {
+    const issues = new ConfigIssues();
+    const names = parseCustomNames(raw.customNames, issues);
+    const refreshed: RuntimeConfig = {
+        ...previous,
+        customNames: names.map,
+        customNamesConfig: names.cleaned ?? [],
+        customNameRows: names.rows,
+        domusThermostat: resolveDomusThermostat(raw.domusThermostat, issues),
+        ksaImport: resolveKsaImport(raw.ksaImport, issues),
+        roomMapping: resolveRoomMapping(raw.roomMapping, issues),
+    };
+    issues.flush(log);
+    return refreshed;
+}
+
+/** One `info` line per deprecated key present in the config, whatever its value. Call once at startup. */
+export function reportDeprecatedKeys(raw: RawLares4Config | undefined, log: Logger): void {
+    for (const { key, message } of DEPRECATED_KEYS) {
+        if (raw !== undefined && raw !== null && Object.prototype.hasOwnProperty.call(raw, key)) log.info(message);
+    }
+}
+
+/**
+ * `platform.config`: the raw config (unknown keys such as `platform` or `name`
+ * untouched) with every key this plugin reads replaced by its
  * validated value, so code that still reads the config directly sees
  * normalized values. The Homebridge-owned config object is not modified.
  */

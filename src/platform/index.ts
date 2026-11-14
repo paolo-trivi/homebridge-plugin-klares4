@@ -9,10 +9,7 @@ import type {
 } from 'homebridge';
 
 import { MqttBridge } from '../mqtt-bridge';
-import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { PLATFORM_NAME, PLUGIN_NAME } from '../settings';
-import { initTelemetry, captureError, closeTelemetry } from '../telemetry';
-import { tlsConfigurationHint } from '../websocket-client/tls-error-hint';
 import type { KseniaDevice } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import type { DebugCaptureManager } from '../debug-capture';
@@ -21,14 +18,14 @@ import { AccessoryHandlerService } from './accessory-handler-service';
 import { createWebSocketClient, hasConnectionConfig } from './client-options';
 import { startRequestedDebugCapture } from './debug-capture-start';
 import { MatterAccessoryRegistry } from './matter-accessory-registry';
-import { PlatformConfigFileService } from './config-file-service';
+import { PlatformConfigFileService, type PlatformBlockSelector } from './config-file-service';
 import { DeviceListService } from './device-list-service';
 import { DeviceEventRouter } from './device-event-router';
 import { DiscoveryService } from './discovery-service';
 import { KsaImportService } from './ksa-import-service';
 import { reportConfigOverrides } from './override-reconciliation';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
-import { resolveRuntimeConfig, toPlatformConfig, type RuntimeConfig } from './runtime-config';
+import { refreshKsaSections, reportDeprecatedKeys, resolveRuntimeConfig, toPlatformConfig, type RuntimeConfig } from './runtime-config';
 import { SyncLifecycle } from './sync-lifecycle';
 import type { AccessoryHandler, Lares4Config, RawLares4Config } from './types';
 
@@ -71,6 +68,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.Characteristic = api.hap.Characteristic;
         // The only place the raw config is interpreted: problems are logged here, once.
         this.runtime = resolveRuntimeConfig(config, this.log);
+        reportDeprecatedKeys(config, this.log);
         this.config = toPlatformConfig(config, this.runtime);
         this.discoveryService = new DiscoveryService(this.config, this.log, this.runtime);
         this.lifecycleService = new PlatformLifecycleService(this.log);
@@ -128,19 +126,12 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
         if (!hasConnectionConfig(config, this.runtime, this.log)) return;
 
-        initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW, [
-            this.config.ip,
-            this.config.pin,
-            this.config.sender,
-        ].filter((v): v is string => typeof v === 'string'));
-
         this.log.debug('Platform initialization completed:', this.config.name);
 
         this.api.on('didFinishLaunching', (): void => {
             this.log.debug('didFinishLaunching callback executed');
             this.initializeLares4().catch((error: unknown): void => {
                 this.log.error('Failed to initialize Lares4:', error instanceof Error ? error.message : String(error));
-                captureError(error, { context: 'didFinishLaunching' });
             });
         });
         this.api.on('shutdown', (): void => {
@@ -167,13 +158,17 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 return;
             }
 
+            // The first thing a start does with the storage directory: clear what a crashed write left.
+            await this.configFileService.removeOrphanedTemporaryFiles();
+            if (this.initAborted()) return;
+
             const ksaCache = await this.ksaImportService.prepare(this.config, PLATFORM_NAME);
             // Nothing below awaits until connect(): one check covers the client,
             // the MQTT bridge, the debug capture and the connection.
             if (this.initAborted()) return;
 
-            // The KSA import may have replaced mappings in `this.config`: read them back.
-            this.runtime = resolveRuntimeConfig(this.config, this.log);
+            // The KSA import may have replaced mappings in `this.config`: read those sections back.
+            this.runtime = refreshKsaSections(this.runtime, this.config, this.log);
             const { ip, pin } = this.runtime;
             if (!ip || !pin) return;
             this.wsClient = createWebSocketClient({ ...this.runtime, ip, pin }, this.log, ksaCache);
@@ -188,8 +183,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             }
 
             if (this.runtime.generateDebugFile) {
-                this.debugCapture = startRequestedDebugCapture(this.config, this.log, this.api.user.storagePath(), this.wsClient);
-                void this.configFileService.disableDebugFlag(PLATFORM_NAME);
+                this.debugCapture = startRequestedDebugCapture(this.runtime.debugCaptureDurationMs, this.log, this.api.user.storagePath(), this.wsClient);
+                void this.configFileService.disableDebugFlag(PLATFORM_NAME, this.blockSelector());
             }
 
             await this.wsClient.connect();
@@ -197,12 +192,6 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.log.info('Ksenia Lares4 initialized successfully');
         } catch (error: unknown) {
             this.log.error('Lares4 initialization error:', error instanceof Error ? error.message : String(error));
-            // A TLS failure fixed by allowInsecureTls is a setup issue, already
-            // explained in the log by the client: it is not a bug to report.
-            const tlsContext = { useHttps: this.runtime.https, allowInsecureTls: this.runtime.allowInsecureTls };
-            if (!tlsConfigurationHint(error, tlsContext)) {
-                captureError(error, { context: 'initializeLares4' });
-            }
         }
     }
 
@@ -216,6 +205,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         // a disabled category.
         if (device.type === 'scenario' && this.wsClient?.isScenarioSuppressed(device.id)) return false;
         return this.discoveryService.resolveMatterPolicy(device).exposed;
+    }
+
+    /** What tells this instance's block apart in config.json when it holds several. */
+    private blockSelector(): PlatformBlockSelector {
+        return { name: this.config.name, ip: this.runtime.ip };
     }
 
     private initAborted(): boolean {
@@ -232,7 +226,6 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.wsClient?.disconnect();
             this.mqttBridge?.disconnect();
         });
-        closeTelemetry();
     }
 
     public configureAccessory(accessory: PlatformAccessory): void {

@@ -1,5 +1,3 @@
-import type { KseniaDevice } from '../types';
-
 export interface RawMessage {
     timestamp: string;
     direction: 'in' | 'out';
@@ -11,5 +9,6 @@ export interface DeviceSnapshot {
     timestamp: string;
     label: 'START' | 'INTERVAL' | 'END';
     deviceCount: number;
-    devices: KseniaDevice[];
+    /** The devices as the client knew them, sensitive keys masked (`redactSnapshot`). */
+    devices: unknown;
 }
