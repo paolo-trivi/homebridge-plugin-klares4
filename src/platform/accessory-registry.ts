@@ -12,12 +12,6 @@ import {
 import { belowDiscoveryFloor, discoveryFamily, familiesOf, type SyncOutcome } from './prune-policy';
 import type { AccessoryHandler } from './types';
 
-/** What one HAP prune pass is told about the sync it closes. */
-export interface HapPruneContext extends Partial<SyncOutcome> {
-    /** Devices hidden by the panel-side policy (suppressed scenarios): removed like excluded ones. */
-    isHiddenByPolicy?: (device: KseniaDevice) => boolean;
-}
-
 interface AccessoryRegistryOptions {
     api: API;
     log: Logger;
@@ -34,7 +28,10 @@ interface AccessoryRegistryOptions {
         handler: AccessoryHandler,
         device: KseniaDevice,
     ) => void;
-    /** Config exclusions: an excluded cached accessory is removed without waiting. */
+    /**
+     * Config exclusions and devices hidden by the exposure policy (one source,
+     * `DiscoveryService.isDeviceExcluded`): such a cached accessory is removed without waiting.
+     */
     isDeviceExcluded?: (device: KseniaDevice) => boolean;
 }
 
@@ -174,12 +171,11 @@ export class AccessoryRegistry {
      * `prune-policy.ts`. `answeredFamilies` comes from the sync lifecycle (every
      * device the panel listed, whatever its exposure); without it the families
      * are taken from the accessories seen in this cycle. Accessories excluded
-     * in the config or hidden by the scenario policy are removed immediately.
+     * in the config or hidden by the exposure policy are removed immediately.
      */
-    public pruneStaleAccessories(context: HapPruneContext = {}): void {
+    public pruneStaleAccessories(context: Partial<SyncOutcome> = {}): void {
         const { accessories, activeDiscoveredUUIDs } = this.options;
-        const hidden = (device: KseniaDevice | undefined): boolean => !!device
-            && (!!this.options.isDeviceExcluded?.(device) || !!context.isHiddenByPolicy?.(device));
+        const hidden = (device: KseniaDevice | undefined): boolean => !!device && !!this.options.isDeviceExcluded?.(device);
         let removed = 0;
         for (const accessory of [...accessories.values()]) {
             if (activeDiscoveredUUIDs.has(accessory.UUID) || !hidden(cachedDevice(accessory))) continue;

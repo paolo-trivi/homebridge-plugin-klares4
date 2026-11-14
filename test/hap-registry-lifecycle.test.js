@@ -117,11 +117,12 @@ test('TD-T-06: a cached accessory without device context is pruned by the counte
     assert.deepEqual(h.unregistered, ['uuid-orphan']);
 });
 
-test('PLAT-04 (case C): a cached scenario hidden by the policy goes at the first sync, even with no scenario on the panel', () => {
-    const h = harness();
+test('PLAT-04 (case C): a cached scenario hidden by the exposure policy goes at the first sync, even with no scenario on the panel', () => {
+    // The platform wires isDeviceExcluded to DiscoveryService, which includes the exposure policy.
+    const h = harness({ excluded: ['scenario_3'] });
     h.cache(light(1));
     h.cache(scenario(3));
-    h.sync([light(1)], { answeredFamilies: new Set(['light_']), isHiddenByPolicy: (d) => d.id === 'scenario_3' });
+    h.sync([light(1)], { answeredFamilies: new Set(['light_']) });
     assert.deepEqual(h.unregistered, ['uuid-scenario_3']);
 });
 

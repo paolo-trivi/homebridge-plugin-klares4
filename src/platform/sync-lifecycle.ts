@@ -39,7 +39,6 @@ export class SyncLifecycle {
     private epoch = 0;
     /** Every device the panel listed in the current sync, excluded ones included. */
     private readonly syncDeviceIds = new Set<string>();
-    private client?: KseniaWebSocketClient;
     private completed?: CompletedSync;
     private prunedEpoch?: number;
     private matterRun?: Promise<void>;
@@ -52,7 +51,6 @@ export class SyncLifecycle {
 
     public attach(client: KseniaWebSocketClient, deviceEvents: DeviceEventRouter): void {
         const { matterRegistry } = this.deps;
-        this.client = client;
         client.onSyncStarted = (): void => this.startSync();
         client.onDeviceDiscovered = (device: KseniaDevice): void => {
             this.discoveredIds.add(device.id);
@@ -83,12 +81,7 @@ export class SyncLifecycle {
         const { log } = this.deps;
         log.info('Initial synchronization completed, finalizing Matter name-map and pruning stale accessories...');
         const answeredFamilies = familiesOf(this.syncDeviceIds);
-        const { client } = this;
-        runIsolated(log, 'HAP accessory prune', () => this.deps.accessoryRegistry.pruneStaleAccessories({
-            answeredFamilies,
-            isHiddenByPolicy: (device: KseniaDevice): boolean => device.type === 'scenario'
-                && !!client?.isScenarioSuppressed(device.id),
-        }));
+        runIsolated(log, 'HAP accessory prune', () => this.deps.accessoryRegistry.pruneStaleAccessories({ answeredFamilies }));
         this.completed = { epoch: this.epoch, answeredFamilies };
         if (!this.firstSyncReported) {
             this.firstSyncReported = true;
