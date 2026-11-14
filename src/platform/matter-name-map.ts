@@ -12,7 +12,7 @@
  *     uuid-derived tag (progressively lengthened until unique) as last resort.
  *
  * Name slots are matched case-insensitively: voice assistants resolve
- * utterances case-insensitively, so "finestra studio" and "Finestra Studio"
+ * utterances case-insensitively, so "lampada ovest" and "Lampada Ovest"
  * are the same voice-namespace entry. By construction the resulting map can
  * never contain two equal (case-insensitive) display names.
  */
@@ -26,6 +26,13 @@ import {
     MAX_NUMERIC_FALLBACK,
     priorityOf,
 } from './matter-name-sanitizer';
+
+/**
+ * A device no longer discovered keeps its name reserved (so a device that comes
+ * back gets the same name, and nobody else takes it) for this long after it was
+ * last seen.
+ */
+export const RESERVATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface MatterNameMapEntry {
     uuid: string;
@@ -84,6 +91,7 @@ export function computeMatterNameMap(
     const reservedById = new Map<string, MatterNameMapEntry>();
     for (const entry of reservations) {
         if (!entry?.uuid || byId.has(entry.uuid)) continue;
+        if (typeof entry.lastSeen === 'number' && now - entry.lastSeen >= RESERVATION_TTL_MS) continue;
         reservedById.set(entry.uuid, entry);
     }
 

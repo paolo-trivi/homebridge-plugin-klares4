@@ -23,6 +23,16 @@ import type { MatterTopologyCoordinator } from './matter-topology-coordinator';
 
 const MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR = true;
 
+/**
+ * Why a device is registered again in the same session: a rename the endpoint
+ * did not take in place, or the dimmer upgrade. Both replace an endpoint
+ * observed gone; `inheritUniqueId` is the identity the new one gets back.
+ */
+export interface ReregisterOptions {
+    reason: 'rename' | 'upgrade';
+    inheritUniqueId?: string;
+}
+
 /** What the registration path shares with the registry facade. */
 export interface MatterRegistrationContext {
     api: API;
@@ -64,10 +74,10 @@ export class MatterRegistrationFlow {
         this.settlement = new RegisterSettlement(ctx.api);
     }
 
-    public register(device: KseniaDevice, isRename = false): Promise<void> {
+    public register(device: KseniaDevice, reregister?: ReregisterOptions): Promise<void> {
         return this.gate.run(
             device.id,
-            () => this.performRegistration(device, isRename),
+            () => this.performRegistration(device, reregister),
             () => this.ctx.updateAccessoryState(device),
         );
     }
@@ -77,7 +87,7 @@ export class MatterRegistrationFlow {
             log: this.ctx.log,
             topologyCoordinator: this.ctx.topologyCoordinator,
             registrations: this.ctx.registrations,
-            register: (d) => this.performRegistration(d, true),
+            register: (d, inheritUniqueId) => this.performRegistration(d, { reason: 'upgrade', inheritUniqueId }),
         }), () => this.ctx.updateAccessoryState(device));
     }
 
@@ -118,7 +128,7 @@ export class MatterRegistrationFlow {
         return { accessory: this.mapShape(device, fallback), fallback };
     }
 
-    private async performRegistration(discovered: KseniaDevice, isRename: boolean): Promise<void> {
+    private async performRegistration(discovered: KseniaDevice, reregister?: ReregisterOptions): Promise<void> {
         const { ctx } = this;
         const cached = ctx.cachedDevices.get(discovered.id);
         // Discovery placeholders must not overwrite the state Homebridge restored from its cache.
@@ -134,15 +144,16 @@ export class MatterRegistrationFlow {
             status: 'pending',
             recoveryAttempts: 0,
             pendingStateUpdates: hasObservedState(device) ? buildStateUpdates(device, fallback) : [],
+            inheritedUniqueId: reregister?.inheritUniqueId,
         };
         ctx.registrations.set(device.id, reg);
 
         const fromCache = ctx.cachedUUIDs.has(device.id);
-        if (!isRename) {
+        if (!reregister) {
             if (fromCache) ctx.pruneTracker.recordCachedRestore();
             else ctx.pruneTracker.recordNewlyRegistered();
         }
-        logRegisterRequested(ctx.log, device, matterAccessory.displayName, { fromCache, fallback, isRename });
+        logRegisterRequested(ctx.log, device, matterAccessory.displayName, { fromCache, fallback, reregister: reregister?.reason });
         // We must always call registerPlatformAccessories — the MatterServer keeps
         // a runtime accessory map that is populated only on register. The Homebridge
         // accessory cache (configureMatterAccessory) is necessary but NOT sufficient:
@@ -168,7 +179,7 @@ export class MatterRegistrationFlow {
             await handleRegisterFailure(device, reg, err, this.recoveryDeps());
             return;
         }
-        if (isRename) await this.completeRegistration(device.id);
+        if (reregister) await this.completeRegistration(device.id);
         else void this.completeRegistration(device.id);
     }
 
@@ -193,6 +204,9 @@ export class MatterRegistrationFlow {
         reg.status = 'registered';
         ctx.topologyCoordinator.markLocallyPublished(uuid);
         reg.registeredAt = Date.now();
+        const inherited = reg.inheritedUniqueId;
+        reg.inheritedUniqueId = undefined;
+        if (inherited) await ctx.topologyCoordinator.restoreUniqueId(uuid, inherited);
         this.onRegistered(reg);
         ctx.stateUpdateQueue.markReadyAfterBootstrap(reg, timings.stateBootstrapMs);
         ctx.log.info(`[Matter] registered: ${reg.displayName}`);

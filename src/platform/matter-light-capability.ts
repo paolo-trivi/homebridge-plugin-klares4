@@ -31,8 +31,12 @@ export function needsDimmableUpgrade(reg: MatterRegistration, device: KseniaDevi
 
 /**
  * Replaces the OnOffLight endpoint with a DimmableLight one under the same
- * UUID. Homebridge rejects a register of a UUID it still holds, so the old
- * endpoint must be observed gone first.
+ * UUID. This cannot happen in place: the device type is fixed when matter.js
+ * builds the endpoint, and Homebridge refuses a register of a UUID it holds in
+ * this session ("already registered", AccessoryManager.js:164-169; only an
+ * endpoint restored from its cache is rebuilt, :157-162). So the old endpoint
+ * must be observed gone first; the new one then gets the old `uniqueId` back.
+ * It happens once per light: the cache remembers the capability.
  */
 export async function upgradeToDimmableLight(
     device: KseniaDevice,
@@ -40,10 +44,12 @@ export async function upgradeToDimmableLight(
         log: Logger;
         topologyCoordinator: MatterTopologyCoordinator;
         registrations: Map<string, MatterRegistration>;
-        register: (device: KseniaDevice) => Promise<void>;
+        /** Registers the DimmableLight; the new endpoint gets `inheritUniqueId` back once it answers. */
+        register: (device: KseniaDevice, inheritUniqueId?: string) => Promise<void>;
     },
 ): Promise<void> {
     deps.log.info(`[Matter] ${device.name} reports a brightness level; re-registering as DimmableLight`);
+    const uniqueId = await deps.topologyCoordinator.readUniqueId(device.id);
     const removed = await deps.topologyCoordinator.unregister(device.id, 'onOff');
     if (!removed) {
         const reg = deps.registrations.get(device.id);
@@ -52,5 +58,5 @@ export async function upgradeToDimmableLight(
         return;
     }
     deps.registrations.delete(device.id);
-    await deps.register(device);
+    await deps.register(device, uniqueId);
 }

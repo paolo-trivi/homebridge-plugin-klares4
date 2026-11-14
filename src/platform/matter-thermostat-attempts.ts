@@ -19,7 +19,8 @@ import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { buildThermostatMatterState } from './matter-thermostat-mapper';
 import { setThermostatShape, thermostatShapeOf } from './matter-thermostat-shape';
-import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
+import { replaceEndpoint } from './matter-endpoint-replacement';
+import type { MatterTopologyCoordinator } from './matter-topology-coordinator';
 
 /**
  * The accessory for the next attempt — same UUID, metadata and handlers, the
@@ -64,8 +65,8 @@ export async function registerNextThermostatAttempt(reg: MatterRegistration, dep
         + 'trying the payload of earlier versions before falling back to TemperatureSensor.',
     );
     try {
-        const removed = await deps.topologyCoordinator.unregister(reg.uuid, registrationProbeCluster(reg.matterAccessory));
-        if (!removed) throw new Error(`previous Matter endpoint for ${reg.uuid} is still present`);
+        // Still a Thermostat: the new endpoint keeps the identity of the refused one, if it had one.
+        await replaceEndpoint(reg, deps.topologyCoordinator, 'same-device');
         // The register payload must not come back as a controller command.
         deps.thermostatEchoTracker?.recordPushed(reg.uuid, next.clusters?.thermostat as Record<string, unknown>);
         reg.matterAccessory = next;

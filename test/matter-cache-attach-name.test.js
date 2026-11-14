@@ -44,7 +44,9 @@ test('a name changed while offline reaches the endpoint that was restored from c
     await registry.finalizeNameMap([light('Luce Nuova')]);
     await delay(60);
     assert.deepEqual(hb.log, []);
-    assert.deepEqual(hb.unregisterCalls, ['light_8']);
+    // MAT-04: renamed in place, the endpoint is never replaced.
+    assert.deepEqual(hb.unregisterCalls, []);
+    assert.equal(hb.registerCalls.length, 1);
     assert.equal(hb.endpoints.get('light_8').nodeLabel, 'Luce Nuova');
     assert.equal(registry.getStatus('light_8'), 'registered');
 });
