@@ -1,6 +1,6 @@
 import type { Logger } from 'homebridge';
 import { LogLevel } from '../log-levels';
-import type { KseniaMessage } from '../types';
+import type { KseniaMessage, OutputOptIn, ScenarioOptIn } from '../types';
 import type { CommandService } from './command-service';
 import { DiscoveryReadHandler } from './discovery-read-handler';
 import { ThermostatReadHandler } from './thermostat-read-handler';
@@ -28,6 +28,8 @@ interface MessageServiceDeps {
     logLevel: LogLevel;
     debugEnabled: boolean;
     exposePartialArmScenarios?: boolean;
+    exposeOutputs?: readonly OutputOptIn[];
+    exposeScenarios?: readonly ScenarioOptIn[];
     statusUpdater: StatusUpdater;
     systemTemperatureUpdater: SystemTemperatureUpdater;
     thermostatStatusUpdater: ThermostatStatusUpdater;
@@ -64,6 +66,8 @@ export class MessageService {
             state: deps.state,
             log: deps.log,
             exposePartialArmScenarios: deps.exposePartialArmScenarios,
+            exposeOutputs: deps.exposeOutputs,
+            exposeScenarios: deps.exposeScenarios,
             statusUpdater: deps.statusUpdater,
             thermostats: this.thermostats,
             emitDeviceDiscovered: (device): void => this.deps.callbacks.onDeviceDiscovered?.(device),
@@ -97,6 +101,10 @@ export class MessageService {
         }
 
         // Only an error that escapes every per-section and per-element guard lands here.
+        // A configuration change on the panel (keypad, app): the cached thermostat cfg may be stale.
+        if (message.CMD === 'NOT_MASK_UNSOLICITED') {
+            runIsolated(this.deps.log, 'NM_CHANGES', () => this.thermostats.handleChangeNotification(message.PAYLOAD));
+        }
         runIsolated(this.deps.log, `Handling ${frameLabel(message)} frame`, () => this.deps.routeMessage(message));
     }
 
@@ -145,7 +153,7 @@ export class MessageService {
 
         const cfg = payload.CFG_THERMOSTATS;
         if (message.PAYLOAD_TYPE === 'CFG_THERMOSTATS' && Array.isArray(cfg)) {
-            section('CFG_THERMOSTATS', () => this.thermostats.handleCfgThermostats(cfg));
+            section('CFG_THERMOSTATS', () => this.thermostats.handleCfgThermostats(cfg, payload.PRG_CHECK));
         }
 
         const programs = payload.PRG_THERMOSTATS;

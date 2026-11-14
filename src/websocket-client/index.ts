@@ -3,7 +3,8 @@ import type { Logger } from 'homebridge';
 import { LogLevel, getEffectiveLogLevel } from '../log-levels';
 import { markStatusObserved } from '../device-observation';
 import { stripDevicePrefix } from '../device-id';
-import { isIgnoredScenarioCategory } from './device-parsers';
+import { isIgnoredScenarioCategory, scenarioOptInIds } from './device-parsers';
+import { isHiddenByExposurePolicy } from './exposure-report';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { ProtocolRouter } from '../websocket/protocol-router';
 import { OutputCommandConfirmationTracker } from '../websocket/output-command-confirmation';
@@ -117,6 +118,7 @@ export class KseniaWebSocketClient {
             emitRawMessage: (direction, rawMessage): void => {
                 this.emitRawMessage(direction, rawMessage);
             },
+            emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
         });
 
         let routeMessage = (_message: KseniaMessage): void => undefined;
@@ -135,6 +137,8 @@ export class KseniaWebSocketClient {
             logLevel: this.logLevel,
             debugEnabled: this.options.debug ?? false,
             exposePartialArmScenarios: this.options.exposePartialArmScenarios ?? false,
+            exposeOutputs: this.options.exposeOutputs,
+            exposeScenarios: this.options.exposeScenarios,
             statusUpdater: this.statusUpdater,
             systemTemperatureUpdater: this.systemTemperatureUpdater,
             thermostatStatusUpdater: this.thermostatStatusUpdater,
@@ -207,11 +211,21 @@ export class KseniaWebSocketClient {
         };
     }
 
-    /** True when the panel lists this scenario in a category the arming policy never exposes. */
+    /** True when the panel lists this scenario in a category the exposure policy does not expose. */
     public isScenarioSuppressed(scenarioId: string): boolean {
-        const category = this.state.scenarioCategoryById.get(stripDevicePrefix(scenarioId));
+        const panelId = stripDevicePrefix(scenarioId);
+        const category = this.state.scenarioCategoryById.get(panelId);
         return category !== undefined
-            && isIgnoredScenarioCategory(category, this.options.exposePartialArmScenarios ?? false);
+            && isIgnoredScenarioCategory(
+                category,
+                this.options.exposePartialArmScenarios ?? false,
+                scenarioOptInIds(this.options.exposeScenarios).has(panelId),
+            );
+    }
+
+    /** True when the latest discovery read hid the output or scenario this device ID names. */
+    public isHiddenByExposurePolicy(deviceId: string): boolean {
+        return isHiddenByExposurePolicy(this.state, deviceId);
     }
 
     public async connect(): Promise<void> {

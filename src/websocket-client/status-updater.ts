@@ -11,7 +11,7 @@ import type {
 } from '../types';
 import type { Logger } from 'homebridge';
 import { LogLevel } from '../log-levels';
-import { kseniaModeToDomain } from '../thermostat-mode';
+import { parseKseniaMode } from '../thermostat-mode';
 import { updateThermostatStatus } from '../thermostat-state';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { hasFreshThermostatRealtimeState } from './thermostat-status-updater';
@@ -98,9 +98,10 @@ export class StatusUpdater {
                     }
                 }
 
-                if (!hasFreshRealtime && typeof output.MODE === 'string') {
+                // An unknown mode is not read as "off": the mode stays as it was.
+                const newMode = hasFreshRealtime ? undefined : parseKseniaMode(output.MODE);
+                if (newMode !== undefined) {
                     const oldMode = thermostatStatus.mode;
-                    const newMode = kseniaModeToDomain(output.MODE);
                     updateThermostatStatus(thermostatDevice, {
                         mode: newMode,
                     });

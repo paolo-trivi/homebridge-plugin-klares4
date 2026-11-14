@@ -68,5 +68,7 @@ export function createInitialWebSocketClientState(
         thermostatRealtimeSeasonByOutputId: new Map(),
         missingThermostatProgramWarningOutputIds: new Set(),
         scenarioCategoryById: new Map(),
+        hiddenByExposurePolicy: new Map(),
+        thermostatCfgFreshness: { ownWritesSinceCounter: 0, readAt: new Map() },
     };
 }

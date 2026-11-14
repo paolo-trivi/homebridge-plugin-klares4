@@ -89,13 +89,11 @@ export function createWebSocketClient(
 }
 
 /**
- * What the client hid with the exposure policy, in the form `DiscoveryService`
- * reads. The facade reports suppressed scenarios today; outputs follow once
- * it exposes the hidden-device registry (`isHiddenByExposurePolicy`).
+ * What the client hid with the exposure policy (outputs and scenarios of the
+ * latest discovery read), in the form `DiscoveryService` reads.
  */
 export function clientExposurePolicy(client: KseniaWebSocketClient): ExposurePolicySource {
     return {
-        isHiddenByExposurePolicy: (deviceId: string): boolean =>
-            deviceId.startsWith('scenario_') && client.isScenarioSuppressed(deviceId),
+        isHiddenByExposurePolicy: (deviceId: string): boolean => client.isHiddenByExposurePolicy(deviceId),
     };
 }

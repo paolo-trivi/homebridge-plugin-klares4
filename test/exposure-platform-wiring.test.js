@@ -2,9 +2,8 @@
 
 // Fail-closed exposure through the real platform lifecycle (WS-01 / PLAT-05,
 // WS-02 / PLAT-01): a cached accessory of a device the exposure policy now
-// hides is handled like an excluded one, on HomeKit and on Matter. The `todo`
-// tests describe the end-to-end behaviour that needs the client facade (task
-// C) to be wired on top of this branch.
+// hides is handled like an excluded one, on HomeKit and on Matter, and the
+// per-device opt-ins (exposeOutputs, exposeScenarios) reach the client.
 
 process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS = '0';
 process.env.KLARES4_MATTER_REGISTER_TIMEOUT_MS = '500';
@@ -71,18 +70,14 @@ test('WS-02: on Matter a cached endpoint of a now-hidden scenario follows the ex
     assert.equal(matter.registerCalls.some((call) => call.UUID === 'scenario_3'), false);
 });
 
-test('A→C (todo): a cached HomeKit accessory of a now-hidden GEN output is removed at the first sync, like an excluded one', {
-    todo: 'A→C: needs KseniaWebSocketClient.isHiddenByExposurePolicy, then clientExposurePolicy returns the client itself',
-}, async (t) => {
+test('WS-01: a cached HomeKit accessory of a now-hidden GEN output is removed at the first sync, like an excluded one', async (t) => {
     const { api, log, platform } = await boot(t, { cached: [cachedOutput] });
     await waitFor(() => api.unregistered.includes('light_12'));
     assert.equal(log.lines.some((line) => /Door strike — absent for/.test(line)), false);
     assert.equal(platform['discoveryService'].resolveMatterPolicy(cachedOutput).exposed, false);
 });
 
-test('A→C (todo): with exposeOutputs the GEN output is exposed again as light_<id> and answers commands', {
-    todo: 'A→C: websocket-client/index.ts + message-service.ts must forward exposeOutputs to DiscoveryReadHandler',
-}, async (t) => {
+test('WS-01: with exposeOutputs the GEN output is exposed again as light_<id> and answers commands', async (t) => {
     const { api, panel, platform } = await boot(t, { config: { exposeOutputs: [{ outputId: '12', exposeAs: 'light' }] } });
     await waitFor(() => api.registered.includes('light_12'));
     await platform.wsClient.switchLight('light_12', true);
@@ -90,9 +85,7 @@ test('A→C (todo): with exposeOutputs the GEN output is exposed again as light_
     assert.deepEqual(sent.map((m) => m.PAYLOAD.OUTPUT), [{ ID: '12', STA: 'ON' }]);
 });
 
-test('A→C (todo): with exposeScenarios a scenario of unknown category is exposed and runs', {
-    todo: 'A→C: forward exposeScenarios to discovery and isScenarioSuppressed (the command guard of task B already honours the opt-in)',
-}, async (t) => {
+test('WS-02: with exposeScenarios a scenario of unknown category is exposed and runs', async (t) => {
     const { api, panel, platform } = await boot(t, { config: { exposeScenarios: [{ scenarioId: '3' }] } });
     await waitFor(() => api.registered.includes('scenario_3'));
     assert.equal(platform.wsClient.isScenarioSuppressed('scenario_3'), false);
