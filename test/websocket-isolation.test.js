@@ -117,7 +117,7 @@ test('WS-03 / 13: a raw listener that throws reaches neither the command nor the
     assert.ok(errors(log).some((line) => /raw listener failed \(out\)/.test(line)));
 });
 
-test('WS-03 / 04-C: a status entry without STA while a command is pending loses only that entry', async (t) => {
+test('WS-03 / 04-C: a status entry without STA while a command is pending costs no other entry', async (t) => {
     // The panel never answers the command: it stays pending.
     const { panel, log, client, events } = await session(t, { commandTimeoutMs: 2_000 }, {
         onMessage: (message) => message.CMD === 'CMD_USR',
@@ -132,10 +132,16 @@ test('WS-03 / 04-C: a status entry without STA while a command is pending loses 
         STATUS_ZONES: [{ ID: '1', STA: 'A', BYP: 'NO', A: 'N', FM: 'F' }],
     });
     await waitFor(() => events.some((e) => e.id === 'zone_1'));
-    assert.deepEqual(events.filter((e) => e.ev === 'update').map((e) => e.id), ['light_6', 'zone_1']);
-    const [line] = errors(log);
-    assert.match(line, /STATUS_OUTPUTS/);
-    assert.match(line, /\b5\b/);
+    // The other entries are applied. The confirmation matchers read STA
+    // defensively (WS-06), so the entry without STA no longer throws in them;
+    // whether it may update light_5 is the status parser's call (WS-07).
+    const updates = events.filter((e) => e.ev === 'update').map((e) => e.id);
+    assert.ok(updates.includes('light_6') && updates.includes('zone_1'), JSON.stringify(updates));
+    assert.deepEqual(errors(log).filter((line) => /confirmation|matches/i.test(line)), []);
+    let settled = false;
+    pending.then(() => { settled = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, 'an entry without STA does not confirm the command');
     client.disconnect();
     await pending;
 });

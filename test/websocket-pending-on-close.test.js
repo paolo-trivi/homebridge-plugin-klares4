@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const { WebSocketServer } = require('ws');
 
 const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
+const { seedDevices } = require('./fixtures/command-client.js');
 
 const silentLog = () => ({ info() {}, warn() {}, error() {}, debug() {}, success() {} });
 
@@ -23,6 +24,8 @@ test('a socket close rejects the pending command at once instead of letting it t
     const client = new KseniaWebSocketClient('127.0.0.1', wss.address().port, false, 'hb', '135790', silentLog(), { reconnectInterval: 60_000, heartbeatInterval: 60_000, commandTimeoutMs: 5000 });
     t.after(() => client.disconnect());
     await client.connect();
+    // This panel answers only LOGIN: the gate is seeded as discovery would store it.
+    seedDevices(client, ['gate_3']);
     const started = Date.now();
     await assert.rejects(() => client.toggleGate('gate_3'), /closed|disconnect/i);
     assert.ok(Date.now() - started < 2000, 'rejected by the close, not by the 5 s command timeout');
