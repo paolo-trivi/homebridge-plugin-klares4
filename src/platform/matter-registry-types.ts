@@ -22,6 +22,8 @@ export interface MatterTimings {
     stateBootstrapMs: number;
     /** How long the panel may stay unreachable before the endpoints are marked unreachable. */
     unreachableGraceMs: number;
+    /** Wait after an unregistered endpoint first reads as absent, before it is checked again (topology coordinator). */
+    unregisterSettleMs: number;
 }
 
 const TIMING_DEFAULTS: Record<keyof MatterTimings, { env: string; value: number; allowZero: boolean }> = {
@@ -32,6 +34,7 @@ const TIMING_DEFAULTS: Record<keyof MatterTimings, { env: string; value: number;
     registerRetryMs: { env: 'KLARES4_MATTER_REGISTER_RETRY_MS', value: 5_000, allowZero: true },
     stateBootstrapMs: { env: 'KLARES4_MATTER_STATE_BOOTSTRAP_MS', value: 0, allowZero: true },
     unreachableGraceMs: { env: 'KLARES4_MATTER_UNREACHABLE_GRACE_MS', value: 15_000, allowZero: true },
+    unregisterSettleMs: { env: 'KLARES4_MATTER_UNREGISTER_SETTLE_MS', value: 1_000, allowZero: true },
 };
 
 function usable(value: unknown, allowZero: boolean): value is number {
@@ -59,6 +62,7 @@ export function resolveMatterTimings(
         registerRetryMs: pick('registerRetryMs'),
         stateBootstrapMs: pick('stateBootstrapMs'),
         unreachableGraceMs: pick('unreachableGraceMs'),
+        unregisterSettleMs: pick('unregisterSettleMs'),
     };
 }
 

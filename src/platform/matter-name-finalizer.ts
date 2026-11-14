@@ -13,7 +13,7 @@ export interface NameFinalizeDeps {
     registrations: Map<string, MatterRegistration>;
     recordMetadataChanged: () => void;
     /** Fallback when the in-place rename is not observed: register again (same UUID; `[rename]`). */
-    registerRenamed: (device: KseniaDevice) => Promise<void>;
+    registerRenamed: (device: KseniaDevice, inheritUniqueId?: string) => Promise<void>;
     fmtErr: (err: unknown) => string;
 }
 
@@ -115,8 +115,5 @@ async function refreshName(
         return;
     }
     deps.registrations.delete(deviceId);
-    await deps.registerRenamed(device);
-    if (uniqueId && deps.registrations.get(deviceId)?.status === 'registered') {
-        await coordinator.restoreUniqueId(deviceId, uniqueId);
-    }
+    await deps.registerRenamed(device, uniqueId);
 }

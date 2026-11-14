@@ -73,7 +73,7 @@ export function logRegisterRequested(
     log: Logger,
     device: KseniaDevice,
     matterName: string,
-    flags: { fromCache: boolean; fallback: boolean; isRename: boolean },
+    flags: { fromCache: boolean; fallback: boolean; reregister?: 'rename' | 'upgrade' },
 ): void {
     const nameAnnotation = matterName !== device.name
         ? ` -> "${matterName}" [${matterName.length}ch]`
@@ -81,7 +81,7 @@ export function logRegisterRequested(
     log.info(
         `[Matter] register requested: ${device.name}${nameAnnotation} `
         + `(${device.type}, uuid=${device.id})`
-        + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.isRename ? ' [rename]' : ''}`,
+        + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.reregister ? ` [${flags.reregister}]` : ''}`,
     );
 }
 

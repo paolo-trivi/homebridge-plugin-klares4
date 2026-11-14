@@ -51,7 +51,7 @@ export class MatterAccessoryRegistry {
         this.fallbackStore = new MatterFallbackStore(deps.storagePath, deps.log);
         this.pruneTracker = new MatterPruneTracker(this.log, deps.storagePath);
         this.nameService = new MatterNameService(deps.storagePath, deps.log);
-        this.topologyCoordinator = new MatterTopologyCoordinator(this.api, this.log, deps.unregisterTimeoutMs);
+        this.topologyCoordinator = new MatterTopologyCoordinator(this.api, this.log, deps.unregisterTimeoutMs, timings.unregisterSettleMs);
         for (const uuid of this.fallbackStore.load()) this.thermostatFallbackUUIDs.add(uuid);
 
         this.stateUpdateQueue = createStateUpdateQueue(this.api, this.log, this.registrations, this.thermostatEchoTracker);
@@ -164,7 +164,7 @@ export class MatterAccessoryRegistry {
             nameService: this.nameService,
             registrations: this.registrations,
             recordMetadataChanged: () => this.pruneTracker.recordMetadataChanged(),
-            registerRenamed: (device) => this.flow.register(device, true),
+            registerRenamed: (device, inheritUniqueId) => this.flow.register(device, { reason: 'rename', inheritUniqueId }),
             fmtErr,
         });
     }

@@ -44,7 +44,8 @@ export async function upgradeToDimmableLight(
         log: Logger;
         topologyCoordinator: MatterTopologyCoordinator;
         registrations: Map<string, MatterRegistration>;
-        register: (device: KseniaDevice) => Promise<void>;
+        /** Registers the DimmableLight; the new endpoint gets `inheritUniqueId` back once it answers. */
+        register: (device: KseniaDevice, inheritUniqueId?: string) => Promise<void>;
     },
 ): Promise<void> {
     deps.log.info(`[Matter] ${device.name} reports a brightness level; re-registering as DimmableLight`);
@@ -57,8 +58,5 @@ export async function upgradeToDimmableLight(
         return;
     }
     deps.registrations.delete(device.id);
-    await deps.register(device);
-    if (uniqueId && deps.registrations.get(device.id)?.status === 'registered') {
-        await deps.topologyCoordinator.restoreUniqueId(device.id, uniqueId);
-    }
+    await deps.register(device, uniqueId);
 }

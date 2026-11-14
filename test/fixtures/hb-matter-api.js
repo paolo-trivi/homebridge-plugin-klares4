@@ -41,6 +41,9 @@
 //   (StateManager.js:72-135, setImmediate). Failed updates land in
 //   `rejectedUpdates` and in `log`; applied ones in `updates`.
 // - Missing uuid/cluster or empty attributes: logged, nothing emitted.
+// uniqueId (AccessoryManager.js:157-162, :190, :827-829): a new endpoint gets a
+// random one, an endpoint restored from the cache keeps its own; a state write
+// of bridgedDeviceBasicInformation.uniqueId replaces it (matter.js accepts it).
 // getAccessoryState (MatterAPIImpl.js:396-427, StateManager.js:200-246)
 // - Returns the cluster attributes, or undefined when the endpoint or the
 //   cluster is missing or the endpoint is closing.
@@ -152,6 +155,8 @@ function makeHbMatterApi({
     // uuid -> { deviceType, clusters (live attribute state), shape, restoredFromCache,
     //           nodeLabel, displayName, handlers, reachable, closing? }
     const endpoints = new Map();
+    let uniqueIdSequence = 0;
+    const newUniqueId = () => `uid-${(uniqueIdSequence += 1)}`;
     for (const r of restored) {
         endpoints.set(r.UUID, {
             deviceType: r.deviceType,
@@ -162,6 +167,7 @@ function makeHbMatterApi({
             displayName: r.displayName,
             handlers: {},
             reachable: true,
+            uniqueId: r.uniqueId ?? newUniqueId(),
         });
     }
     const log = [];
@@ -174,7 +180,7 @@ function makeHbMatterApi({
     const tick = () => new Promise((resolve) => setImmediate(resolve));
     const hasCluster = (ep, cluster) => cluster === BRIDGED_INFO || cluster in ep.clusters;
 
-    function createEndpoint(a) {
+    function createEndpoint(a, uniqueId = newUniqueId()) {
         const left = unqueryable.get(a.UUID) ?? 0;
         const broken = left > 0;
         if (broken) unqueryable.set(a.UUID, left - 1);
@@ -187,6 +193,7 @@ function makeHbMatterApi({
             displayName: a.displayName,
             handlers: a.handlers ?? {},
             reachable: true,
+            uniqueId,
         });
     }
 
@@ -212,9 +219,11 @@ function makeHbMatterApi({
             existing.handlers = a.handlers ?? {};
             return;
         }
+        // A restored endpoint of another shape is rebuilt with its uniqueId (:157-162).
+        const preserved = existing?.uniqueId;
         if (existing) await closeEndpoint(a.UUID);
         if (failRegistration(a)) throw new Error(`Failed to register accessory: ${a.displayName} refused by matter.js`);
-        createEndpoint(a);
+        createEndpoint(a, preserved);
     }
 
     const matter = {
@@ -272,7 +281,7 @@ function makeHbMatterApi({
         getAccessoryState: async (uuid, cluster) => {
             const ep = endpoints.get(uuid);
             if (!ep || ep.closing || !cluster) return undefined;
-            if (cluster === BRIDGED_INFO) return { nodeLabel: ep.nodeLabel, reachable: ep.reachable };
+            if (cluster === BRIDGED_INFO) return { nodeLabel: ep.nodeLabel, reachable: ep.reachable, uniqueId: ep.uniqueId };
             return cluster in ep.clusters ? { ...ep.clusters[cluster] } : undefined;
         },
         updateAccessoryState: async (uuid, cluster, attributes) => {
@@ -291,6 +300,7 @@ function makeHbMatterApi({
                 if (cluster === BRIDGED_INFO) {
                     if ('reachable' in attributes) ep.reachable = attributes.reachable;
                     if ('nodeLabel' in attributes) ep.nodeLabel = attributes.nodeLabel;
+                    if ('uniqueId' in attributes) ep.uniqueId = attributes.uniqueId;
                 } else {
                     ep.clusters[cluster] = { ...ep.clusters[cluster], ...attributes };
                 }
@@ -327,7 +337,7 @@ function makeHbMatterApi({
      * as `restored` to a new fixture to model a restart.
      */
     const cacheSnapshot = () => [...endpoints.entries()].filter(([, ep]) => !ep.closing).map(([UUID, ep]) => ({
-        UUID, displayName: ep.displayName, deviceType: ep.deviceType, clusters: copyClusters(ep.clusters),
+        UUID, displayName: ep.displayName, deviceType: ep.deviceType, clusters: copyClusters(ep.clusters), uniqueId: ep.uniqueId,
     }));
 
     return {

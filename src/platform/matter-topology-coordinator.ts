@@ -35,7 +35,8 @@ const DEFAULT_UNREGISTER_TIMEOUT_MS = 3_000;
  */
 const DEFAULT_UNREGISTER_SETTLE_MS = 1_000;
 
-function resolveSettleMs(): number {
+function resolveSettleMs(configured?: number): number {
+    if (Number.isFinite(configured) && (configured as number) >= 0) return configured as number;
     const fromEnv = Number(process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS);
     return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : DEFAULT_UNREGISTER_SETTLE_MS;
 }
@@ -64,12 +65,20 @@ export class MatterTopologyCoordinator {
     private readonly knownAccessories = new Map<string, MatterAccessory>();
     private readonly unregisterTimeoutMs: number;
 
+    private readonly unregisterSettleMs: number;
+
+    /**
+     * `unregisterSettleMs`: the registry passes `MatterTimings.unregisterSettleMs`;
+     * left out, KLARES4_MATTER_UNREGISTER_SETTLE_MS, then 1 s.
+     */
     constructor(
         private readonly api: API,
         private readonly log: Logger,
         unregisterTimeoutMs?: number,
+        unregisterSettleMs?: number,
     ) {
         this.unregisterTimeoutMs = resolveTimeout(unregisterTimeoutMs);
+        this.unregisterSettleMs = resolveSettleMs(unregisterSettleMs);
     }
 
     /** Records an accessory restored from the Homebridge cache so it can be unregistered. */
@@ -256,7 +265,7 @@ export class MatterTopologyCoordinator {
         let delay = 100;
         while (Date.now() < deadline) {
             if (await this.isAbsent(uuid, clusterName)) {
-                await sleep(resolveSettleMs());
+                await sleep(this.unregisterSettleMs);
                 if (await this.isAbsent(uuid, clusterName)) return true;
             }
             await sleep(delay);
@@ -267,6 +276,18 @@ export class MatterTopologyCoordinator {
     }
 }
 
-export function registrationProbeCluster(accessory: MatterAccessory): string {
-    return Object.keys(accessory.clusters ?? {}).find((name) => name !== BRIDGED_INFO) ?? BRIDGED_INFO;
+/**
+ * The clusters the plugin declared for an accessory. Homebridge writes every
+ * state update into the plugin's own `clusters` object, the bridged
+ * information included (StateManager.js:116-127), so that key can appear
+ * there without being declared. Without any declared cluster: the bridged
+ * information, which every bridged endpoint has.
+ */
+export function declaredClusters(accessory: Pick<MatterAccessory, 'clusters'>): string[] {
+    const names = Object.keys(accessory.clusters ?? {}).filter((name) => name !== BRIDGED_INFO);
+    return names.length > 0 ? names : [BRIDGED_INFO];
+}
+
+export function registrationProbeCluster(accessory: Pick<MatterAccessory, 'clusters'>): string {
+    return declaredClusters(accessory)[0];
 }
