@@ -15,6 +15,7 @@ import type {
     KseniaWebSocketOptions,
 } from '../types';
 import { createInitialWebSocketClientState } from './state';
+import { runIsolated } from '../isolation';
 import { CommandService } from './command-service';
 import { ConnectionService } from './connection-service';
 import { MessageService } from './message-service';
@@ -45,6 +46,8 @@ export class KseniaWebSocketClient {
     public onConnected?: () => void;
     public onDisconnected?: () => void;
     public onInitialSyncComplete?: () => void;
+    /** Every successful login, before the discovery reads of the new sync are sent. */
+    public onSyncStarted?: () => void;
 
     constructor(
         private readonly ip: string,
@@ -87,15 +90,14 @@ export class KseniaWebSocketClient {
             log: this.log,
             logLevel: this.logLevel,
             debugEnabled: this.options.debug ?? false,
-            emitDeviceDiscovered: (device: KseniaDevice): void => {
-                this.onDeviceDiscovered?.(device);
-            },
+            emitDeviceDiscovered: (device: KseniaDevice): void => this.emitDiscovered(device),
             emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
         });
 
         this.thermostatStatusUpdater = new ThermostatStatusUpdater({
             state: this.state,
             emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
+            log: this.log,
         });
 
         this.commandService = new CommandService({
@@ -119,9 +121,10 @@ export class KseniaWebSocketClient {
         this.messageService = new MessageService({
             state: this.state,
             callbacks: {
-                onDeviceDiscovered: (device: KseniaDevice): void => this.onDeviceDiscovered?.(device),
+                onDeviceDiscovered: (device: KseniaDevice): void => this.emitDiscovered(device),
                 onDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
-                onInitialSyncComplete: (): void => this.onInitialSyncComplete?.(),
+                onInitialSyncComplete: (): void => this.emitEvent('onInitialSyncComplete', this.onInitialSyncComplete),
+                onSyncStarted: (): void => this.emitEvent('onSyncStarted', this.onSyncStarted),
             },
             log: this.log,
             logLevel: this.logLevel,
@@ -182,12 +185,10 @@ export class KseniaWebSocketClient {
             onRawMessage: (raw: string): void => {
                 this.messageService.handleMessage(raw);
             },
-            onConnected: (): void => {
-                this.onConnected?.();
-            },
+            onConnected: (): void => this.emitEvent('onConnected', this.onConnected),
             onDisconnected: (): void => {
                 this.outputConfirmation.rejectAll(new Error('WebSocket disconnected'));
-                this.onDisconnected?.();
+                this.emitEvent('onDisconnected', this.onDisconnected);
             },
             executeLogin: (): Promise<void> => this.commandService.sendLoginCommand(),
         });
@@ -254,15 +255,26 @@ export class KseniaWebSocketClient {
         return Array.from(this.state.devices.values());
     }
 
+    // Consumers (platform, debug capture) are isolated from the client: a
+    // throwing consumer is logged with the device id and stack, and never
+    // aborts the frame, the login or the send that emitted the event.
+    private emitDiscovered(device: KseniaDevice): void {
+        runIsolated(this.log, `onDeviceDiscovered handler for ${device.id}`, () => this.onDeviceDiscovered?.(device));
+    }
+
     /** Every real status report goes through here: the device's state is now observed. */
     private emitStatus(device: KseniaDevice): void {
         markStatusObserved(device);
-        this.onDeviceStatusUpdate?.(device);
+        runIsolated(this.log, `onDeviceStatusUpdate handler for ${device.id}`, () => this.onDeviceStatusUpdate?.(device));
+    }
+
+    private emitEvent(name: string, callback: (() => void) | undefined): void {
+        runIsolated(this.log, `${name} handler`, () => callback?.());
     }
 
     private emitRawMessage(direction: RawMessageDirection, rawMessage: string): void {
         for (const listener of this.rawMessageListeners) {
-            listener(direction, rawMessage);
+            runIsolated(this.log, `Raw message listener (${direction})`, () => listener(direction, rawMessage));
         }
     }
 }

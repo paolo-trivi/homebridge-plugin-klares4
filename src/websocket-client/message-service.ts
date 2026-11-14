@@ -8,6 +8,7 @@ import { ThermostatReadHandler } from './thermostat-read-handler';
 import type { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
+import { runIsolated } from '../isolation';
 import { recordLoginRejection, resetLoginRejections } from './login-rejection-guard';
 import type {
     CallbackRegistry,
@@ -56,24 +57,29 @@ export class MessageService {
     }
 
     public handleMessage(rawData: string): void {
-        this.deps.emitRawMessage('in', rawData);
+        runIsolated(this.deps.log, 'Raw message listener', () => this.deps.emitRawMessage('in', rawData));
+        let message: KseniaMessage;
         try {
-            const message = JSON.parse(rawData) as KseniaMessage;
-
-            if (this.deps.logLevel >= LogLevel.DEBUG) {
-                const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
-                if (!isHeartbeat) {
-                    this.deps.log.debug(`Message: ${message.CMD} / ${message.PAYLOAD_TYPE}`);
-                }
-            }
-
-            this.deps.routeMessage(message);
-        } catch (error: unknown) {
-            this.deps.log.error(
-                'Message parsing error:',
-                error instanceof Error ? error.message : String(error),
-            );
+            message = JSON.parse(rawData) as KseniaMessage;
+        } catch {
+            // The parser's message quotes the frame: only its size is logged.
+            this.deps.log.error(`Invalid JSON frame from the panel (${rawData.length} bytes)`);
+            return;
         }
+        if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+            this.deps.log.warn('Ignoring a panel frame that is not a JSON object');
+            return;
+        }
+
+        if (this.deps.logLevel >= LogLevel.DEBUG) {
+            const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
+            if (!isHeartbeat) {
+                this.deps.log.debug(`Message: ${message.CMD} / ${message.PAYLOAD_TYPE}`);
+            }
+        }
+
+        // Only an error that escapes every per-section and per-element guard lands here.
+        runIsolated(this.deps.log, `Handling ${frameLabel(message)} frame`, () => this.deps.routeMessage(message));
     }
 
     public handleLoginResponse(message: KseniaMessage): void {
@@ -88,6 +94,8 @@ export class MessageService {
             this.deps.log.info(`Login completed, ID_LOGIN: ${this.deps.state.idLogin}`);
             this.deps.state.pendingLogin?.resolve();
             this.deps.onLoginCompleted();
+            // Every login re-reads the whole configuration: a new discovery sync starts here.
+            this.deps.callbacks.onSyncStarted?.();
             this.deps.commandService.requestSystemData().catch((error: unknown): void => {
                 this.deps.log.error(
                     'Error requesting system data:',
@@ -108,76 +116,56 @@ export class MessageService {
 
     public handleReadResponse(message: KseniaMessage): void {
         const payload = message.PAYLOAD;
+        const frame = frameLabel(message);
+        const section = (name: string, fn: () => void): void => runIsolated(this.deps.log, `${frame} ${name}`, fn);
 
         this.deps.log.info(`Response received: ${message.PAYLOAD_TYPE}`);
 
         if (message.PAYLOAD_TYPE === 'ZONES' && payload.ZONES) {
-            this.discovery.handleZones(payload.ZONES);
+            const zones = payload.ZONES;
+            section('ZONES', () => this.discovery.handleZones(zones));
         }
 
         if (message.PAYLOAD_TYPE === 'MULTI_TYPES') {
-            if (payload.OUTPUTS) {
-                this.discovery.handleOutputs(payload.OUTPUTS);
-            }
-            if (payload.SCENARIOS) {
-                this.discovery.handleScenarios(payload.SCENARIOS);
-            }
-            if (payload.BUS_HAS) {
-                this.discovery.handleBusSensors(payload.BUS_HAS);
-            }
-            this.thermostats.afterMultiTypes();
+            const { OUTPUTS: outputs, SCENARIOS: scenarios, BUS_HAS: sensors } = payload;
+            if (outputs) section('OUTPUTS', () => this.discovery.handleOutputs(outputs));
+            if (scenarios) section('SCENARIOS', () => this.discovery.handleScenarios(scenarios));
+            if (sensors) section('BUS_HAS', () => this.discovery.handleBusSensors(sensors));
+            section('thermostat mapping', () => this.thermostats.afterMultiTypes());
         }
 
-        if (message.PAYLOAD_TYPE === 'CFG_THERMOSTATS' && Array.isArray(payload.CFG_THERMOSTATS)) {
-            this.thermostats.handleCfgThermostats(payload.CFG_THERMOSTATS);
+        const cfg = payload.CFG_THERMOSTATS;
+        if (message.PAYLOAD_TYPE === 'CFG_THERMOSTATS' && Array.isArray(cfg)) {
+            section('CFG_THERMOSTATS', () => this.thermostats.handleCfgThermostats(cfg));
         }
 
-        if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS' && Array.isArray(payload.PRG_THERMOSTATS)) {
-            this.thermostats.handlePrgThermostats(payload.PRG_THERMOSTATS);
+        const programs = payload.PRG_THERMOSTATS;
+        if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS' && Array.isArray(programs)) {
+            section('PRG_THERMOSTATS', () => this.thermostats.handlePrgThermostats(programs));
         }
 
+        const initialStatus: RealtimeStatusData = {};
         if (message.PAYLOAD_TYPE === 'STATUS_OUTPUTS' && payload.STATUS_OUTPUTS) {
             this.deps.log.info(`Initial states for ${payload.STATUS_OUTPUTS.length} outputs`);
             this.thermostats.logInitialThermostatStates(payload.STATUS_OUTPUTS);
-            this.deps.statusUpdater.updateOutputStatuses(payload.STATUS_OUTPUTS);
+            initialStatus.STATUS_OUTPUTS = payload.STATUS_OUTPUTS;
         }
-
         if (message.PAYLOAD_TYPE === 'STATUS_BUS_HA_SENSORS' && payload.STATUS_BUS_HA_SENSORS) {
             this.deps.log.info(`Initial states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
-            this.deps.statusUpdater.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
+            initialStatus.STATUS_BUS_HA_SENSORS = payload.STATUS_BUS_HA_SENSORS;
         }
-
         if (message.PAYLOAD_TYPE === 'STATUS_TEMPERATURES' && payload.STATUS_TEMPERATURES) {
-            this.deps.thermostatStatusUpdater.updateTemperatureStatuses(payload.STATUS_TEMPERATURES);
+            initialStatus.STATUS_TEMPERATURES = payload.STATUS_TEMPERATURES;
         }
-
         if (message.PAYLOAD_TYPE === 'STATUS_SYSTEM' && payload.STATUS_SYSTEM) {
             this.deps.log.info('Initial system temperatures');
-            this.deps.systemTemperatureUpdater.updateSystemTemperatures(
-                payload.STATUS_SYSTEM as unknown as SystemTemperatureData[],
-            );
+            initialStatus.STATUS_SYSTEM = realtimeStatusOf(payload).STATUS_SYSTEM;
         }
+        this.applyStatusGroups(frame, initialStatus);
     }
 
     public handleRealtimeResponse(message: KseniaMessage): void {
-        const payload = message.PAYLOAD;
-        if (payload.STATUS_OUTPUTS) {
-            this.deps.statusUpdater.updateOutputStatuses(payload.STATUS_OUTPUTS);
-        }
-        if (payload.STATUS_BUS_HA_SENSORS) {
-            this.deps.statusUpdater.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
-        }
-        if (payload.STATUS_TEMPERATURES) {
-            this.deps.thermostatStatusUpdater.updateTemperatureStatuses(payload.STATUS_TEMPERATURES);
-        }
-        if (payload.STATUS_ZONES) {
-            this.deps.statusUpdater.updateZoneStatuses(payload.STATUS_ZONES);
-        }
-        if (payload.STATUS_SYSTEM) {
-            this.deps.systemTemperatureUpdater.updateSystemTemperatures(
-                payload.STATUS_SYSTEM as unknown as SystemTemperatureData[],
-            );
-        }
+        this.applyStatusGroups(frameLabel(message), realtimeStatusOf(message.PAYLOAD));
 
         if (!this.deps.state.hasCompletedInitialSync) {
             this.deps.state.hasCompletedInitialSync = true;
@@ -186,27 +174,40 @@ export class MessageService {
     }
 
     public handleStatusUpdate(message: KseniaMessage): void {
-        const payload = message.PAYLOAD;
-        for (const [, data] of Object.entries(payload)) {
+        const frame = frameLabel(message);
+        for (const [, data] of Object.entries(message.PAYLOAD)) {
             if (data && typeof data === 'object') {
-                const statusData = data as RealtimeStatusData;
-
-                if (statusData.STATUS_OUTPUTS) {
-                    this.deps.statusUpdater.updateOutputStatuses(statusData.STATUS_OUTPUTS);
-                }
-                if (statusData.STATUS_BUS_HA_SENSORS) {
-                    this.deps.statusUpdater.updateSensorStatuses(statusData.STATUS_BUS_HA_SENSORS);
-                }
-                if (statusData.STATUS_TEMPERATURES) {
-                    this.deps.thermostatStatusUpdater.updateTemperatureStatuses(statusData.STATUS_TEMPERATURES);
-                }
-                if (statusData.STATUS_ZONES) {
-                    this.deps.statusUpdater.updateZoneStatuses(statusData.STATUS_ZONES);
-                }
-                if (statusData.STATUS_SYSTEM) {
-                    this.deps.systemTemperatureUpdater.updateSystemTemperatures(statusData.STATUS_SYSTEM);
-                }
+                this.applyStatusGroups(frame, data as RealtimeStatusData);
             }
         }
     }
+
+    /** Each status group of a frame is applied on its own: one failing group never drops the others. */
+    private applyStatusGroups(frame: string, data: RealtimeStatusData): void {
+        const section = (name: string, fn: () => void): void => runIsolated(this.deps.log, `${frame} ${name}`, fn);
+        const { STATUS_OUTPUTS: outputs, STATUS_BUS_HA_SENSORS: sensors, STATUS_TEMPERATURES: temperatures } = data;
+        const { STATUS_ZONES: zones, STATUS_SYSTEM: system } = data;
+        if (outputs) section('STATUS_OUTPUTS', () => this.deps.statusUpdater.updateOutputStatuses(outputs));
+        if (sensors) section('STATUS_BUS_HA_SENSORS', () => this.deps.statusUpdater.updateSensorStatuses(sensors));
+        if (temperatures) {
+            section('STATUS_TEMPERATURES', () => this.deps.thermostatStatusUpdater.updateTemperatureStatuses(temperatures));
+        }
+        if (zones) section('STATUS_ZONES', () => this.deps.statusUpdater.updateZoneStatuses(zones));
+        if (system) section('STATUS_SYSTEM', () => this.deps.systemTemperatureUpdater.updateSystemTemperatures(system));
+    }
+}
+
+function frameLabel(message: KseniaMessage): string {
+    return `${String(message.CMD)}/${String(message.PAYLOAD_TYPE)}`;
+}
+
+/** The status groups of a READ_RES or REALTIME_RES payload. */
+function realtimeStatusOf(payload: KseniaMessage['PAYLOAD']): RealtimeStatusData {
+    return {
+        STATUS_OUTPUTS: payload.STATUS_OUTPUTS,
+        STATUS_BUS_HA_SENSORS: payload.STATUS_BUS_HA_SENSORS,
+        STATUS_TEMPERATURES: payload.STATUS_TEMPERATURES,
+        STATUS_ZONES: payload.STATUS_ZONES,
+        STATUS_SYSTEM: payload.STATUS_SYSTEM as unknown as SystemTemperatureData[],
+    };
 }

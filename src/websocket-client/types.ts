@@ -83,6 +83,8 @@ export interface CallbackRegistry {
     onConnected?: () => void;
     onDisconnected?: () => void;
     onInitialSyncComplete?: () => void;
+    /** A login succeeded and the discovery reads of a new sync are about to be sent. */
+    onSyncStarted?: () => void;
 }
 
 export interface WebSocketClientState {

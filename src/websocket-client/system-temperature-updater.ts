@@ -4,6 +4,7 @@ import { stripDevicePrefix } from '../device-id';
 import { LogLevel } from '../log-levels';
 import { updateThermostatStatus } from '../thermostat-state';
 import { parseFloatInRange } from '../websocket/device-state-projector';
+import { forEachIsolated } from '../isolation';
 import { hasFreshThermostatRealtimeState } from './thermostat-status-updater';
 import type { SystemTemperatureData, WebSocketClientState } from './types';
 
@@ -20,7 +21,7 @@ export class SystemTemperatureUpdater {
     constructor(private readonly deps: SystemTemperatureUpdaterDeps) {}
 
     public updateSystemTemperatures(systemData: SystemTemperatureData[]): void {
-        systemData.forEach((system: SystemTemperatureData): void => {
+        forEachIsolated(this.deps.log, 'STATUS_SYSTEM entry', systemData, (system: SystemTemperatureData): void => {
             if (this.deps.debugEnabled) {
                 this.deps.log.debug(`System data ${system.ID}: ${JSON.stringify(system)}`);
             }

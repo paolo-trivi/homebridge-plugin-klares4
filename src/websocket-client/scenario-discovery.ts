@@ -2,6 +2,7 @@ import type { Logger } from 'homebridge';
 import type { KseniaDevice, KseniaScenarioData } from '../types';
 import { isIgnoredScenarioCategory, normalizeScenarioCategory, parseScenarioData } from './device-parsers';
 import { adoptDiscoveredDevice } from './discovered-device';
+import { forEachIsolated } from '../isolation';
 import type { WebSocketClientState } from './types';
 
 interface DiscoverScenariosInput {
@@ -20,7 +21,7 @@ export function discoverScenarios(
     { state, log, exposePartialArmScenarios, onDeviceDiscovered }: DiscoverScenariosInput,
 ): void {
     log.info(`Found ${scenarios.length} scenarios`);
-    for (const scenario of scenarios) {
+    forEachIsolated(log, 'READ_RES/MULTI_TYPES SCENARIOS scenario', scenarios, (scenario: KseniaScenarioData): void => {
         const category = normalizeScenarioCategory(scenario.CAT);
         state.scenarioCategoryById.set(String(scenario.ID), category);
         if (isIgnoredScenarioCategory(category, exposePartialArmScenarios)) {
@@ -32,12 +33,12 @@ export function discoverScenarios(
             } else {
                 log.debug(`Scenario ${scenario.DES} ignored (category ${scenario.CAT})`);
             }
-            continue;
+            return;
         }
 
         const parsed = parseScenarioData(scenario);
         if (parsed) {
             onDeviceDiscovered(adoptDiscoveredDevice(state.devices, parsed));
         }
-    }
+    });
 }

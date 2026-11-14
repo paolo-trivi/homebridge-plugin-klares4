@@ -21,6 +21,7 @@ import {
     parseFloatInRange,
     parseIntegerInRange,
 } from '../websocket/device-state-projector';
+import { forEachIsolated } from '../isolation';
 import type { WebSocketClientState } from './types';
 
 interface StatusUpdaterDeps {
@@ -36,7 +37,7 @@ export class StatusUpdater {
     constructor(private readonly deps: StatusUpdaterDeps) {}
 
     public updateOutputStatuses(outputs: KseniaOutputStatusRaw[]): void {
-        outputs.forEach((output: KseniaOutputStatusRaw): void => {
+        forEachIsolated(this.deps.log, 'STATUS_OUTPUTS entry', outputs, (output: KseniaOutputStatusRaw): void => {
             this.deps.observeOutputStatus?.(output);
             this.deps.log.debug(
                 `Output update ${output.ID}: STA=${output.STA}, POS=${output.POS}, TPOS=${output.TPOS}`,
@@ -146,7 +147,7 @@ export class StatusUpdater {
     }
 
     public updateSensorStatuses(sensors: KseniaSensorStatusRaw[]): void {
-        sensors.forEach((sensor: KseniaSensorStatusRaw): void => {
+        forEachIsolated(this.deps.log, 'STATUS_BUS_HA_SENSORS entry', sensors, (sensor: KseniaSensorStatusRaw): void => {
             if (sensor.DOMUS) {
                 const sensorId = normalizeDomusSensorId(sensor.ID);
                 let matchedDevice = false;
@@ -233,7 +234,7 @@ export class StatusUpdater {
     }
 
     public updateZoneStatuses(zones: KseniaZoneStatusRaw[]): void {
-        zones.forEach((zone: KseniaZoneStatusRaw): void => {
+        forEachIsolated(this.deps.log, 'STATUS_ZONES entry', zones, (zone: KseniaZoneStatusRaw): void => {
             const zoneDevice = this.deps.state.devices.get(`zone_${zone.ID}`);
             if (zoneDevice && zoneDevice.type === 'zone') {
                 const zoneStatus = zoneDevice.status as ZoneStatus;

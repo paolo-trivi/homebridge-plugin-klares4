@@ -10,6 +10,7 @@ import { normalizeDeviceName } from '../websocket/device-state-projector';
 import { parseOutputData, parseZoneData } from './device-parsers';
 import { adoptDiscoveredDevice } from './discovered-device';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
+import { forEachIsolated } from '../isolation';
 import { discoverScenarios } from './scenario-discovery';
 import type { StatusUpdater } from './status-updater';
 import type { ThermostatReadHandler } from './thermostat-read-handler';
@@ -34,7 +35,7 @@ export class DiscoveryReadHandler {
 
     public handleZones(zones: KseniaZoneData[]): void {
         this.deps.log.info(`Found ${zones.length} zones`);
-        zones.forEach((zone: KseniaZoneData): void => {
+        forEachIsolated(this.deps.log, 'READ_RES/ZONES zone', zones, (zone: KseniaZoneData): void => {
             const device = adoptDiscoveredDevice(this.deps.state.devices, parseZoneData(zone));
             this.deps.emitDeviceDiscovered(device);
             this.deps.statusUpdater.applyPendingZoneStatus(zone.ID);
@@ -43,7 +44,7 @@ export class DiscoveryReadHandler {
 
     public handleOutputs(outputs: KseniaOutputData[]): void {
         this.deps.log.info(`Found ${outputs.length} outputs`);
-        outputs.forEach((output: KseniaOutputData): void => {
+        forEachIsolated(this.deps.log, 'READ_RES/MULTI_TYPES OUTPUTS output', outputs, (output: KseniaOutputData): void => {
             this.deps.thermostats.recordOutput(output);
             const parsed = parseOutputData(output);
             if (parsed) {
@@ -65,7 +66,7 @@ export class DiscoveryReadHandler {
 
     public handleBusSensors(sensors: KseniaBusHaData[]): void {
         this.deps.log.info(`Found ${sensors.length} sensors`);
-        sensors.forEach((sensor: KseniaBusHaData): void => {
+        forEachIsolated(this.deps.log, 'READ_RES/MULTI_TYPES BUS_HAS sensor', sensors, (sensor: KseniaBusHaData): void => {
             const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
             this.deps.state.domusSensors.set(normalizedSensorId, { ...sensor, ID: normalizedSensorId });
             const baseName = normalizeDeviceName(sensor.DES) || `Sensor ${normalizedSensorId}`;
