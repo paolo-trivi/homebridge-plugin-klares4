@@ -2,17 +2,15 @@
  * Build Matter cluster state-update payloads from a Lares4 device.
  *
  * Pure functions, no side effects. Used by `MatterAccessoryRegistry` for both
- * the immediate-push and queue-for-flush paths.
+ * the immediate-push and queue-for-flush paths. A value that is not a valid
+ * reading is left out, so the endpoint keeps the last valid one.
  */
 
 import type { KseniaDevice, KseniaThermostat } from '../types';
-import {
-    toCentidegrees,
-    clampCentidegrees,
-    luxToMatterIlluminance,
-    coverLiftPercent100ths,
-} from './matter-device-mapper';
 import { buildThermostatMatterState } from './matter-thermostat-mapper';
+import {
+    coverLift, finiteNumber, humidityMeasuredValue, illuminanceMeasuredValue, levelFromBrightness, temperatureMeasuredValue,
+} from './matter-value-guards';
 
 export interface PendingMatterStateUpdate {
     clusterName: string;
@@ -52,30 +50,26 @@ export function buildStateUpdates(
     thermostatAsFallback = false,
 ): PendingMatterStateUpdate[] {
     const out: PendingMatterStateUpdate[] = [];
+    const push = (clusterName: string, attributes: Record<string, unknown>): void => {
+        const defined = Object.entries(attributes).filter(([, value]) => value !== undefined);
+        if (defined.length > 0) out.push({ clusterName, attributes: Object.fromEntries(defined) });
+    };
 
     switch (device.type) {
         case 'light':
-            out.push({ clusterName: 'onOff', attributes: { onOff: device.status.on } });
-            if (device.status.dimmable && device.status.brightness !== undefined) {
-                out.push({
-                    clusterName: 'levelControl',
-                    attributes: {
-                        currentLevel: Math.max(1, Math.round((device.status.brightness / 100) * 254)),
-                    },
-                });
-            }
+            if (typeof device.status.on === 'boolean') push('onOff', { onOff: device.status.on });
+            if (device.status.dimmable) push('levelControl', { currentLevel: levelFromBrightness(device.status.brightness) });
             break;
 
-        case 'cover':
-            out.push({ clusterName: 'windowCovering', attributes: coverLiftPercent100ths(device.status) });
+        case 'cover': {
+            const { current, target } = coverLift(device.status);
+            push('windowCovering', { currentPositionLiftPercent100ths: current, targetPositionLiftPercent100ths: target });
             break;
+        }
 
         case 'thermostat':
             if (thermostatAsFallback) {
-                out.push({
-                    clusterName: 'temperatureMeasurement',
-                    attributes: { measuredValue: clampCentidegrees(toCentidegrees(device.currentTemperature ?? 21)) },
-                });
+                push('temperatureMeasurement', { measuredValue: temperatureMeasuredValue(device.currentTemperature) });
             } else {
                 const { base } = buildThermostatMatterState(device as KseniaThermostat);
                 out.push({ clusterName: 'thermostat', attributes: base });
@@ -84,36 +78,22 @@ export function buildStateUpdates(
 
         case 'sensor': {
             const val = device.status.value;
+            const finite = finiteNumber(val);
             switch (device.status.sensorType) {
                 case 'temperature':
-                    out.push({
-                        clusterName: 'temperatureMeasurement',
-                        attributes: { measuredValue: clampCentidegrees(toCentidegrees(val)) },
-                    });
+                    push('temperatureMeasurement', { measuredValue: temperatureMeasuredValue(val) });
                     break;
                 case 'humidity':
-                    out.push({
-                        clusterName: 'relativeHumidityMeasurement',
-                        attributes: { measuredValue: Math.round(Math.max(0, Math.min(100, val)) * 100) },
-                    });
+                    push('relativeHumidityMeasurement', { measuredValue: humidityMeasuredValue(val) });
                     break;
                 case 'light':
-                    out.push({
-                        clusterName: 'illuminanceMeasurement',
-                        attributes: { measuredValue: luxToMatterIlluminance(val) },
-                    });
+                    push('illuminanceMeasurement', { measuredValue: illuminanceMeasuredValue(val) });
                     break;
                 case 'motion':
-                    out.push({
-                        clusterName: 'occupancySensing',
-                        attributes: { occupancy: { occupied: val > 0 } },
-                    });
+                    if (finite !== undefined) push('occupancySensing', { occupancy: { occupied: finite > 0 } });
                     break;
                 case 'contact':
-                    out.push({
-                        clusterName: 'booleanState',
-                        attributes: { stateValue: val === 0 },
-                    });
+                    if (finite !== undefined) push('booleanState', { stateValue: finite === 0 });
                     break;
             }
             break;
