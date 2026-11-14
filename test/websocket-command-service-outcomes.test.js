@@ -13,7 +13,7 @@ function createService(onSend, timeoutMs = 40) {
   state.idLogin = 'login-id';
   state.ws = { readyState: 1 };
   // Scenario 14 was listed by MULTI_TYPES as an ordinary (non-arming) scenario.
-  state.scenarioCategoryById.set('14', 'GENERIC');
+  state.scenarioCategoryById.set('14', 'GEN');
   // Commands only reach discovered outputs (WS-01 defense in depth).
   seedStateDevices(state, ['light_7', 'gate_29']);
   state.devices.set('scenario_14', { id: 'scenario_14', type: 'scenario', name: 'S', description: '', status: { active: false } });
