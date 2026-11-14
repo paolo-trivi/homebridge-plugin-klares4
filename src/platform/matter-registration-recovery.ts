@@ -31,13 +31,6 @@ export interface MatterRegistration {
     retryAfter?: number;
 }
 
-const DEFAULT_REGISTER_RETRY_MS = 5_000;
-
-function registerRetryMs(): number {
-    const fromEnv = Number(process.env.KLARES4_MATTER_REGISTER_RETRY_MS);
-    return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : DEFAULT_REGISTER_RETRY_MS;
-}
-
 /**
  * Homebridge 2.4 rejects a bridged register while the bridge's Matter server
  * is still starting and calls it transient. Nothing was registered, so the
@@ -63,6 +56,8 @@ interface RecoveryDeps {
     momentaryAutoOffMs?: number;
     onFallbackPersist?: (uuid: string) => void;
     resolveDisplayName?: (device: KseniaDevice) => string;
+    /** Wait before a transient refusal may be retried (`MatterTimings.registerRetryMs`). */
+    registerRetryMs: number;
 }
 
 /** True when the registration currently maps to the TemperatureSensor fallback shape. */
@@ -71,19 +66,23 @@ export function isFallbackTemperatureSensor(reg: MatterRegistration): boolean {
     return 'temperatureMeasurement' in clusters && !('thermostat' in clusters);
 }
 
+/**
+ * The endpoint answers for every cluster the requested accessory declares. A
+ * single cluster only proved that some endpoint holds the UUID: a stale one of
+ * another shape could answer it too.
+ */
 export async function isMatterAccessoryQueryable(
     api: API,
     log: Logger,
     fmtErr: (err: unknown) => string,
     reg: MatterRegistration,
 ): Promise<boolean> {
-    const probeCluster = reg.pendingStateUpdates[0]?.clusterName
-        ?? Object.keys(reg.matterAccessory.clusters ?? {})[0];
-    if (!probeCluster) return true;
-
+    const clusters = Object.keys(reg.matterAccessory.clusters ?? {});
     try {
-        const current = await api.matter!.getAccessoryState(reg.uuid, probeCluster);
-        return current !== undefined;
+        for (const cluster of clusters) {
+            if (await api.matter!.getAccessoryState(reg.uuid, cluster) === undefined) return false;
+        }
+        return true;
     } catch (err) {
         log.debug(`[Matter] metadata probe failed for ${reg.displayName}: ${fmtErr(err)}`);
         return false;
@@ -171,7 +170,7 @@ export async function handleRegisterFailure(
     reg.lastError = msg;
     reg.pendingStateUpdates = [];
     if (transient) {
-        reg.retryAfter = reg.failedAt + registerRetryMs();
+        reg.retryAfter = reg.failedAt + deps.registerRetryMs;
         deps.log.warn(`[Matter] register deferred: ${device.name} — the Matter server is still starting; retrying on a later update`);
         return;
     }

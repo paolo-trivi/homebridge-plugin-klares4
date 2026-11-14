@@ -4,8 +4,8 @@ import type { KseniaDevice } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import type { AccessoryRegistry } from './accessory-registry';
 import type { DeviceEventRouter } from './device-event-router';
-import { discoveryFamily } from './hap-prune-policy';
 import type { MatterAccessoryRegistry } from './matter-accessory-registry';
+import { familiesOf, type SyncOutcome } from './prune-policy';
 
 export interface SyncLifecycleDeps {
     log: Logger;
@@ -17,11 +17,9 @@ export interface SyncLifecycleDeps {
     onFirstSyncComplete?: (discoveredIds: ReadonlySet<string>) => void;
 }
 
-/** What the Matter prune of a completed sync may do. */
-interface CompletedSync {
+/** A completed sync, as the Matter prune sees it. */
+interface CompletedSync extends SyncOutcome {
     epoch: number;
-    /** Discovery families seen in earlier syncs that produced no device in this one. */
-    silentFamilies: string[];
 }
 
 /**
@@ -29,21 +27,19 @@ interface CompletedSync {
  * shared by HAP and Matter.
  *
  * Every login starts a sync (`onSyncStarted`): HAP and Matter open a new
- * discovery cycle, so "seen" always means "seen in this sync" and the prune
- * guards (family that answered, consecutive missed syncs, 50% floor) judge
- * each sync on its own, reconnects included.
+ * discovery cycle, so "seen" always means "seen in this sync", and the
+ * families that answered are the families of the devices the panel listed in
+ * this sync. Both prunes apply the same discipline (`prune-policy.ts`) to that.
  *
  * At the end of a sync: HAP prune, then the Matter name-map finalize and
  * prune. The Matter chain is single-flight (one run, at most one queued),
  * prunes a sync at most once and only while that sync is the current one.
- * The Matter prune tracker has no per-family guard yet, so a sync in which a
- * family seen before produced no device at all (a failed discovery read) does
- * not run the Matter prune.
  */
 export class SyncLifecycle {
     private epoch = 0;
-    private readonly knownFamilies = new Set<string>();
-    private readonly syncFamilies = new Set<string>();
+    /** Every device the panel listed in the current sync, excluded ones included. */
+    private readonly syncDeviceIds = new Set<string>();
+    private client?: KseniaWebSocketClient;
     private completed?: CompletedSync;
     private prunedEpoch?: number;
     private matterRun?: Promise<void>;
@@ -56,24 +52,29 @@ export class SyncLifecycle {
 
     public attach(client: KseniaWebSocketClient, deviceEvents: DeviceEventRouter): void {
         const { matterRegistry } = this.deps;
+        this.client = client;
         client.onSyncStarted = (): void => this.startSync();
         client.onDeviceDiscovered = (device: KseniaDevice): void => {
             this.discoveredIds.add(device.id);
-            if (deviceEvents.handleDeviceDiscovered(device)) this.recordSeen(device);
+            this.syncDeviceIds.add(device.id);
+            deviceEvents.handleDeviceDiscovered(device);
         };
         client.onDeviceStatusUpdate = (device: KseniaDevice): void => {
             this.discoveredIds.add(device.id);
-            if (deviceEvents.handleDeviceStatusUpdate(device)) this.recordSeen(device);
+            deviceEvents.handleDeviceStatusUpdate(device);
         };
         client.onInitialSyncComplete = (): void => this.handleInitialSyncComplete();
         client.onConnected = (): void => matterRegistry.setPanelReachable(true);
         client.onDisconnected = (): void => matterRegistry.setPanelReachable(false);
+        // Not connected yet: if the panel stays unreachable past the grace
+        // period, the endpoints Homebridge restored from its cache say so.
+        matterRegistry.setPanelReachable(false);
     }
 
     /** Opens the discovery cycle of a new sync on HAP and Matter. */
     public startSync(): void {
         this.epoch += 1;
-        this.syncFamilies.clear();
+        this.syncDeviceIds.clear();
         this.deps.accessoryRegistry.startDiscoveryCycle();
         this.deps.matterRegistry.startDiscoveryCycle();
     }
@@ -81,22 +82,20 @@ export class SyncLifecycle {
     public handleInitialSyncComplete(): void {
         const { log } = this.deps;
         log.info('Initial synchronization completed, finalizing Matter name-map and pruning stale accessories...');
-        runIsolated(log, 'HAP accessory prune', () => this.deps.accessoryRegistry.pruneStaleAccessories());
-        this.completed = {
-            epoch: this.epoch,
-            silentFamilies: [...this.knownFamilies].filter((family) => !this.syncFamilies.has(family)),
-        };
-        for (const family of this.syncFamilies) this.knownFamilies.add(family);
+        const answeredFamilies = familiesOf(this.syncDeviceIds);
+        const { client } = this;
+        runIsolated(log, 'HAP accessory prune', () => this.deps.accessoryRegistry.pruneStaleAccessories({
+            answeredFamilies,
+            isHiddenByPolicy: (device: KseniaDevice): boolean => device.type === 'scenario'
+                && !!client?.isScenarioSuppressed(device.id),
+        }));
+        this.completed = { epoch: this.epoch, answeredFamilies };
         if (!this.firstSyncReported) {
             this.firstSyncReported = true;
             const { onFirstSyncComplete } = this.deps;
             if (onFirstSyncComplete) runIsolated(log, 'Config override check', () => onFirstSyncComplete(this.discoveredIds));
         }
         this.scheduleMatterPass();
-    }
-
-    private recordSeen(device: KseniaDevice): void {
-        this.syncFamilies.add(discoveryFamily(device.id));
     }
 
     private scheduleMatterPass(): void {
@@ -127,16 +126,9 @@ export class SyncLifecycle {
             log.debug('[Matter] Prune skipped: the sync it belonged to was superseded or already pruned');
             return;
         }
-        if (sync.silentFamilies.length > 0) {
-            log.info(
-                `[Matter] Prune skipped for this sync: no device of ${sync.silentFamilies.join(', ')} `
-                + 'was reported (partial discovery)',
-            );
-            return;
-        }
         this.prunedEpoch = sync.epoch;
         try {
-            await matterRegistry.pruneStaleAccessories();
+            await matterRegistry.pruneStaleAccessories(sync);
         } catch (err: unknown) {
             log.warn('[Matter] Prune error:', err instanceof Error ? err.message : String(err));
         }
