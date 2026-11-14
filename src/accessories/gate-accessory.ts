@@ -3,6 +3,7 @@ import type { Lares4Platform } from '../platform';
 import type { KseniaGate } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
+import { communicationFailure } from './communication-failure';
 
 /**
  * Gate Accessory Handler
@@ -84,9 +85,7 @@ export class GateAccessory {
             );
             // Reset to OFF on error
             this.service.updateCharacteristic(this.platform.Characteristic.On, false);
-            throw new this.platform.api.hap.HapStatusError(
-                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-            );
+            throw communicationFailure(this.platform.api, error);
         }
     }
 

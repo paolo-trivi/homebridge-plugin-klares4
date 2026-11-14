@@ -4,6 +4,7 @@ import type { KseniaCover } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
 import { hasObservedState } from '../device-observation';
+import { communicationFailure } from './communication-failure';
 
 /**
  * Cover Accessory Handler
@@ -135,9 +136,7 @@ export class CoverAccessory {
             this.positionState = previousPositionState;
             this.service.updateCharacteristic(this.platform.Characteristic.TargetPosition, this.targetPosition);
             this.service.updateCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
-            throw new this.platform.api.hap.HapStatusError(
-                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-            );
+            throw communicationFailure(this.platform.api, error);
         }
     }
 

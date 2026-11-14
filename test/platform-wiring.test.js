@@ -48,7 +48,7 @@ function bootSpiedPlatform(t, config) {
     const seen = { hap: [], hapUpdate: [], mqtt: [], matter: [], matterUpdate: [] };
     platform['accessoryRegistry'].addAccessory = (d) => seen.hap.push(d);
     platform['accessoryRegistry'].updateAccessory = (d) => seen.hapUpdate.push(d);
-    platform.mqttBridge = { publishDeviceState: (d) => seen.mqtt.push(d), disconnect() {} };
+    platform.mqttBridge = { publishDeviceState: (d) => seen.mqtt.push(d), disconnect() {}, setPanelConnected() {} };
     platform.matterRegistry.addOrUpdateAccessory = async (d) => { seen.matter.push(d); };
     platform.matterRegistry.updateAccessoryState = async (d) => { seen.matterUpdate.push(d); };
     return { platform, seen };

@@ -122,6 +122,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 .filter((device: KseniaDevice): boolean => this.isMatterEligible(device)),
             onFirstSyncComplete: (discoveredIds: ReadonlySet<string>): void =>
                 reportConfigOverrides(this.runtime, discoveredIds, this.log),
+            onPanelConnection: (connected: boolean): void => this.mqttBridge?.setPanelConnected(connected),
         });
 
         if (!hasConnectionConfig(config, this.runtime, this.log)) return;
@@ -175,14 +176,17 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             // A cached accessory of a device the exposure policy now hides is treated as excluded.
             this.discoveryService.attachExposurePolicy(clientExposurePolicy(this.wsClient));
 
-            this.syncLifecycle.attach(this.wsClient, this.deviceEvents);
             // MQTT and debug capture must not depend on the first connect: if the
             // panel is offline at boot, connect() rejects while the client keeps
-            // reconnecting in the background.
+            // reconnecting in the background. The bridge exists before `attach`,
+            // which reports the panel as not connected yet.
             if (this.runtime.mqtt?.enabled) {
-                this.mqttBridge = new MqttBridge(this.runtime.mqtt, this.log, this);
+                this.mqttBridge = new MqttBridge(this.runtime.mqtt, this.log, this, {
+                    isDeviceExcluded: (device: KseniaDevice): boolean => this.discoveryService.isDeviceExcluded(device),
+                });
                 this.log.info('MQTT Bridge initialized');
             }
+            this.syncLifecycle.attach(this.wsClient, this.deviceEvents);
 
             if (this.runtime.generateDebugFile) {
                 this.debugCapture = startRequestedDebugCapture(this.runtime.debugCaptureDurationMs, this.log, this.api.user.storagePath(), this.wsClient);
@@ -202,10 +206,9 @@ export class Lares4Platform implements DynamicPlatformPlugin {
      * `matterExposure` opt-out. HAP and MQTT paths are NOT affected by this.
      */
     private isMatterEligible(device: KseniaDevice): boolean {
-        // Arming scenarios hidden by the security policy count as not exposed, so a
-        // cache-restored endpoint left from an older version is pruned like one of
-        // a disabled category.
-        if (device.type === 'scenario' && this.wsClient?.isScenarioSuppressed(device.id)) return false;
+        // Devices the exposure policy hides (arming scenarios included) count as
+        // excluded in `resolveMatterPolicy`, so a cache-restored endpoint left
+        // from an older version is pruned like one of a disabled category.
         return this.discoveryService.resolveMatterPolicy(device).exposed;
     }
 

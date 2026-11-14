@@ -42,6 +42,8 @@ export interface RuntimeMqttConfig {
     topicPrefix: string;
     qos: 0 | 1 | 2;
     retain: boolean;
+    /** `false`: publish state only, never subscribe to the command topics. */
+    commands: boolean;
 }
 
 /**
@@ -132,6 +134,7 @@ function readMqtt(raw: unknown, issues: ConfigIssues): RuntimeMqttConfig | undef
         topicPrefix: topicPrefix?.trim() ? topicPrefix : 'homebridge/klares4',
         qos: qos === 0 || qos === 2 ? qos : 1,
         retain: readBoolean(raw.retain, true, 'mqtt.retain', issues),
+        commands: readBoolean(raw.commands, true, 'mqtt.commands', issues),
     };
 }
 

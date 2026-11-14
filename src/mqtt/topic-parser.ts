@@ -1,6 +1,8 @@
 export interface ParsedCommandTopic {
     deviceType: string;
     deviceIdentifier: string;
+    /** The room level of `<prefix>/<room>/<type>/<id>/set`, absent on the direct form. */
+    room?: string;
 }
 
 /**
@@ -18,7 +20,7 @@ export function parseCommandTopic(topic: string, topicPrefix?: string): ParsedCo
             return { deviceType: levels[0], deviceIdentifier: levels[1] };
         }
         if (levels.length === 4 && levels[3] === 'set') {
-            return { deviceType: levels[1], deviceIdentifier: levels[2] };
+            return { room: levels[0], deviceType: levels[1], deviceIdentifier: levels[2] };
         }
         return null;
     }
@@ -34,6 +36,7 @@ export function parseCommandTopic(topic: string, topicPrefix?: string): ParsedCo
 
     if (topicParts.length === 6 && topicParts[5] === 'set') {
         return {
+            room: topicParts[2],
             deviceType: topicParts[3],
             deviceIdentifier: topicParts[4],
         };
@@ -78,4 +81,17 @@ export function buildStateTopic(
     }
 
     return `${topicPrefix}/${deviceType}/${deviceSlug}/state`;
+}
+
+/** `<prefix>/status`: retained availability of the bridge and of the panel connection. */
+export function buildStatusTopic(topicPrefix: string): string {
+    return `${topicPrefix}/status`;
+}
+
+/**
+ * The prefix is published to verbatim, so it must be a valid topic name:
+ * `+`, `#` and NUL are not allowed (MQTT-3.3.2-2, MQTT-4.7.3-2).
+ */
+export function isValidTopicPrefix(topicPrefix: string): boolean {
+    return topicPrefix !== '' && !/[+#\u0000]/.test(topicPrefix);
 }
