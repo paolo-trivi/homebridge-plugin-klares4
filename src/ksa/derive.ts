@@ -139,7 +139,9 @@ function resolveRoomMapToDeviceIds(map: { objectType: string; objectId: string }
         if (!output) {
             return [];
         }
-        const outputType = determineOutputType(output.CAT ?? '', output.MOD);
+        // An output of an unrecognized category is hidden unless `exposeOutputs`
+        // re-exposes it, and then it is `light_<id>` (as discovery names it).
+        const outputType = determineOutputType(typeof output.CAT === 'string' ? output.CAT : '', output.MOD) ?? 'light';
         return [`${outputType}_${map.objectId}`];
     }
     if (map.objectType === 'prgZones') {
