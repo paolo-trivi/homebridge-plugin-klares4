@@ -64,29 +64,36 @@ export function homeKitTargetToDomainMode(value: number): ThermostatMode {
     }
 }
 
+/**
+ * HomeKit CurrentHeatingCoolingState (0 idle, 1 heating, 2 cooling). The
+ * panel's output state decides when known; heat or cool comes from the mode
+ * and, in AUTO, from the season (`WIN` heats, `SUM` cools). Without the output
+ * state the room and target temperatures stand in, in the season's direction.
+ */
 export function deriveHomeKitCurrentState(
     mode: ThermostatMode,
     currentTemperature: number,
     targetTemperature: number,
     outputActive?: boolean,
+    season?: 'WIN' | 'SUM',
 ): 0 | 1 | 2 {
-    if (mode === 'off') {
+    if (mode === 'off' || outputActive === false) {
         return 0;
     }
-
-    if (outputActive === false) {
-        return 0;
+    const direction = mode === 'heat' ? 1 : mode === 'cool' ? 2 : seasonDirection(season);
+    if (outputActive === true && direction !== undefined) {
+        return direction;
     }
-
-    if (outputActive === true) {
-        if (mode === 'heat') return 1;
-        if (mode === 'cool') return 2;
-    }
-
-    if (mode === 'heat') return currentTemperature < targetTemperature ? 1 : 0;
-    if (mode === 'cool') return currentTemperature > targetTemperature ? 2 : 0;
+    if (direction === 1) return currentTemperature < targetTemperature ? 1 : 0;
+    if (direction === 2) return currentTemperature > targetTemperature ? 2 : 0;
     if (currentTemperature < targetTemperature) return 1;
     if (currentTemperature > targetTemperature) return 2;
 
     return 0;
+}
+
+function seasonDirection(season: 'WIN' | 'SUM' | undefined): 1 | 2 | undefined {
+    if (season === 'WIN') return 1;
+    if (season === 'SUM') return 2;
+    return undefined;
 }
