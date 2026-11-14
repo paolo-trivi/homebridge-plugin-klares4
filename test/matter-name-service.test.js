@@ -1,14 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const { MatterNameService } = require('../dist/platform/matter-name-service.js');
-
-function tmpStorage() {
-    return fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-namesvc-'));
-}
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
@@ -26,8 +22,8 @@ const STORE_FILE = 'klares4-matter-names.json';
 // Persistence round-trip
 // ---------------------------------------------------------------------------
 
-test('finalize persists the name-map to klares4-matter-names.json', () => {
-    const dir = tmpStorage();
+test('finalize persists the name-map to klares4-matter-names.json', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     const svc = new MatterNameService(dir, silentLog());
     const { entries, duplicates, persisted } = svc.finalize(devices);
 
@@ -44,8 +40,8 @@ test('finalize persists the name-map to klares4-matter-names.json', () => {
     assert.equal(zone.type, 'zone');
 });
 
-test('a fresh service reloads the persisted map: final names available BEFORE any finalize, in any resolve order', () => {
-    const dir = tmpStorage();
+test('a fresh service reloads the persisted map: final names available BEFORE any finalize, in any resolve order', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     new MatterNameService(dir, silentLog()).finalize(devices);
 
     // Next boot: zone arrives FIRST (the order that used to give it the clean
@@ -61,8 +57,8 @@ test('a fresh service reloads the persisted map: final names available BEFORE an
     assert.equal(boot3.resolveName(devices[0]), 'Finestra Cucina - Sens.');
 });
 
-test('second finalize with the identical device set does not rewrite the store', () => {
-    const dir = tmpStorage();
+test('second finalize with the identical device set does not rewrite the store', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     const svc = new MatterNameService(dir, silentLog());
     assert.equal(svc.finalize(devices).persisted, true);
     assert.equal(svc.finalize(devices).persisted, false, 'unchanged map must not rewrite');
@@ -71,8 +67,8 @@ test('second finalize with the identical device set does not rewrite the store',
     assert.equal(boot2.finalize(devices).persisted, false, 'reloaded identical map must not rewrite');
 });
 
-test('device-set changes are persisted and reflected by resolveName after finalize', () => {
-    const dir = tmpStorage();
+test('device-set changes are persisted and reflected by resolveName after finalize', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     const svc = new MatterNameService(dir, silentLog());
     svc.finalize(devices);
 
@@ -85,15 +81,15 @@ test('device-set changes are persisted and reflected by resolveName after finali
     assert.equal(svc.resolveName(devices[2]), 'Studio - Luce');
 });
 
-test('resolveName is stable across repeated calls (no churn, no re-resolution)', () => {
-    const dir = tmpStorage();
+test('resolveName is stable across repeated calls (no churn, no re-resolution)', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     const svc = new MatterNameService(dir, silentLog());
     const first = svc.resolveName(devices[1]);
     for (let i = 0; i < 5; i++) assert.equal(svc.resolveName(devices[1]), first);
 });
 
-test('incremental fallback: unknown device never collides with seeded map names', () => {
-    const dir = tmpStorage();
+test('incremental fallback: unknown device never collides with seeded map names', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     new MatterNameService(dir, silentLog()).finalize(devices);
 
     const boot2 = new MatterNameService(dir, silentLog());
@@ -104,15 +100,15 @@ test('incremental fallback: unknown device never collides with seeded map names'
     assert.equal(boot2.currentNameOf('light_12'), 'Studio', 'seeded owner keeps its slot');
 });
 
-test('corrupt store file is tolerated (empty map, incremental fallback still works)', () => {
-    const dir = tmpStorage();
+test('corrupt store file is tolerated (empty map, incremental fallback still works)', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     fs.writeFileSync(path.join(dir, STORE_FILE), '{ not json', 'utf8');
     const svc = new MatterNameService(dir, silentLog());
     assert.equal(svc.resolveName(devices[1]), 'Finestra Cucina');
 });
 
-test('store entries missing required fields are skipped on load', () => {
-    const dir = tmpStorage();
+test('store entries missing required fields are skipped on load', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     fs.writeFileSync(path.join(dir, STORE_FILE), JSON.stringify({
         version: 1,
         names: [
@@ -127,22 +123,22 @@ test('store entries missing required fields are skipped on load', () => {
     assert.equal(svc.currentNameOf(''), undefined);
 });
 
-test('v2 store rejects missing timestamps, unsupported versions and duplicate slots', () => {
-    const invalidTimestampDir = tmpStorage();
+test('v2 store rejects missing timestamps, unsupported versions and duplicate slots', (t) => {
+    const invalidTimestampDir = tmpStorage(t, 'klares4-namesvc-');
     fs.writeFileSync(path.join(invalidTimestampDir, STORE_FILE), JSON.stringify({
         version: 2,
         names: [{ uuid: 'cover_1', name: 'Finestra Cucina', base: 'Finestra Cucina', type: 'cover' }],
     }), 'utf8');
     assert.equal(new MatterNameService(invalidTimestampDir, silentLog()).currentNameOf('cover_1'), undefined);
 
-    const unsupportedDir = tmpStorage();
+    const unsupportedDir = tmpStorage(t, 'klares4-namesvc-');
     fs.writeFileSync(path.join(unsupportedDir, STORE_FILE), JSON.stringify({
         version: 99,
         names: [{ uuid: 'cover_1', name: 'Finestra Cucina', base: 'Finestra Cucina', lastSeen: Date.now() }],
     }), 'utf8');
     assert.equal(new MatterNameService(unsupportedDir, silentLog()).currentNameOf('cover_1'), undefined);
 
-    const duplicateDir = tmpStorage();
+    const duplicateDir = tmpStorage(t, 'klares4-namesvc-');
     fs.writeFileSync(path.join(duplicateDir, STORE_FILE), JSON.stringify({
         version: 2,
         names: [
@@ -158,8 +154,8 @@ test('v2 store rejects missing timestamps, unsupported versions and duplicate sl
     assert.equal(repaired.names.length, 1, 'discarded entries must be removed from disk on finalize');
 });
 
-test('v1 migration writes a backup before the first atomic v2 write', () => {
-    const dir = tmpStorage();
+test('v1 migration writes a backup before the first atomic v2 write', (t) => {
+    const dir = tmpStorage(t, 'klares4-namesvc-');
     fs.writeFileSync(path.join(dir, STORE_FILE), JSON.stringify({
         version: 1,
         names: [{ uuid: 'cover_1', name: 'Finestra Cucina', base: 'Finestra Cucina', type: 'cover' }],

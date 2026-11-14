@@ -1,13 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const { DebugFileGenerator } = require('../dist/debug-capture/file-generator.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
-test('F40: the debug file reports the running plugin version', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-debugfile-'));
+test('F40: the debug file reports the running plugin version', async (t) => {
+    const dir = tmpStorage(t, 'klares4-debugfile-');
     const log = { info() {}, warn() {}, error() {}, debug() {} };
     new DebugFileGenerator(log, dir).generate([], [], 10000);
     let data;

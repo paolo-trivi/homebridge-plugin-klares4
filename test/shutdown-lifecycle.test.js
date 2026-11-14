@@ -8,11 +8,12 @@ const { DebugCaptureManager } = require('../dist/debug-capture/index.js');
 const { DeviceListService } = require('../dist/platform/device-list-service.js');
 const { DiscoveryService } = require('../dist/platform/discovery-service.js');
 const { PlatformLifecycleService } = require('../dist/platform/platform-lifecycle-service.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const log = { info() {}, warn() {}, error() {}, debug() {} };
 
-function tempDir(prefix) {
-    return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+function tempDir(t, prefix) {
+    return tmpStorage(t, prefix);
 }
 
 function fakeWsClient() {
@@ -22,8 +23,8 @@ function fakeWsClient() {
     };
 }
 
-test('F36: debug capture timers do not keep the process alive', () => {
-    const manager = new DebugCaptureManager(log, tempDir('klares4-f36-'));
+test('F36: debug capture timers do not keep the process alive', (t) => {
+    const manager = new DebugCaptureManager(log, tempDir(t, 'klares4-f36-'));
     manager.startCapture(fakeWsClient(), 600000);
     try {
         assert.equal(manager.captureTimer.hasRef(), false);
@@ -33,8 +34,8 @@ test('F36: debug capture timers do not keep the process alive', () => {
     }
 });
 
-test('F36: shutdown stops the capture and writes the debug file before returning', () => {
-    const dir = tempDir('klares4-f36-');
+test('F36: shutdown stops the capture and writes the debug file before returning', (t) => {
+    const dir = tempDir(t, 'klares4-f36-');
     const manager = new DebugCaptureManager(log, dir);
     manager.startCapture(fakeWsClient(), 600000);
     manager.shutdown();
@@ -60,8 +61,8 @@ function deviceListService(dir) {
     });
 }
 
-test('F36: flush on shutdown writes the pending device list and cancels the timer', () => {
-    const dir = tempDir('klares4-f36-');
+test('F36: flush on shutdown writes the pending device list and cancels the timer', (t) => {
+    const dir = tempDir(t, 'klares4-f36-');
     const service = deviceListService(dir);
     service.saveDevicesList([{ id: 'light_1', type: 'light', name: 'Luce Test', status: {} }]);
     service.flush();
@@ -72,8 +73,8 @@ test('F36: flush on shutdown writes the pending device list and cancels the time
     assert.deepEqual(fs.readdirSync(dir), ['klares4-devices.json']);
 });
 
-test('F36: the debounced device list write is atomic', async () => {
-    const dir = tempDir('klares4-f36-');
+test('F36: the debounced device list write is atomic', async (t) => {
+    const dir = tempDir(t, 'klares4-f36-');
     const service = deviceListService(dir);
     const renames = [];
     const originalRename = fs.promises.rename;

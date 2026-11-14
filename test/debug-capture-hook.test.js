@@ -1,13 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const { DebugCaptureManager } = require('../dist/debug-capture/index.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
-test('DebugCaptureManager captures raw hooks and masks PIN', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-debug-test-'));
+test('DebugCaptureManager captures raw hooks and masks PIN', async (t) => {
+  const tempDir = tmpStorage(t, 'klares4-debug-test-');
 
   let rawListener;
   const fakeWsClient = {

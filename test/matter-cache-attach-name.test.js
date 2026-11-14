@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -13,18 +12,19 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const storage = () => fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-attach-name-'));
+const storage = (t) => tmpStorage(t, 'klares4-attach-name-');
 
 const light = (name) => ({ id: 'light_8', type: 'light', name, description: '', status: { on: false, dimmable: false } });
 
-async function bootWithCache(cachedName, currentName) {
+async function bootWithCache(t, cachedName, currentName) {
     const hb = makeHbMatterApi({
         restored: [{ UUID: 'light_8', displayName: cachedName, deviceType: deviceTypes.OnOffLight, clusters: { onOff: {} } }],
     });
-    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage(t) });
     registry.configureCachedAccessory({
         UUID: 'light_8', displayName: cachedName, deviceType: deviceTypes.OnOffLight,
         context: { device: light(cachedName) },
@@ -36,8 +36,8 @@ async function bootWithCache(cachedName, currentName) {
     return { hb, registry };
 }
 
-test('a name changed while offline reaches the endpoint that was restored from cache', async () => {
-    const { hb, registry } = await bootWithCache('Luce Vecchia', 'Luce Nuova');
+test('a name changed while offline reaches the endpoint that was restored from cache', async (t) => {
+    const { hb, registry } = await bootWithCache(t, 'Luce Vecchia', 'Luce Nuova');
     // Attaching in place keeps the restored endpoint and its old nodeLabel.
     assert.equal(hb.endpoints.get('light_8').nodeLabel, 'Luce Vecchia');
 
@@ -49,8 +49,8 @@ test('a name changed while offline reaches the endpoint that was restored from c
     assert.equal(registry.getStatus('light_8'), 'registered');
 });
 
-test('an unchanged name restored from cache is never re-registered', async () => {
-    const { hb, registry } = await bootWithCache('Luce Studio', 'Luce Studio');
+test('an unchanged name restored from cache is never re-registered', async (t) => {
+    const { hb, registry } = await bootWithCache(t, 'Luce Studio', 'Luce Studio');
     await registry.finalizeNameMap([light('Luce Studio')]);
     await delay(60);
     assert.deepEqual(hb.unregisterCalls, []);

@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -13,18 +12,19 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const storage = () => fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-dimmer-'));
+const storage = (t) => tmpStorage(t, 'klares4-dimmer-');
 
 function light(status) {
     return { id: 'light_5', type: 'light', name: 'Faretti', description: '', status };
 }
 
-test('F04: a light discovered as on/off is re-registered as DimmableLight once the panel reports a level', async () => {
+test('F04: a light discovered as on/off is re-registered as DimmableLight once the panel reports a level', async (t) => {
     const hb = makeHbMatterApi();
-    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage(t) });
 
     // READ_RES discovery always precedes STATUS_OUTPUTS, so dimmable is still unknown here.
     await registry.addOrUpdateAccessory(light({ on: false, dimmable: false }));
@@ -42,11 +42,11 @@ test('F04: a light discovered as on/off is re-registered as DimmableLight once t
     assert.equal(level?.attributes.currentLevel, 152);
 });
 
-test('F04: a dimmer known from the Homebridge cache is registered as DimmableLight straight away', async () => {
+test('F04: a dimmer known from the Homebridge cache is registered as DimmableLight straight away', async (t) => {
     const hb = makeHbMatterApi({
         restored: [{ UUID: 'light_5', deviceType: deviceTypes.DimmableLight, clusters: { onOff: {}, levelControl: {} } }],
     });
-    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage(t) });
     registry.configureCachedAccessory({
         UUID: 'light_5',
         displayName: 'Faretti',
@@ -63,9 +63,9 @@ test('F04: a dimmer known from the Homebridge cache is registered as DimmableLig
     assert.equal(hb.endpoints.get('light_5').deviceType.name, 'DimmableLight');
 });
 
-test('F04: a plain on/off light is never re-registered', async () => {
+test('F04: a plain on/off light is never re-registered', async (t) => {
     const hb = makeHbMatterApi();
-    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage(t) });
     await registry.addOrUpdateAccessory(light({ on: false, dimmable: false }));
     await delay(150);
     await registry.updateAccessoryState(light({ on: true, dimmable: false }));
@@ -74,9 +74,9 @@ test('F04: a plain on/off light is never re-registered', async () => {
     assert.deepEqual(hb.unregisterCalls, []);
 });
 
-test('F04: a level reported while the on/off registration is still pending upgrades once it completes', async () => {
+test('F04: a level reported while the on/off registration is still pending upgrades once it completes', async (t) => {
     const hb = makeHbMatterApi();
-    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage(t) });
 
     await registry.addOrUpdateAccessory(light({ on: false, dimmable: false }));
     assert.equal(registry.getStatus('light_5'), 'pending');
@@ -90,9 +90,9 @@ test('F04: a level reported while the on/off registration is still pending upgra
     assert.deepEqual(hb.rejectedUpdates, []);
 });
 
-test('F04: a re-discovery that renames the light does not disable the dimmer upgrade', async () => {
+test('F04: a re-discovery that renames the light does not disable the dimmer upgrade', async (t) => {
     const hb = makeHbMatterApi();
-    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage(t) });
 
     await registry.addOrUpdateAccessory(light({ on: false, dimmable: false }));
     await delay(150);

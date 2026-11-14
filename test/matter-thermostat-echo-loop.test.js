@@ -21,7 +21,6 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -31,10 +30,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MS = '5';
 process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '10';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-
-function tmpStorage() {
-    return fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-echo-'));
-}
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const fakeDeviceTypes = {
     OnOffLight: { _t: 'OnOffLight' },
@@ -90,10 +86,10 @@ function makeWsClient() {
     };
 }
 
-async function setup() {
+async function setup(t) {
     const { api, registered, updates } = makeApi();
     const ws = makeWsClient();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => ws, storagePath: tmpStorage() });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => ws, storagePath: tmpStorage(t, 'klares4-echo-') });
     // Heating-only Matrimoniale (cmd 3) and heating-only Bagno (cmd 4)
     await registry.addOrUpdateAccessory(thermostat('thermostat_21', 'Riscaldamento Matrimoniale'));
     await registry.addOrUpdateAccessory(thermostat('thermostat_20', 'Riscaldamento Bagno'));
@@ -107,8 +103,8 @@ function getThermostatHandlers(registered, uuid) {
     return acc.handlers?.thermostat;
 }
 
-test('echo-loop fix: internal state push (matter.js re-firing handler) does NOT trigger WS command', async () => {
-    const { registry, registered, ws } = await setup();
+test('echo-loop fix: internal state push (matter.js re-firing handler) does NOT trigger WS command', async (t) => {
+    const { registry, registered, ws } = await setup(t);
     // The plugin pushes new state for thermostat_21 (e.g. centrale broadcast after a CFG change).
     // The mock api's updateAccessoryState records but doesn't actually re-fire the handler —
     // we simulate that by invoking the handler directly with the same value that was pushed.
@@ -121,8 +117,8 @@ test('echo-loop fix: internal state push (matter.js re-firing handler) does NOT 
     assert.equal(ws.calls.length, 0, 'echo must not produce a WS command');
 });
 
-test('echo-loop fix: external command on thermostat_21 hits only its own id, never thermostat_20', async () => {
-    const { registered, ws } = await setup();
+test('echo-loop fix: external command on thermostat_21 hits only its own id, never thermostat_20', async (t) => {
+    const { registered, ws } = await setup(t);
     const handlers21 = getThermostatHandlers(registered, 'thermostat_21');
     // External: a value the plugin has NOT pushed (different from current 20°C)
     await handlers21.occupiedHeatingSetpointChange({ occupiedHeatingSetpoint: 2400 });
@@ -134,22 +130,22 @@ test('echo-loop fix: external command on thermostat_21 hits only its own id, nev
     assert.equal(ws.calls.some(c => c.id === 'thermostat_20'), false);
 });
 
-test('echo-loop fix: heating-only cooling setpoint change does NOT produce a WS command', async () => {
-    const { registered, ws } = await setup();
+test('echo-loop fix: heating-only cooling setpoint change does NOT produce a WS command', async (t) => {
+    const { registered, ws } = await setup(t);
     const handlers = getThermostatHandlers(registered, 'thermostat_21');
     await handlers.occupiedCoolingSetpointChange({ occupiedCoolingSetpoint: 2600 });
     assert.equal(ws.calls.length, 0, 'heating-only cooling change must be a no-op');
 });
 
-test('echo-loop fix: idempotent heating change (already current) does NOT produce a WS command', async () => {
-    const { registered, ws } = await setup();
+test('echo-loop fix: idempotent heating change (already current) does NOT produce a WS command', async (t) => {
+    const { registered, ws } = await setup(t);
     const handlers = getThermostatHandlers(registered, 'thermostat_21');
     // Device currently at 20°C → asking for 20°C must be a no-op
     await handlers.occupiedHeatingSetpointChange({ occupiedHeatingSetpoint: 2000 });
     assert.equal(ws.calls.length, 0);
 });
 
-test('echo-loop fix: WS timeout in handler does NOT throw (prevents matter.js reactor retry loop)', async () => {
+test('echo-loop fix: WS timeout in handler does NOT throw (prevents matter.js reactor retry loop)', async (t) => {
     const { api, registered } = makeApi();
     const flakyWs = {
         async setThermostatTemperature() {
@@ -157,7 +153,7 @@ test('echo-loop fix: WS timeout in handler does NOT throw (prevents matter.js re
         },
         async setThermostatMode() { throw new Error('timeout'); },
     };
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => flakyWs, storagePath: tmpStorage() });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => flakyWs, storagePath: tmpStorage(t, 'klares4-echo-') });
     await registry.addOrUpdateAccessory(thermostat('thermostat_99', 'Riscaldamento Test'));
     await new Promise(r => setTimeout(r, 50));
     const handlers = getThermostatHandlers(registered, 'thermostat_99');
@@ -165,8 +161,8 @@ test('echo-loop fix: WS timeout in handler does NOT throw (prevents matter.js re
     await assert.doesNotReject(() => handlers.systemModeChange({ systemMode: 0 }));
 });
 
-test('echo-loop fix: external systemMode change uses correct device id and not the other thermostat', async () => {
-    const { registered, ws } = await setup();
+test('echo-loop fix: external systemMode change uses correct device id and not the other thermostat', async (t) => {
+    const { registered, ws } = await setup(t);
     const handlers21 = getThermostatHandlers(registered, 'thermostat_21');
     // Device currently 'heat'; ask for OFF (0)
     await handlers21.systemModeChange({ systemMode: 0 });
@@ -177,8 +173,8 @@ test('echo-loop fix: external systemMode change uses correct device id and not t
     assert.equal(ws.calls.some(c => c.id === 'thermostat_20'), false);
 });
 
-test('echo-loop fix: idempotent systemMode change (already current) does NOT produce a WS command', async () => {
-    const { registered, ws } = await setup();
+test('echo-loop fix: idempotent systemMode change (already current) does NOT produce a WS command', async (t) => {
+    const { registered, ws } = await setup(t);
     const handlers = getThermostatHandlers(registered, 'thermostat_21');
     // Device currently 'heat' (matter systemMode 4); asking for 4 again is a no-op
     await handlers.systemModeChange({ systemMode: 4 });

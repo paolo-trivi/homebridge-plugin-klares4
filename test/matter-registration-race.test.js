@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,6 +11,7 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
@@ -35,8 +35,8 @@ function thermostat(extras = {}) {
     };
 }
 
-function storageWithFallback() {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
+function storageWithFallback(t) {
+    const dir = tmpStorage(t, 'klares4-race-');
     fs.writeFileSync(path.join(dir, 'klares4-matter-fallback.json'), JSON.stringify({
         thermostatAsTemperatureSensor: ['thermostat_18'],
     }));
@@ -61,8 +61,8 @@ function recoveryRegistry(api, storagePath) {
     return registry;
 }
 
-test('F05: a state update during thermostat recovery joins the in-flight registration instead of registering twice', async () => {
-    const storagePath = storageWithFallback();
+test('F05: a state update during thermostat recovery joins the in-flight registration instead of registering twice', async (t) => {
+    const storagePath = storageWithFallback(t);
     const hb = makeHbMatterApi({
         restored: [{
             UUID: 'thermostat_18',
@@ -89,8 +89,8 @@ test('F05: a state update during thermostat recovery joins the in-flight registr
     assert.equal(saved.thermostats[0].mode, 'native');
 });
 
-test('F05: the joined update is still delivered once the registration settles', async () => {
-    const storagePath = storageWithFallback();
+test('F05: the joined update is still delivered once the registration settles', async (t) => {
+    const storagePath = storageWithFallback(t);
     const hb = makeHbMatterApi({
         restored: [{
             UUID: 'thermostat_18',
@@ -113,8 +113,8 @@ test('F05: the joined update is still delivered once the registration settles', 
     assert.equal(temps.at(-1), 2350);
 });
 
-test('F14: fallback after a non-queryable registration unregisters the endpoint before re-registering', async () => {
-    const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
+test('F14: fallback after a non-queryable registration unregisters the endpoint before re-registering', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-race-');
     const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_18'] });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath,
@@ -129,8 +129,8 @@ test('F14: fallback after a non-queryable registration unregisters the endpoint 
     assert.equal(registry.getStatus('thermostat_18'), 'registered');
 });
 
-test('F14: registration retry unregisters the stale endpoint on the first attempt', async () => {
-    const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
+test('F14: registration retry unregisters the stale endpoint on the first attempt', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-race-');
     const hb = makeHbMatterApi({ unqueryableOnce: ['light_9'] });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath,
@@ -146,7 +146,7 @@ test('F14: registration retry unregisters the stale endpoint on the first attemp
     assert.equal(registry.getStatus('light_9'), 'registered');
 });
 
-test('F37: a rename waits until Homebridge has really released the UUID before registering again', async () => {
+test('F37: a rename waits until Homebridge has really released the UUID before registering again', async (t) => {
     process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '150';
     const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
     // Homebridge closes the endpoint first (probe already undefined) and

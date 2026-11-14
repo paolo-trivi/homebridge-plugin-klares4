@@ -1,12 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const hap = require('@homebridge/hap-nodejs');
 
 const { Lares4Platform } = require('../dist/platform/index.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const silentLog = { info() {}, warn() {}, error() {}, debug() {}, success() {} };
 
@@ -34,8 +34,8 @@ function closedPort() {
     });
 }
 
-test('MQTT bridge starts even when the panel is unreachable at boot', async () => {
-    const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-startup-'));
+test('MQTT bridge starts even when the panel is unreachable at boot', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-startup-');
     const api = fakeApi(storagePath);
     const platform = new Lares4Platform(silentLog, {
         platform: 'Lares4Complete',
@@ -58,8 +58,8 @@ test('MQTT bridge starts even when the panel is unreachable at boot', async () =
     }
 });
 
-test('F36/F17: shutdown during a debug capture writes the file; the flag resets on the qualified name', async () => {
-    const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-startup-'));
+test('F36/F17: shutdown during a debug capture writes the file; the flag resets on the qualified name', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-startup-');
     const platformConfig = {
         platform: 'homebridge-plugin-klares4.Lares4Complete',
         ip: '127.0.0.1',
