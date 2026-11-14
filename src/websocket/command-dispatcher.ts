@@ -1,5 +1,6 @@
 import { PanelCommandRejectedError, RetryableKlaresError } from '../errors';
 import { DeviceCommandQueue, type DeviceQueueOptions } from './device-command-queue';
+import { frameResult, resultDetail } from './protocol-result';
 
 export { CommandQueueRejectedError } from './device-command-queue';
 export type { CommandQueueRejection, DeviceQueueOptions, DeviceQueuePolicy } from './device-command-queue';
@@ -33,11 +34,6 @@ export interface ResponseLikeMessage {
         RESULT?: unknown;
         RESULT_DETAIL?: unknown;
     };
-}
-
-/** A malformed RESULT (number, object) is no result, never a crash. */
-function normalizedText(value: unknown): string | undefined {
-    return typeof value === 'string' ? value.trim() : undefined;
 }
 
 export class CommandDispatcher {
@@ -214,7 +210,7 @@ export class CommandDispatcher {
     }
 
     private isExplicitFailure(message: ResponseLikeMessage): boolean {
-        const result = normalizedText(message.PAYLOAD?.RESULT)?.toUpperCase();
+        const result = frameResult(message);
         return message.PAYLOAD_TYPE?.toUpperCase() === 'ERROR'
             || message.CMD.toUpperCase() === 'GENERIC'
             || (result !== undefined && result !== 'OK');
@@ -225,8 +221,8 @@ export class CommandDispatcher {
         message: ResponseLikeMessage,
         correlation: CommandAcknowledgement['correlation'],
     ): void {
-        const result = normalizedText(message.PAYLOAD?.RESULT)?.toUpperCase();
-        const detail = normalizedText(message.PAYLOAD?.RESULT_DETAIL);
+        const result = frameResult(message);
+        const detail = resultDetail(message);
         if (this.isExplicitFailure(message)) {
             pending.reject(new PanelCommandRejectedError(result ?? 'FAIL', detail));
             return;
