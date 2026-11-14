@@ -148,7 +148,6 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         try {
             if (this.initAborted()) return;
             this.log.info('Initializing Ksenia Lares4 connection...');
-            this.syncLifecycle.startDiscoveryCycle();
 
             if (!this.config.ip || !this.config.pin) {
                 this.log.error('Configurazione mancante: IP e PIN sono obbligatori');
