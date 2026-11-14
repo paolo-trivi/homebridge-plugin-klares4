@@ -2,14 +2,21 @@ import type { API, Logger, PlatformAccessory } from 'homebridge';
 import { sanitizeHapDisplayName } from '../display-name';
 import { hasObservedState, mergeKnownState } from '../device-observation';
 import type { KseniaDevice } from '../types';
+import { errorDetail } from '../isolation';
 import {
     HAP_PRUNE_STALE_THRESHOLD_CYCLES,
     cachedDevice,
-    discoveryFamily,
     readMissedCycles,
     writeMissedCycles,
 } from './hap-prune-policy';
+import { belowDiscoveryFloor, discoveryFamily, familiesOf, type SyncOutcome } from './prune-policy';
 import type { AccessoryHandler } from './types';
+
+/** What one HAP prune pass is told about the sync it closes. */
+export interface HapPruneContext extends Partial<SyncOutcome> {
+    /** Devices hidden by the panel-side policy (suppressed scenarios): removed like excluded ones. */
+    isHiddenByPolicy?: (device: KseniaDevice) => boolean;
+}
 
 interface AccessoryRegistryOptions {
     api: API;
@@ -38,26 +45,39 @@ export class AccessoryRegistry {
         this.options.activeDiscoveredUUIDs.clear();
     }
 
+    /**
+     * Homebridge calls this for every cached accessory without catching: a
+     * throw here would stop the restore of the whole cache at every start.
+     */
     public configureAccessory(accessory: PlatformAccessory): void {
         this.options.log.info('Loading accessory from cache:', accessory.displayName);
         this.options.accessories.set(accessory.UUID, accessory);
 
         // Matter-readiness: the Matter bridge inspects accessories immediately at startup,
         // before the WS discovery cycle runs. Attach the handler now from cached context.
-        const device = accessory.context?.device as KseniaDevice | undefined;
-        if (!device || !device.id) {
+        const device = usableCachedDevice(accessory);
+        if (!device) {
             this.options.log.warn(
-                `Skipping cache handler init for ${accessory.displayName}: missing device context`,
+                `Skipping cache handler init for ${accessory.displayName}: missing or malformed device context `
+                + '(the accessory is realigned at the next discovery)',
             );
             return;
         }
+        // Excluded: removed at the end of the first sync, never commandable meanwhile.
+        if (this.options.isDeviceExcluded?.(device)) return;
 
-        // Legacy caches keep the invalid Name that HAP warns about at every publish.
-        this.alignHapNames(accessory, device);
-        const handler = this.options.createAccessoryHandler(accessory, device);
-        if (handler) {
-            this.options.accessoryHandlers.set(accessory.UUID, handler);
-            this.options.log.debug(`Handler attached from cache for ${device.name}`);
+        try {
+            // Legacy caches keep the invalid Name that HAP warns about at every publish.
+            this.alignHapNames(accessory, device);
+            const handler = this.options.createAccessoryHandler(accessory, device);
+            if (handler) {
+                this.options.accessoryHandlers.set(accessory.UUID, handler);
+                this.options.log.debug(`Handler attached from cache for ${device.name}`);
+            }
+        } catch (error: unknown) {
+            this.options.log.warn(
+                `Skipping cache handler init for ${accessory.displayName} (${device.id}): ${errorDetail(error)}`,
+            );
         }
     }
 
@@ -93,16 +113,21 @@ export class AccessoryRegistry {
         );
         accessory.context.device = device;
 
+        // The services must exist before HAP publishes the accessory, but the
+        // handler is kept only once Homebridge has accepted it (the bridge
+        // refuses accessories beyond its limit by throwing).
         const handler = this.options.createAccessoryHandler(accessory, device);
-        if (handler) {
-            this.options.accessoryHandlers.set(uuid, handler);
+        try {
+            this.options.api.registerPlatformAccessories(
+                this.options.pluginName,
+                this.options.platformName,
+                [accessory],
+            );
+        } catch (error: unknown) {
+            if (handler) disposeHandler(handler);
+            throw error;
         }
-
-        this.options.api.registerPlatformAccessories(
-            this.options.pluginName,
-            this.options.platformName,
-            [accessory],
-        );
+        if (handler) this.options.accessoryHandlers.set(uuid, handler);
         this.options.accessories.set(uuid, accessory);
     }
 
@@ -110,7 +135,7 @@ export class AccessoryRegistry {
      * Re-align every HAP name of a cached accessory with the sanitised device
      * name: displayName, AccessoryInformation Name and the primary service
      * Name. Covers panel renames and names cached before the HAP sanitiser
-     * (e.g. "Balcone Sala " with a trailing space). The UUID is untouched.
+     * (e.g. "Living Room " with a trailing space). The UUID is untouched.
      */
     private alignHapNames(accessory: PlatformAccessory, device: KseniaDevice): void {
         const cleanName = sanitizeHapDisplayName(device.name, device.id);
@@ -145,40 +170,42 @@ export class AccessoryRegistry {
     }
 
     /**
-     * One prune pass per completed discovery sync (see `hap-prune-policy.ts`):
-     * only accessories of a discovery family that answered in this sync are
-     * candidates, and a candidate is removed after
-     * `HAP_PRUNE_STALE_THRESHOLD_CYCLES` consecutive missed syncs. Accessories
-     * excluded in the config are removed immediately.
+     * One prune pass per completed discovery sync, with the discipline of
+     * `prune-policy.ts`. `answeredFamilies` comes from the sync lifecycle (every
+     * device the panel listed, whatever its exposure); without it the families
+     * are taken from the accessories seen in this cycle. Accessories excluded
+     * in the config or hidden by the scenario policy are removed immediately.
      */
-    public pruneStaleAccessories(): void {
-        // Safety net: a sync that discovered NOTHING is a failed/partial sync
-        // (WS glitch, panel busy), not a panel with zero devices. Removing every
-        // cached accessory here would wipe HomeKit rooms/automations for the
-        // whole bridge — skip and let the next complete sync prune for real.
-        if (this.options.activeDiscoveredUUIDs.size === 0 && this.options.accessories.size > 0) {
+    public pruneStaleAccessories(context: HapPruneContext = {}): void {
+        const { accessories, activeDiscoveredUUIDs } = this.options;
+        const hidden = (device: KseniaDevice | undefined): boolean => !!device
+            && (!!this.options.isDeviceExcluded?.(device) || !!context.isHiddenByPolicy?.(device));
+        let removed = 0;
+        for (const accessory of [...accessories.values()]) {
+            if (activeDiscoveredUUIDs.has(accessory.UUID) || !hidden(cachedDevice(accessory))) continue;
+            this.removeAccessory(accessory);
+            removed += 1;
+        }
+
+        const known = accessories.size;
+        if (belowDiscoveryFloor(activeDiscoveredUUIDs.size, known)) {
             this.options.log.warn(
-                'Skipping accessory prune: discovery returned no devices (partial or failed sync)',
+                `Skipping accessory prune: discovery returned ${activeDiscoveredUUIDs.size} of ${known} `
+                + 'accessories (partial or failed sync)',
             );
             return;
         }
-        const answeredFamilies = this.answeredDiscoveryFamilies();
+        const answeredFamilies = context.answeredFamilies ?? this.familiesSeenInCycle();
         const counterChanged: PlatformAccessory[] = [];
         let unanswered = 0;
         let waiting = 0;
-        let removed = 0;
 
-        for (const [uuid, accessory] of [...this.options.accessories]) {
-            if (this.options.activeDiscoveredUUIDs.has(uuid)) {
+        for (const [uuid, accessory] of [...accessories]) {
+            if (activeDiscoveredUUIDs.has(uuid)) {
                 if (writeMissedCycles(accessory, 0)) counterChanged.push(accessory);
                 continue;
             }
             const device = cachedDevice(accessory);
-            if (device && this.options.isDeviceExcluded?.(device)) {
-                this.removeAccessory(accessory);
-                removed += 1;
-                continue;
-            }
             if (device && !answeredFamilies.has(discoveryFamily(device.id))) {
                 unanswered += 1;
                 continue;
@@ -210,23 +237,21 @@ export class AccessoryRegistry {
         }
     }
 
-    /** Discovery families with at least one device seen in this sync. */
-    private answeredDiscoveryFamilies(): Set<string> {
-        const families = new Set<string>();
+    /** Discovery families with at least one accessory seen in this cycle. */
+    private familiesSeenInCycle(): Set<string> {
+        const ids: string[] = [];
         for (const uuid of this.options.activeDiscoveredUUIDs) {
             const accessory = this.options.accessories.get(uuid);
             const device = accessory ? cachedDevice(accessory) : undefined;
-            if (device) families.add(discoveryFamily(device.id));
+            if (device) ids.push(device.id);
         }
-        return families;
+        return familiesOf(ids);
     }
 
     public removeAccessory(accessory: PlatformAccessory): void {
         this.options.log.info('Removing accessory:', accessory.displayName);
         const handler = this.options.accessoryHandlers.get(accessory.UUID);
-        if (handler && 'dispose' in handler && typeof handler.dispose === 'function') {
-            handler.dispose();
-        }
+        if (handler) disposeHandler(handler);
         this.options.api.unregisterPlatformAccessories(
             this.options.pluginName,
             this.options.platformName,
@@ -236,4 +261,16 @@ export class AccessoryRegistry {
         this.options.accessoryHandlers.delete(accessory.UUID);
         this.options.activeDiscoveredUUIDs.delete(accessory.UUID);
     }
+}
+
+function disposeHandler(handler: AccessoryHandler): void {
+    if ('dispose' in handler && typeof handler.dispose === 'function') handler.dispose();
+}
+
+/** The cached device snapshot, if it has the shape every accessory handler reads. */
+function usableCachedDevice(accessory: PlatformAccessory): KseniaDevice | undefined {
+    const device = cachedDevice(accessory);
+    if (!device || typeof device.type !== 'string' || typeof device.name !== 'string') return undefined;
+    const status: unknown = device.status;
+    return status !== null && typeof status === 'object' ? device : undefined;
 }
