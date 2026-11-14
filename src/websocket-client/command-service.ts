@@ -7,7 +7,7 @@ import type { OutputCommandConfirmationTracker } from '../websocket/output-comma
 import { clampValue } from '../websocket/device-state-projector';
 import type { WsTransport } from '../websocket/ws-transport';
 import { ThermostatCommandService } from './thermostat-command-service';
-import type { KseniaMessage, KseniaWebSocketOptions } from '../types';
+import type { KseniaDevice, KseniaMessage, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
 import { CommandSender } from './command-sender';
@@ -41,6 +41,8 @@ interface CommandServiceDeps {
     outputConfirmation?: OutputCommandConfirmationTracker;
     wsTransport: WsTransport;
     emitRawMessage: (direction: RawMessageDirection, rawMessage: string) => void;
+    /** Realtime status channel: an acknowledged thermostat write reaches HomeKit, Matter and MQTT through it. */
+    emitDeviceStatusUpdate?: (device: KseniaDevice) => void;
 }
 
 export class CommandService {
@@ -55,7 +57,9 @@ export class CommandService {
             log: deps.log,
             logLevel: deps.logLevel,
             commandDispatcher: deps.commandDispatcher,
+            commandTimeoutMs: deps.options.commandTimeoutMs ?? 8000,
             send: (cmd, payloadType, payload, options) => this.sendKseniaCommand(cmd, payloadType, payload, options),
+            emitDeviceStatusUpdate: deps.emitDeviceStatusUpdate,
         });
     }
 

@@ -25,6 +25,8 @@ interface ThermostatCommandServiceDeps {
     logLevel: LogLevel;
     commandDispatcher: Pick<CommandDispatcher, 'enqueueDeviceCommand'>;
     send: SendKseniaCommand;
+    /** How long a write may wait in its cfg queue before it is refused instead of sent late. */
+    commandTimeoutMs?: number;
     /** Realtime status channel: an acknowledged write reaches HomeKit, Matter and MQTT through it. */
     emitDeviceStatusUpdate?: (device: KseniaDevice) => void;
     /** How long a write waits for a companion command (mode + setpoint of a scene). Default 50 ms. */
@@ -43,7 +45,12 @@ export class ThermostatCommandService {
     constructor(private readonly deps: ThermostatCommandServiceDeps) {
         this.executor = new ThermostatWriteExecutor(deps);
         this.batcher = new ThermostatWriteBatcher({
-            enqueue: (key, task) => deps.commandDispatcher.enqueueDeviceCommand(key, task),
+            // Serial: commands are merged before they are queued, so the one
+            // waiting is already the latest intent and nothing is superseded.
+            enqueue: (key, task) => deps.commandDispatcher.enqueueDeviceCommand(key, task, {
+                policy: 'serial',
+                maxWaitMs: deps.commandTimeoutMs ?? 8000,
+            }),
             execute: (batch) => this.executor.execute(batch),
             coalesceMs: deps.writeCoalesceMs ?? 50,
         });
