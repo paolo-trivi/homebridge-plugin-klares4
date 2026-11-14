@@ -105,9 +105,9 @@ test('buildThermostatMatterState: heating-only thermostat', () => {
     assert.equal(schemaInvariants.controlSequenceOfOperation, CONTROL_SEQ_HEATING_ONLY);
     assert.ok(schemaInvariants.minHeatSetpointLimit >= TEMP_ABS_MIN_CENTI);
     assert.ok(schemaInvariants.maxHeatSetpointLimit <= TEMP_ABS_MAX_CENTI);
-    assert.equal(schemaInvariants.minSetpointDeadBand, DEFAULT_DEADBAND_C * 10);
-    assert.equal(schemaInvariants.numberOfPresets, 1);
-    assert.equal(schemaInvariants.presetTypes.length, 1);
+    // Heating only (TH-01, TH-09): no cooling, deadband, occupancy or preset attribute.
+    for (const key of ['occupiedCoolingSetpoint', 'unoccupiedHeatingSetpoint', 'unoccupiedCoolingSetpoint']) assert.equal(key in base, false, key);
+    for (const key of ['minSetpointDeadBand', 'numberOfPresets', 'presetTypes', 'minCoolSetpointLimit']) assert.equal(key in schemaInvariants, false, key);
 });
 
 test('buildThermostatMatterState: cooling-capable thermostat exposes both setpoints', () => {

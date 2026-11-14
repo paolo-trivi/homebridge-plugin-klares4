@@ -16,6 +16,11 @@ export interface ThermostatStatus {
     mode: 'off' | 'heat' | 'cool' | 'auto';
     humidity?: number;
     hvacOutputActive?: boolean;
+    /**
+     * Active season of the thermostat program, from the realtime `ACT_SEA`
+     * (`WIN` → winter, `SUM` → summer). Absent when the panel has not reported it.
+     */
+    season?: 'winter' | 'summer';
 }
 
 export interface SensorStatus {

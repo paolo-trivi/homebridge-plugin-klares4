@@ -98,10 +98,7 @@ for (const { label, device, type, cluster } of CASES) {
     });
 }
 
-test('real stack: a mapped thermostat registers as a native Thermostat', {
-    timeout: 30000,
-    todo: 'TH-01: matter.js 0.18 rejects presetTypes/numberOfPresets without the Presets feature (task E)',
-}, async (t) => {
+test('real stack: a mapped thermostat registers as a native Thermostat', { timeout: 30000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const device = D.thermostat(12);
     await registerOnRealStack(stack, deviceToMatterAccessory(device, mapperDeps(stack)));
