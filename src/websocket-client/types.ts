@@ -134,6 +134,8 @@ export interface WebSocketClientState {
      */
     thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number }>;
     missingThermostatProgramWarningOutputIds: Set<string>;
+    /** CFG_THERMOSTATS cache bookkeeping; created on first use (thermostat-cfg-freshness.ts). */
+    thermostatCfgFreshness?: ThermostatCfgFreshness;
     /** Normalized CAT of every scenario listed by MULTI_TYPES, exposed or not. */
     scenarioCategoryById: Map<string, string>;
 }
@@ -141,4 +143,18 @@ export interface WebSocketClientState {
 export interface MessagePipeline {
     routeMessage: (message: KseniaMessage) => void;
     resolvePending: (message: KseniaMessage) => void;
+}
+
+/**
+ * Whether the CFG_THERMOSTATS cache still matches the panel. Every READ_RES and
+ * NM_CHANGES carries `PRG_CHECK.CFG`, a counter the panel bumps at every cfg
+ * change; each acknowledged write of ours bumps it by one.
+ */
+export interface ThermostatCfgFreshness {
+    /** Last `PRG_CHECK.CFG` known to match the cache. */
+    counter?: number;
+    /** Own writes acknowledged since `counter` was learned. */
+    ownWritesSinceCounter: number;
+    /** When each cfg id was last read from the panel (epoch ms). */
+    readAt: Map<string, number>;
 }

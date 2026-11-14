@@ -525,8 +525,7 @@ test('CommandService does not fall back to legacy WRITE/THERMOSTAT', async () =>
 
 test('CommandService writes cfg id from PRG_THERMOSTATS instead of DOMUS sensor id', async () => {
   const writes = [];
-  const service = new CommandService({
-    state: {
+  const state = Object.assign(createInitialWebSocketClientState(), {
       idLogin: '3',
       ws: { readyState: 1 },
       thermostatProgramById: new Map([['3', { ID: '3', PERIPH: { PID: '4' }, HEATING_OUT: '21' }]]),
@@ -537,7 +536,9 @@ test('CommandService writes cfg id from PRG_THERMOSTATS instead of DOMUS sensor 
       domusThermostatConfig: { enabled: true, manualPairs: [], manualCommandPairs: [], sensorFreshnessMs: 300000 },
       thermostatToDomus: new Map([['21', '4']]),
       missingThermostatProgramWarningOutputIds: new Set(),
-    },
+  });
+  const service = new CommandService({
+    state,
     sender: 'sender',
     pin: '1234',
     log: createLogger(),
@@ -550,9 +551,14 @@ test('CommandService writes cfg id from PRG_THERMOSTATS instead of DOMUS sensor 
 
   service.sendKseniaCommand = async (...args) => {
     writes.push({ cmd: args[0], payloadType: args[1], payload: args[2] });
+    // TH-02: a setpoint re-reads its cfg first; the panel answers with it.
+    if (args[0] === 'READ') {
+      state.thermostatCfgById.set('3', { ID: '3', ACT_MODE: 'MAN', ACT_SEA: 'WIN', WIN: { TM: '21.0' }, SUM: { TM: '22.0' } });
+    }
   };
 
   await service.setThermostatTemperature('thermostat_21', 27);
-  assert.equal(writes[0].cmd, 'WRITE_CFG');
-  assert.equal(writes[0].payload.CFG_THERMOSTATS[0].ID, '3');
+  assert.deepEqual(writes.map((w) => w.cmd), ['READ', 'WRITE_CFG']);
+  assert.equal(writes[0].payload.ID_READ, '3');
+  assert.equal(writes[1].payload.CFG_THERMOSTATS[0].ID, '3');
 });
