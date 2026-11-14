@@ -1,7 +1,7 @@
 /**
  * Turns the TLS failures a Lares4 panel typically causes into an actionable
  * hint. Both cases are fixed by configuration (`allowInsecureTls`), not by
- * code, so the platform also keeps them out of telemetry.
+ * code, so the log tells the user which setting to change.
  */
 
 export interface TlsHintContext {
