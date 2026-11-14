@@ -7,6 +7,7 @@ import { isOutputLikeDevice } from '../device-id';
 import type { KseniaDevice } from '../types';
 import type { DiscoveryService } from './discovery-service';
 import type { PlatformLifecycleService } from './platform-lifecycle-service';
+import { buildRoomMappingExample } from './room-mapping-example';
 import type { DeviceListItem, DevicesList, Lares4Config } from './types';
 
 interface DeviceListServiceOptions {
@@ -19,10 +20,18 @@ interface DeviceListServiceOptions {
 
 const DEVICES_FILE_WRITE_DEBOUNCE_MS = 1000;
 
+/** What identifies a device list, ignoring when it was built. */
+function listSignature(devicesList: DevicesList): string {
+    return JSON.stringify([devicesList.outputs, devicesList.zones, devicesList.sensors, devicesList.scenarios]);
+}
+
 export class DeviceListService {
     private readonly devicesFilePath: string;
     private writeTimer?: NodeJS.Timeout;
     private pendingList?: DevicesList;
+    /** The list last handed to `saveDevicesList`: a reconnect that finds the same devices changes nothing. */
+    private latestSignature?: string;
+    private summarySignature?: string;
 
     constructor(private readonly options: DeviceListServiceOptions) {
         this.devicesFilePath = path.join(options.storagePath, 'klares4-devices.json');
@@ -31,11 +40,16 @@ export class DeviceListService {
     /**
      * Called once per discovered device during a sync — the list is rebuilt
      * cheaply every time, but the file write (and the summary) are debounced
-     * so a boot with N devices produces one write, not N racing writes.
+     * so a boot with N devices produces one write, not N racing writes. A sync
+     * that finds the very same devices (every reconnect) writes and prints nothing.
      */
     public saveDevicesList(discoveredDevices: Iterable<KseniaDevice>): void {
         try {
-            this.pendingList = this.buildDevicesList(discoveredDevices);
+            const built = this.buildDevicesList(discoveredDevices);
+            const signature = listSignature(built);
+            if (signature === this.latestSignature) return;
+            this.latestSignature = signature;
+            this.pendingList = built;
 
             if (this.writeTimer) {
                 clearTimeout(this.writeTimer);
@@ -46,10 +60,9 @@ export class DeviceListService {
             }, DEVICES_FILE_WRITE_DEBOUNCE_MS);
             this.writeTimer.unref?.();
 
-            const devicesList = this.pendingList;
             const summaryDelay = this.options.config.devicesSummaryDelay ?? 2000;
             this.options.lifecycleService.scheduleSummary((): void => {
-                this.printDevicesSummary(devicesList);
+                this.printDevicesSummary(built);
             }, summaryDelay);
         } catch (error: unknown) {
             this.options.log.error(
@@ -101,6 +114,8 @@ export class DeviceListService {
                 this.options.log.debug(`Devices list saved: ${count} devices`);
             })
             .catch((error: unknown): void => {
+                // Not written: the next sync with the same devices must try again.
+                this.latestSignature = undefined;
                 this.options.log.error(
                     'Error saving devices list:',
                     error instanceof Error ? error.message : String(error),
@@ -146,6 +161,10 @@ export class DeviceListService {
     }
 
     private printDevicesSummary(devicesList: DevicesList): void {
+        const signature = listSignature(devicesList);
+        if (signature === this.summarySignature) return;
+        this.summarySignature = signature;
+
         const log = this.options.log;
         log.info('');
         log.info('========== AVAILABLE DEVICES ==========');
@@ -173,125 +192,24 @@ export class DeviceListService {
         log.info('================================================');
         log.info('');
 
-        this.generateRoomMappingExample(devicesList);
+        this.writeRoomMappingExample(devicesList);
     }
 
-    private generateRoomMappingExample(devicesList: DevicesList): void {
-        try {
-            const examplePath = path.join(
-                this.options.storagePath,
-                'klares4-room-mapping-example.json',
-            );
-
-            const exampleConfig = {
-                roomMapping: {
-                    enabled: false,
-                    rooms: [
-                        {
-                            roomName: 'sala',
-                            devices: this.getExampleDevicesForRoom(devicesList, 'sala'),
-                        },
-                        {
-                            roomName: 'cucina',
-                            devices: this.getExampleDevicesForRoom(devicesList, 'cucina'),
-                        },
-                        {
-                            roomName: 'camera',
-                            devices: this.getExampleDevicesForRoom(devicesList, 'camera'),
-                        },
-                    ],
-                },
-                _note: 'This is an example file. Modify roomName and devices as needed.',
-                _availableDevices: {
-                    outputs: devicesList.outputs.map((d: DeviceListItem) => ({
-                        id: d.fullId,
-                        name: d.name,
-                        type: d.type,
-                    })),
-                    zones: devicesList.zones.map((d: DeviceListItem) => ({
-                        id: d.fullId,
-                        name: d.name,
-                        type: d.type,
-                    })),
-                    sensors: devicesList.sensors.map((d: DeviceListItem) => ({
-                        id: d.fullId,
-                        name: d.name,
-                        type: d.type,
-                    })),
-                    scenarios: devicesList.scenarios.map((d: DeviceListItem) => ({
-                        id: d.fullId,
-                        name: d.name,
-                        type: d.type,
-                    })),
-                },
-            };
-
-            const serializedExample = JSON.stringify(exampleConfig, null, 2);
-            void fs.promises
-                .writeFile(examplePath, serializedExample, 'utf8')
-                .then((): void => {
-                    this.options.log.info(`Room mapping example created: ${examplePath}`);
-                })
-                .catch((error: unknown): void => {
-                    this.options.log.error(
-                        'Error creating example file:',
-                        error instanceof Error ? error.message : String(error),
-                    );
-                });
-        } catch (error: unknown) {
-            this.options.log.error(
-                'Error creating example file:',
-                error instanceof Error ? error.message : String(error),
-            );
-        }
-    }
-
-    private getExampleDevicesForRoom(
-        devicesList: DevicesList,
-        roomName: string,
-    ): Array<{ deviceId: string; deviceName: string }> {
-        const devices: Array<{ deviceId: string; deviceName: string }> = [];
-
-        switch (roomName) {
-            case 'sala': {
-                const salaDevices = [
-                    ...devicesList.sensors.slice(0, 2),
-                    ...devicesList.outputs.slice(0, 1),
-                ];
-                salaDevices.forEach((device: DeviceListItem): void => {
-                    devices.push({
-                        deviceId: device.fullId,
-                        deviceName: device.name,
-                    });
-                });
-                break;
-            }
-            case 'cucina': {
-                const cucinaDevices = [...devicesList.outputs.slice(1, 3)];
-                cucinaDevices.forEach((device: DeviceListItem): void => {
-                    devices.push({
-                        deviceId: device.fullId,
-                        deviceName: device.name,
-                    });
-                });
-                break;
-            }
-            case 'camera': {
-                const cameraDevices = [
-                    ...devicesList.zones.slice(0, 1),
-                    ...devicesList.outputs.slice(3, 4),
-                ];
-                cameraDevices.forEach((device: DeviceListItem): void => {
-                    devices.push({
-                        deviceId: device.fullId,
-                        deviceName: device.name,
-                    });
-                });
-                break;
-            }
-        }
-
-        return devices.slice(0, 3);
+    /** Written only when its content differs from what the file already holds. */
+    private writeRoomMappingExample(devicesList: DevicesList): void {
+        const examplePath = path.join(this.options.storagePath, 'klares4-room-mapping-example.json');
+        const content = buildRoomMappingExample(devicesList);
+        const log = this.options.log;
+        void fs.promises.readFile(examplePath, 'utf8')
+            .catch((): undefined => undefined)
+            .then(async (existing): Promise<void> => {
+                if (existing === content) return;
+                await writeFileAtomic(examplePath, content);
+                log.info(`Room mapping example ${existing === undefined ? 'created' : 'updated'}: ${examplePath}`);
+            })
+            .catch((error: unknown): void => {
+                log.error('Error creating example file:', error instanceof Error ? error.message : String(error));
+            });
     }
 }
 

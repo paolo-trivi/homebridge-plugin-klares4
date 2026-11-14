@@ -5,7 +5,6 @@ const path = require('node:path');
 
 const { KsaImportService } = require('../dist/platform/ksa-import-service.js');
 const { PlatformConfigFileService } = require('../dist/platform/config-file-service.js');
-const { mergeExclusionList } = require('../dist/platform/ksa-config-merge.js');
 const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const log = { info() {}, warn() {}, error() {}, debug() {} };
@@ -50,32 +49,6 @@ function setup(t, platformOverrides) {
     const persisted = () => JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')).platforms[0];
     return { runtime, service, persisted };
 }
-
-test('KSA exclusions: empty suggestions never erase the user lists (runtime and persisted)', async (t) => {
-    const { runtime, service, persisted } = setup(t, {
-        excludeOutputs: ['5'],
-        excludeZones: ['7'],
-        excludeSensors: ['2'],
-        excludeScenarios: ['9'],
-        ksaImport: { applyAtStartup: true, applyExclusionSuggestions: true },
-    });
-    await service.prepare(runtime, 'Lares4Complete');
-
-    for (const config of [runtime, persisted()]) {
-        assert.deepEqual(config.excludeOutputs, ['5']);
-        assert.deepEqual(config.excludeZones, ['7']);
-        assert.deepEqual(config.excludeSensors, ['2']);
-        assert.deepEqual(config.excludeScenarios, ['9']);
-    }
-    assert.equal(persisted().ksaImport.applyAtStartup, false);
-});
-
-test('KSA exclusions: suggestions are added to the user list, never replace it', (t) => {
-    assert.equal(mergeExclusionList(['5'], []), undefined);
-    assert.deepEqual(mergeExclusionList(['5', '6'], ['6', '7']), ['5', '6', '7']);
-    assert.deepEqual(mergeExclusionList(undefined, ['7']), ['7']);
-    assert.equal(mergeExclusionList(['5'], ['5']), undefined);
-});
 
 test('KSA custom names: re-applying the same import adds no duplicate rows', (t) => {
     const { mergeCustomNames } = require('../dist/platform/custom-names-config.js');

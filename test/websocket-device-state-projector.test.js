@@ -17,7 +17,11 @@ test('determineOutputType preserves output classification contract', () => {
   assert.equal(determineOutputType('GATE', 'M'), 'gate');
   assert.equal(determineOutputType('GATE', 'B'), 'cover');
   assert.equal(determineOutputType('THERMOSTAT'), 'thermostat');
-  assert.equal(determineOutputType('UNKNOWN'), 'light');
+  assert.equal(determineOutputType('GATE', 'm'), 'gate', 'MOD is compared without case');
+  // WS-01: an unrecognized category is not a light.
+  for (const category of ['UNKNOWN', 'GEN', 'IRR', '', '  ']) {
+    assert.equal(determineOutputType(category, 'M'), undefined, category);
+  }
 });
 
 // ---------------------------------------------------------------------------

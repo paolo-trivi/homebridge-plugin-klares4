@@ -46,6 +46,8 @@ export interface KseniaZone extends KseniaDeviceBase {
 export interface KseniaScenario extends KseniaDeviceBase {
     type: 'scenario';
     status: ScenarioStatus;
+    /** The panel's `PIN` flag for this scenario (`N`, `P`, `PR`), as listed; meaning not established. */
+    pinFlag?: string;
 }
 
 export interface KseniaGate extends KseniaDeviceBase {
