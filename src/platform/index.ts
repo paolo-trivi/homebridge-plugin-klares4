@@ -13,6 +13,7 @@ import { MqttBridge } from '../mqtt-bridge';
 import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { PLATFORM_NAME, PLUGIN_NAME } from '../settings';
 import { initTelemetry, captureError, closeTelemetry } from '../telemetry';
+import { tlsConfigurationHint } from '../websocket-client/tls-error-hint';
 import type { KseniaDevice } from '../types';
 import { KseniaWebSocketClient } from '../websocket-client';
 import { DebugCaptureManager } from '../debug-capture';
@@ -222,7 +223,12 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 'Lares4 initialization error:',
                 error instanceof Error ? error.message : String(error),
             );
-            captureError(error, { context: 'initializeLares4' });
+            // A TLS failure fixed by allowInsecureTls is a setup issue, already
+            // explained in the log by the client: it is not a bug to report.
+            const tlsContext = { useHttps: this.config.https !== false, allowInsecureTls: this.config.allowInsecureTls === true };
+            if (!tlsConfigurationHint(error, tlsContext)) {
+                captureError(error, { context: 'initializeLares4' });
+            }
         }
     }
 

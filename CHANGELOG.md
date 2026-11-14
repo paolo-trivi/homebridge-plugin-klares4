@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A panel that needs TLS legacy renegotiation or has a self-signed certificate no longer fails with only a raw OpenSSL error (`unsafe legacy renegotiation disabled`): the log explains that `allowInsecureTls` fixes it, once rather than on every reconnect, and these setup errors are no longer sent as error reports (#37).
+
 ### Changed
 
 - Node.js 22.12 or newer is required (`engines.node >= 22.12.0`), the minimum of `@sentry/node` 11 and of Homebridge's own `hap-nodejs`. Node 22.0–22.11 are no longer supported.
