@@ -42,7 +42,7 @@
                 "title": "Consenti TLS Insicuro",
                 "type": "boolean",
                 "default": false,
-                "description": "Disabilita la verifica del certificato TLS (solo per certificati self-signed in rete locale fidata)"
+                "description": "Disabilita la verifica del certificato TLS e consente la rinegoziazione TLS legacy richiesta da molte centrali su Node 24 (solo in rete locale fidata)"
             },
             "sender": {
                 "title": "Identificativo Client",

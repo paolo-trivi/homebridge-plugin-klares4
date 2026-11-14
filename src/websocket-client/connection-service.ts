@@ -6,6 +6,7 @@ import type { Logger } from 'homebridge';
 import type { KseniaWebSocketOptions } from '../types';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { WsTransport } from '../websocket/ws-transport';
+import { tlsConfigurationHint } from './tls-error-hint';
 import type { WebSocketClientState, WebSocketConnectionOptions } from './types';
 
 interface ConnectionServiceDeps {
@@ -27,6 +28,7 @@ export class ConnectionService {
     private readonly maxReconnectDelay = 60000;
     /** Set by disconnect(): no reconnect may be scheduled after shutdown. */
     private stopped = false;
+    private tlsHintLogged = false;
 
     constructor(private readonly deps: ConnectionServiceDeps) {}
 
@@ -186,6 +188,11 @@ export class ConnectionService {
                         return;
                     }
                     this.deps.log.error('WebSocket error:', error.message);
+                    const hint = tlsConfigurationHint(error, { useHttps: this.deps.useHttps, allowInsecureTls });
+                    if (hint && !this.tlsHintLogged) {
+                        this.tlsHintLogged = true; // reconnects would repeat it every backoff
+                        this.deps.log.warn(hint);
+                    }
                     if (this.deps.state.pendingLogin) {
                         this.deps.state.pendingLogin.reject(error);
                     } else {

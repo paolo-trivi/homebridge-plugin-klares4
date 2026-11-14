@@ -218,7 +218,7 @@ The plugin can be fully configured via the Homebridge UI graphical interface. Re
 | `reconnectInterval` | number   | 5000         | Reconnection interval (ms)      |
 | `heartbeatInterval` | number   | 30000        | Heartbeat interval (ms)         |
 | `commandTimeoutMs`  | number   | 8000         | API command response timeout (ms) |
-| `allowInsecureTls`  | boolean  | false        | Disable TLS certificate validation (trusted LAN only) |
+| `allowInsecureTls`  | boolean  | false        | Disable TLS certificate validation and allow the TLS legacy renegotiation most panels need on Node 24 (trusted LAN only) |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | enabled/freshness defaults | DOMUS thermostat mapping, manual overrides, freshness fallback |
 | `ksaImport`         | object   | disabled     | Import KSA backup metadata for thermostat routing, room mapping and optional config apply. Imported names, rooms and exclusions are added without overriding yours, see [`docs/en/config-and-ui.md`](docs/en/config-and-ui.md#ksa-import-block) |
@@ -626,7 +626,7 @@ Il plugin puo essere configurato completamente tramite l'interfaccia grafica di 
 | `reconnectInterval` | number   | 5000         | Intervallo riconnessione (ms)   |
 | `heartbeatInterval` | number   | 30000        | Intervallo heartbeat (ms)       |
 | `commandTimeoutMs`  | number   | 8000         | Timeout della risposta ai comandi API (ms) |
-| `allowInsecureTls`  | boolean  | false        | Disattiva la verifica del certificato TLS (solo su LAN fidata) |
+| `allowInsecureTls`  | boolean  | false        | Disattiva la verifica del certificato TLS e consente la rinegoziazione TLS legacy richiesta dalla maggior parte delle centrali su Node 24 (solo su LAN fidata) |
 | `logLevel`          | number   | 1            | 0=minimal, 1=normal, 2=debug    |
 | `domusThermostat`   | object   | default attivi | Mapping termostati DOMUS, override manuali e fallback freshness |
 | `ksaImport`         | object   | disabilitato | Import metadata da backup KSA per routing termostati, room mapping e apply opzionale. Nomi, stanze ed esclusioni importati si aggiungono ai tuoi senza sovrascriverli, vedi [`docs/it/configurazione-e-ui.md`](docs/it/configurazione-e-ui.md#blocco-import-ksa) |

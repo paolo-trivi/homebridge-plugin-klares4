@@ -40,6 +40,15 @@ Azioni:
 - usa preload da cache KSA sanitizzata
 - verifica presenza file cache in storage Homebridge
 
+### `unsafe legacy renegotiation disabled` o errore di certificato self-signed
+
+Le centrali Lares4 usano un certificato self-signed e molte richiedono la rinegoziazione TLS legacy, che Node.js 24 rifiuta di default. Il log mostra un suggerimento che indica `allowInsecureTls`.
+
+Azioni:
+
+- su una rete locale fidata, abilita `allowInsecureTls` e riavvia Homebridge
+- altrimenti, se la centrale lo consente, imposta `https: false` per usare `ws://` in chiaro
+
 ## File di Cattura Debug
 
 - `generateDebugFile: true` registra il traffico WebSocket al prossimo avvio e scrive `klares4-debug-<timestamp>.json` nella cartella storage di Homebridge, con i PIN mascherati. Il flag torna da solo a `false` in `config.json`.
