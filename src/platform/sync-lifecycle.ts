@@ -23,8 +23,12 @@ export class SyncLifecycle {
 
     public attach(client: KseniaWebSocketClient, deviceEvents: DeviceEventRouter): void {
         const { matterRegistry } = this.deps;
-        client.onDeviceDiscovered = (device: KseniaDevice): void => deviceEvents.handleDeviceDiscovered(device);
-        client.onDeviceStatusUpdate = (device: KseniaDevice): void => deviceEvents.handleDeviceStatusUpdate(device);
+        client.onDeviceDiscovered = (device: KseniaDevice): void => {
+            deviceEvents.handleDeviceDiscovered(device);
+        };
+        client.onDeviceStatusUpdate = (device: KseniaDevice): void => {
+            deviceEvents.handleDeviceStatusUpdate(device);
+        };
         client.onInitialSyncComplete = (): void => this.handleInitialSyncComplete();
         client.onConnected = (): void => matterRegistry.setPanelReachable(true);
         client.onDisconnected = (): void => matterRegistry.setPanelReachable(false);

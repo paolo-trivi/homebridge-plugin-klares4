@@ -54,6 +54,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly deviceEvents: DeviceEventRouter;
     private readonly syncLifecycle: SyncLifecycle;
     private debugCapture?: DebugCaptureManager;
+    /** Set at shutdown: an initialization still in progress must not connect afterwards. */
+    private shuttingDown = false;
 
     constructor(
         public readonly log: Logger,
@@ -129,10 +131,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.api.on('didFinishLaunching', (): void => {
             this.log.debug('didFinishLaunching callback executed');
             this.initializeLares4().catch((error: unknown): void => {
-                this.log.error(
-                    'Failed to initialize Lares4:',
-                    error instanceof Error ? error.message : String(error),
-                );
+                this.log.error('Failed to initialize Lares4:', error instanceof Error ? error.message : String(error));
                 captureError(error, { context: 'didFinishLaunching' });
             });
         });
@@ -147,6 +146,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
     private async initializeLares4(): Promise<void> {
         try {
+            if (this.initAborted()) return;
             this.log.info('Initializing Ksenia Lares4 connection...');
             this.syncLifecycle.startDiscoveryCycle();
 
@@ -157,6 +157,9 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             const { ip, pin } = this.config;
 
             const ksaCache = await this.ksaImportService.prepare(this.config, PLATFORM_NAME);
+            // Nothing below awaits until connect(): one check covers the client,
+            // the MQTT bridge, the debug capture and the connection.
+            if (this.initAborted()) return;
 
             this.wsClient = createWebSocketClient({ ...this.config, ip, pin }, this.log, ksaCache);
 
@@ -178,10 +181,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
             this.log.info('Ksenia Lares4 initialized successfully');
         } catch (error: unknown) {
-            this.log.error(
-                'Lares4 initialization error:',
-                error instanceof Error ? error.message : String(error),
-            );
+            this.log.error('Lares4 initialization error:', error instanceof Error ? error.message : String(error));
             // A TLS failure fixed by allowInsecureTls is a setup issue, already
             // explained in the log by the client: it is not a bug to report.
             const tlsContext = { useHttps: this.config.https !== false, allowInsecureTls: this.config.allowInsecureTls === true };
@@ -203,7 +203,13 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         return this.discoveryService.resolveMatterPolicy(device).exposed;
     }
 
+    private initAborted(): boolean {
+        if (this.shuttingDown) this.log.debug('Initialization stopped: Homebridge is shutting down');
+        return this.shuttingDown;
+    }
+
     private cleanupConnections(): void {
+        this.shuttingDown = true;
         this.lifecycleService.cleanupConnections((): void => {
             // Flush before disconnecting: both write synchronously, Homebridge exits right after.
             this.debugCapture?.shutdown();
