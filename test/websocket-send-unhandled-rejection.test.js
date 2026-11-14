@@ -6,6 +6,8 @@ const { createInitialWebSocketClientState } = require('../dist/websocket-client/
 const { CommandDispatcher } = require('../dist/websocket/command-dispatcher.js');
 const { OutputCommandConfirmationTracker } = require('../dist/websocket/output-command-confirmation.js');
 
+const { seedStateDevices } = require('./fixtures/command-client.js');
+
 const silentLog = { info() {}, warn() {}, error() {}, debug() {} };
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -13,6 +15,8 @@ function createService(onSend) {
     const state = createInitialWebSocketClientState();
     state.idLogin = '5';
     state.ws = { readyState: 1 };
+    // Commands only reach discovered outputs (WS-01 defense in depth).
+    seedStateDevices(state, ['light_7']);
     const dispatcher = new CommandDispatcher();
     const outputConfirmation = new OutputCommandConfirmationTracker();
     const service = new CommandService({

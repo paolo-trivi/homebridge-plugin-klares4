@@ -5,6 +5,8 @@ import { hasObservedState } from '../device-observation';
 import { mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
 import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
+import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { registerNextThermostatAttempt, resetThermostatAttempts } from './matter-thermostat-attempts';
 
 const MATTER_REGISTER_RECOVERY_LIMIT = 2;
 
@@ -29,13 +31,6 @@ export interface MatterRegistration {
     registeredDisplayName?: string;
     /** Set when the failure was transient: earliest time a new update may retry the registration. */
     retryAfter?: number;
-}
-
-const DEFAULT_REGISTER_RETRY_MS = 5_000;
-
-function registerRetryMs(): number {
-    const fromEnv = Number(process.env.KLARES4_MATTER_REGISTER_RETRY_MS);
-    return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : DEFAULT_REGISTER_RETRY_MS;
 }
 
 /**
@@ -63,6 +58,10 @@ interface RecoveryDeps {
     momentaryAutoOffMs?: number;
     onFallbackPersist?: (uuid: string) => void;
     resolveDisplayName?: (device: KseniaDevice) => string;
+    /** Wait before a transient refusal may be retried (`MatterTimings.registerRetryMs`). */
+    registerRetryMs: number;
+    /** Records the payload of a second Thermostat attempt as pushed (echo guard). */
+    thermostatEchoTracker?: MatterThermostatEchoTracker;
 }
 
 /** True when the registration currently maps to the TemperatureSensor fallback shape. */
@@ -71,19 +70,23 @@ export function isFallbackTemperatureSensor(reg: MatterRegistration): boolean {
     return 'temperatureMeasurement' in clusters && !('thermostat' in clusters);
 }
 
+/**
+ * The endpoint answers for every cluster the requested accessory declares. A
+ * single cluster only proved that some endpoint holds the UUID: a stale one of
+ * another shape could answer it too.
+ */
 export async function isMatterAccessoryQueryable(
     api: API,
     log: Logger,
     fmtErr: (err: unknown) => string,
     reg: MatterRegistration,
 ): Promise<boolean> {
-    const probeCluster = reg.pendingStateUpdates[0]?.clusterName
-        ?? Object.keys(reg.matterAccessory.clusters ?? {})[0];
-    if (!probeCluster) return true;
-
+    const clusters = Object.keys(reg.matterAccessory.clusters ?? {});
     try {
-        const current = await api.matter!.getAccessoryState(reg.uuid, probeCluster);
-        return current !== undefined;
+        for (const cluster of clusters) {
+            if (await api.matter!.getAccessoryState(reg.uuid, cluster) === undefined) return false;
+        }
+        return true;
     } catch (err) {
         log.debug(`[Matter] metadata probe failed for ${reg.displayName}: ${fmtErr(err)}`);
         return false;
@@ -103,6 +106,8 @@ export async function handleMissingRegisteredAccessory(
         && deps.thermostatFallbackEnabled;
 
     if (shouldFallbackThermostat) {
+        // A runtime that refused the conformant payload may take the 2.2.0 one (TH-01).
+        if (await registerNextThermostatAttempt(reg, deps)) return;
         deps.log.warn(
             `[Matter] ${reg.displayName} was not queryable after registration; `
             + 'falling back to TemperatureSensor before sending state updates.',
@@ -154,6 +159,7 @@ export async function handleRegisterFailure(
     const transient = isTransientRegisterError(msg);
     // A transient refusal says nothing about the Thermostat shape: no fallback.
     if (device.type === 'thermostat' && deps.thermostatFallbackEnabled && !transient) {
+        if (await registerNextThermostatAttempt(reg, deps)) return;
         deps.log.warn(
             `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor. Error: ${msg}`,
         );
@@ -171,7 +177,7 @@ export async function handleRegisterFailure(
     reg.lastError = msg;
     reg.pendingStateUpdates = [];
     if (transient) {
-        reg.retryAfter = reg.failedAt + registerRetryMs();
+        reg.retryAfter = reg.failedAt + deps.registerRetryMs;
         deps.log.warn(`[Matter] register deferred: ${device.name} — the Matter server is still starting; retrying on a later update`);
         return;
     }
@@ -183,6 +189,7 @@ export async function registerFallbackAccessory(
     reg: MatterRegistration,
     deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'momentaryAutoOffMs' | 'onFallbackPersist' | 'resolveDisplayName' | 'topologyCoordinator'>,
 ): Promise<void> {
+    resetThermostatAttempts(device.id);
     const fallback = mapThermostatAsTemperatureSensor(device, {
         api: deps.api,
         log: deps.log,

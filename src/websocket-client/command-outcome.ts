@@ -19,7 +19,11 @@ export function mutationOptions(
     };
 }
 
-export function logMutationOutcome(
+/**
+ * Logs a confirmed mutation. A command that went out with nothing confirming
+ * it is a failure (a socket write is not a success), so it throws.
+ */
+export function reportMutationOutcome(
     log: Logger,
     kind: string,
     id: string,
@@ -27,8 +31,7 @@ export function logMutationOutcome(
     outcome: MutationOutcome,
 ): void {
     if (!outcome) {
-        log.warn(`${kind} command sent without confirmation: ${id} -> ${target}`);
-        return;
+        throw new Error(`${kind} command sent without confirmation: ${id} -> ${target}`);
     }
     log.info(`${kind} command ${outcome.status}: ${id} -> ${target} (${outcome.latencyMs}ms)`);
 }

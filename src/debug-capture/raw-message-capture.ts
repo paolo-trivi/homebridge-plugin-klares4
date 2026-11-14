@@ -1,34 +1,34 @@
+import { isPlainRecord, redactFrame, redactText } from './redaction';
 import type { RawMessage } from './types';
 
+/**
+ * One frame as it goes into the debug file. Sensitive keys are masked at any
+ * depth, in both directions; what is not a JSON object is masked as text, so
+ * a frame that cannot be understood is never written as it came.
+ */
 export function captureRawMessage(direction: 'in' | 'out', rawData: string): RawMessage {
     let parsed: Record<string, unknown> | null = null;
-    let maskedData = rawData;
+    let text: string;
 
     try {
-        const parsedMessage = JSON.parse(rawData) as unknown;
-        if (isRecord(parsedMessage)) {
-            parsed = parsedMessage;
-        }
-
-        if (parsed && isRecord(parsed.PAYLOAD) && (typeof parsed.PAYLOAD.PIN === 'string' || typeof parsed.PAYLOAD.PIN === 'number')) {
-            const maskedParsed = JSON.parse(JSON.stringify(parsed)) as Record<string, unknown>;
-            const maskedPayload = maskedParsed.PAYLOAD as Record<string, unknown>;
-            maskedPayload.PIN = '***MASKED***';
-            parsed = maskedParsed;
-            maskedData = JSON.stringify(maskedParsed);
+        const message: unknown = JSON.parse(rawData);
+        if (isPlainRecord(message)) {
+            const redacted = redactFrame(message, direction);
+            parsed = redacted.value;
+            // The original text is kept byte for byte when there was nothing to mask.
+            text = redacted.changed ? JSON.stringify(redacted.value) : rawData;
+        } else {
+            text = redactText(rawData);
         }
     } catch {
-        // Keep non-JSON payloads as-is.
+        parsed = null;
+        text = redactText(rawData);
     }
 
     return {
         timestamp: new Date().toISOString(),
         direction,
-        rawData: maskedData,
+        rawData: text,
         parsed,
     };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
 }

@@ -144,20 +144,21 @@ test('thermostat: registers as Thermostat when matter accepts it', async (t) => 
 
 test('thermostat: falls back to TemperatureSensor when Homebridge refuses the Thermostat endpoint', async (t) => {
     // Homebridge 2.5 only logs a refused endpoint (e.g. a matter.js conformance
-    // error): the register call resolves and the probe finds nothing.
-    let refusedOnce = false;
+    // error): the register call resolves and the probe finds nothing. Both
+    // Thermostat payloads are refused (TH-01: the 2.2.0 one is tried second).
     const hb = makeHbMatterApi({
-        failRegistration: (acc) => !refusedOnce && acc.deviceType.name === 'Thermostat' && (refusedOnce = true),
+        failRegistration: (acc) => acc.deviceType.name === 'Thermostat',
     });
     const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_60'));
     await waitFor(() => registry.getStatus('thermostat_60') === 'registered', FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
-    assert.deepEqual(hb.registerCalls.map((r) => r.deviceType), ['Thermostat', 'TemperatureSensor']);
+    assert.deepEqual(hb.registerCalls.map((r) => r.deviceType), ['Thermostat', 'Thermostat', 'TemperatureSensor']);
     assert.equal(hb.endpoints.get('thermostat_60').deviceType.name, 'TemperatureSensor');
 });
 
 test('thermostat: async missing registration falls back before state updates', async (t) => {
-    const { api, registerCalls: registered, updates } = makeHbMatterApi({ unqueryableOnce: ['thermostat_async_missing'] });
+    // Neither Thermostat payload answers (TH-01: the second attempt comes before the fallback).
+    const { api, registerCalls: registered, updates } = makeHbMatterApi({ unqueryableTimes: { thermostat_async_missing: 2 } });
     const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_async_missing'));
     await registry.updateAccessoryState(thermostatDevice('thermostat_async_missing', { currentTemperature: 19.5 }));
@@ -165,8 +166,7 @@ test('thermostat: async missing registration falls back before state updates', a
 
     await waitFor(() => registry.getStatus('thermostat_async_missing') === 'registered');
     assert.equal(registry.getStatus('thermostat_async_missing'), 'registered');
-    assert.equal(registered[0].deviceType, 'Thermostat');
-    assert.equal(registered[1].deviceType, 'TemperatureSensor');
+    assert.deepEqual(registered.map((r) => r.deviceType), ['Thermostat', 'Thermostat', 'TemperatureSensor']);
     assert.equal(updates.length, 1);
     assert.equal(updates[0].cluster, 'temperatureMeasurement');
     assert.equal(updates[0].attributes.measuredValue, 1950);
@@ -243,9 +243,8 @@ test('rediscovery updates in-memory Matter identity without updatePlatformAccess
 });
 
 test('thermostat fallback: state updates go to temperatureMeasurement, not thermostat cluster', async (t) => {
-    let refusedOnce = false;
     const { api, updates } = makeHbMatterApi({
-        failRegistration: (acc) => !refusedOnce && acc.deviceType.name === 'Thermostat' && (refusedOnce = true),
+        failRegistration: (acc) => acc.deviceType.name === 'Thermostat',
     });
     const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_70'));

@@ -64,6 +64,5 @@ log.txt
 klares4-debug*
 prg-*.ksa
 scripts/debug-thermostat-routing.js
-scripts/
 AGENTS.md
 .claude

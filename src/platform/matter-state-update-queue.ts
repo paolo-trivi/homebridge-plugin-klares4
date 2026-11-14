@@ -2,15 +2,6 @@ import type { API, Logger } from 'homebridge';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { PendingMatterStateUpdate } from './matter-state-updates';
 
-// With the probe-based settle in MatterAccessoryRegistry (Fix 2), the endpoint
-// is only marked `registered` once `getAccessoryState` actually returns. No
-// additional bootstrap delay is needed; the env var stays available as an
-// emergency override.
-const DEFAULT_MATTER_STATE_UPDATE_BOOTSTRAP_MS = 0;
-const MATTER_STATE_UPDATE_BOOTSTRAP_MS = Number(
-    process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS ?? DEFAULT_MATTER_STATE_UPDATE_BOOTSTRAP_MS,
-);
-
 export class MatterStateUpdateQueue {
     private readonly flushTimers = new Map<string, NodeJS.Timeout>();
 
@@ -27,8 +18,12 @@ export class MatterStateUpdateQueue {
         private readonly onBeforePush?: (uuid: string, clusterName: string, attrs: Record<string, unknown>) => void,
     ) {}
 
-    public markReadyAfterBootstrap(reg: MatterRegistration): void {
-        reg.stateUpdatesReadyAt = Date.now() + MATTER_STATE_UPDATE_BOOTSTRAP_MS;
+    /**
+     * The endpoint answered the probe, so no bootstrap delay is needed;
+     * `delayMs` (`MatterTimings.stateBootstrapMs`) stays as an emergency override.
+     */
+    public markReadyAfterBootstrap(reg: MatterRegistration, delayMs: number): void {
+        reg.stateUpdatesReadyAt = Date.now() + delayMs;
     }
 
     public async pushOrQueue(

@@ -1,5 +1,10 @@
 name: Release Publish
 
+# Two jobs on purpose. `build` installs and runs the code of every dependency, so
+# it has no OIDC token and cannot publish. `publish` has the token but runs no
+# repository or dependency code: it only publishes the tarball `build` produced,
+# after the `npm-publish` environment gate.
+
 on:
   push:
     tags:
@@ -9,89 +14,156 @@ concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  id-token: write
+permissions: {}
 
 jobs:
-  publish:
-    name: Publish to npm
+  build:
+    name: Build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      name: ${{ steps.plan.outputs.name }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      tarball: ${{ steps.pack.outputs.tarball }}
 
     steps:
+      # Full history: the tag must be an ancestor of main and the release gate
+      # compares the stable commit with the release candidate tag.
       - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-          cache: npm
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Source size gate
-        run: npm run check:max-lines
-
-      - name: TypeScript strict checks
-        run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
-
-      - name: Test suite
-        run: npm test
-
-      - name: Resolve publish metadata
-        id: meta
-        shell: bash
+      - name: Require the tagged commit to be on main
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./package.json').version")"
-          NAME="$(node -p "require('./package.json').name")"
-
-          if [[ "$VERSION" == *"-beta"* ]]; then
-            AUTO_TAG="beta"
-          elif [[ "$VERSION" == *"-rc"* ]]; then
-            AUTO_TAG="rc"
-          else
-            AUTO_TAG="latest"
-          fi
-
-          TAG="$AUTO_TAG"
-          GIT_TAG="${GITHUB_REF#refs/tags/}"
-          if [[ "$GIT_TAG" != "v$VERSION" ]]; then
-            echo "Tag/version mismatch: git tag=$GIT_TAG package.json=$VERSION"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) is not reachable from main. Release from a commit that was merged to main."
             exit 1
           fi
 
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
 
-      - name: Prevent duplicate publish
-        shell: bash
+      - name: Release gate
+        id: plan
+        run: node scripts/release-guard.js
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify
+        run: npm run verify
+
+      # `npm pack` runs prepack: a clean build without source maps.
+      - name: Pack
+        id: pack
+        env:
+          NAME: ${{ steps.plan.outputs.name }}
+          VERSION: ${{ steps.plan.outputs.version }}
         run: |
           set -euo pipefail
-          if npm view "${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" version >/dev/null 2>&1; then
-            echo "Version already published: ${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}"
+          mkdir release-pack
+          npm pack --pack-destination release-pack
+          TARBALL="${NAME}-${VERSION}.tgz"
+          test -f "release-pack/${TARBALL}"
+          node scripts/check-pack.js "release-pack/${TARBALL}"
+          (cd release-pack && sha256sum "${TARBALL}" > SHA256SUMS)
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-tarball
+          path: |
+            release-pack/*.tgz
+            release-pack/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download tarball
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-tarball
+          path: release-pack
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify the tarball is the one that was built
+        env:
+          NAME: ${{ needs.build.outputs.name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TARBALL: ${{ needs.build.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          cd release-pack
+          sha256sum --check SHA256SUMS
+          test "$(tar -xOzf "${TARBALL}" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")" = "${NAME}"
+          test "$(tar -xOzf "${TARBALL}" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")" = "${VERSION}"
+
+      # The approval can arrive long after the build: check again that the tag
+      # is still on main and that nobody published this version in the meantime.
+      - name: Re-check tag ancestry and duplicate publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ needs.build.outputs.name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          STATUS="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq .status)"
+          if [[ "$STATUS" != "identical" && "$STATUS" != "behind" ]]; then
+            echo "::error::Tag commit ${GITHUB_SHA} is no longer reachable from main (compare status: ${STATUS})."
+            exit 1
+          fi
+          # Anonymous read: the placeholder token setup-node writes for the
+          # registry must not be sent, or the registry may answer 401.
+          if OUT="$(NPM_CONFIG_USERCONFIG=/dev/null npm view "${NAME}@${VERSION}" version 2>&1)"; then
+            echo "::error::Version already published: ${NAME}@${VERSION}"
+            exit 1
+          elif ! grep -q E404 <<<"$OUT"; then
+            echo "::error::Could not query the registry: ${OUT}"
             exit 1
           fi
 
       - name: Publish diagnostics
-        shell: bash
         run: |
-          set -euo pipefail
           echo "workflow_ref=$GITHUB_WORKFLOW_REF"
-          echo "workflow=$GITHUB_WORKFLOW"
           echo "ref=$GITHUB_REF"
           node -v
           npm -v
 
       - name: Publish package
-        run: npm publish --tag "${{ steps.meta.outputs.tag }}" --access public --provenance
+        env:
+          TARBALL: ${{ needs.build.outputs.tarball }}
+          NPM_TAG: ${{ needs.build.outputs.tag }}
+        run: npm publish "release-pack/${TARBALL}" --tag "${NPM_TAG}" --access public --provenance
 
       - name: Summary
+        env:
+          NAME: ${{ needs.build.outputs.name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          NPM_TAG: ${{ needs.build.outputs.tag }}
         run: |
-          echo "Published: ${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "npm tag: ${{ steps.meta.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published: ${NAME}@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "npm tag: ${NPM_TAG}" >> "$GITHUB_STEP_SUMMARY"

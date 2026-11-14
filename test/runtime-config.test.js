@@ -362,7 +362,7 @@ test('compatibility: a full, valid, non-default config is carried over untouched
         matterRecoveryRequests: [{ deviceId: 'thermostat_18', generation: 2 }], matterUnregisterTimeoutMs: 9000,
         customNames: [{ deviceId: 'light_5', name: 'Lamp' }], scenarioAutoOffDelay: 800, coverStepSize: 10,
         temperatureDefaults: { target: 20, min: 12, max: 30, step: 1 }, devicesSummaryDelay: 4000,
-        mqtt: { enabled: true, broker: 'mqtt://broker.example', port: 1884, username: 'u', password: 'p', clientId: 'c', topicPrefix: 'home/k', qos: 2, retain: false },
+        mqtt: { enabled: true, broker: 'mqtt://broker.example', port: 1884, username: 'u', password: 'p', clientId: 'c', topicPrefix: 'home/k', qos: 2, retain: false, commands: false },
         roomMapping: { enabled: true, rooms: [{ roomName: 'study', devices: [{ deviceId: 'light_5', deviceName: 'Lamp' }] }] },
         domusThermostat: { enabled: false, sensorFreshnessMs: 60000, manualPairs: [{ thermostatOutputId: '18', domusSensorId: '3' }],
             manualCommandPairs: [{ thermostatOutputId: 'thermostat_18', commandThermostatId: '2' }] },

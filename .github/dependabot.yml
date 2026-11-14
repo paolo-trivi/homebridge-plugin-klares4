@@ -11,11 +11,22 @@ updates:
         update-types:
           - version-update:semver-major
     groups:
-      npm-minor-and-patch:
+      # Development dependencies never ship in the package: their minor and patch
+      # updates may auto-merge once CI is green. Runtime dependencies are grouped
+      # apart so that they are always reviewed by a person.
+      npm-dev-minor-and-patch:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      npm-runtime-minor-and-patch:
+        dependency-type: production
         update-types:
           - minor
           - patch
 
+  # Workflow actions are pinned by commit SHA with the version in a trailing
+  # comment (`uses: owner/repo@<sha> # v1.2.3`); Dependabot updates both.
   - package-ecosystem: github-actions
     directory: /
     schedule:
