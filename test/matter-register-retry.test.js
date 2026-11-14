@@ -13,6 +13,7 @@ process.env.KLARES4_MATTER_REGISTER_RETRY_MS = '30';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,6 +36,7 @@ test('a registration refused while the Matter server is starting is retried on a
     await registry.updateAccessoryState(zone(true));
     await delay(60);
     assert.deepEqual(hb.log, []);
+    await waitFor(() => registry.getStatus('zone_4') === 'registered');
     assert.equal(registry.getStatus('zone_4'), 'registered');
     assert.equal(hb.endpoints.get('zone_4').deviceType.name, 'ContactSensor');
 });

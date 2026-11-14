@@ -12,6 +12,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '10';
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { buildThermostatMatterState } = require('../dist/platform/matter-thermostat-mapper.js');
 const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,6 +51,7 @@ async function setup(device, ws = wsClient()) {
     const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => ws, storagePath: storage() });
     await registry.addOrUpdateAccessory(device);
     await delay(60);
+    await waitFor(() => registry.getStatus('thermostat_3') === 'registered');
     assert.equal(registry.getStatus('thermostat_3'), 'registered');
     const invoke = (command, args) => hb.invoke('thermostat_3', 'thermostat', command, args);
     return { hb, registry, ws, invoke };
