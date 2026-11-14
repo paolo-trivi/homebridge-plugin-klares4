@@ -10,7 +10,9 @@
         "release:dry-run": "npm publish --tag rc --dry-run",
         "release:rc": "npm publish --tag rc",
         "release:beta": "npm publish --tag beta",
-        "test": "npm run build && node --test $(find test -name '*.test.js' -print)",
+        "test": "npm run build && node --test --test-timeout=30000 $(find test -name '*.test.js' -print)",
+        "test:contract": "npm run build && node --test --test-timeout=60000 test/matter-real-stack-contract.test.js",
+        "test:coverage": "npm run build && node --test --test-timeout=30000 --enable-source-maps --experimental-test-coverage --test-coverage-exclude='test/**' $(find test -name '*.test.js' -print)",
         "prepublishOnly": "npm run build"
     },
     "keywords": [
