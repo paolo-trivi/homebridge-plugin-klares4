@@ -128,7 +128,7 @@ test('STATUS_SYSTEM does not overwrite thermostat when mapped DOMUS sensor is fr
   assert.equal(thermostat.status.currentTemperature, 22);
 });
 
-test('STATUS_SYSTEM applies fallback when mapping is missing or stale', () => {
+test('STATUS_SYSTEM applies fallback only when the thermostat has no source (TH-03: a silent sensor is a stable room)', () => {
   const state = createInitialWebSocketClientState({
     enabled: true,
     manualPairs: [],
@@ -150,7 +150,7 @@ test('STATUS_SYSTEM applies fallback when mapping is missing or stale', () => {
 
   updater.updateSystemTemperatures([{ ID: '1', TEMP: { IN: '19.0', OUT: 'NA' } }]);
 
-  assert.equal(mappedThermostat.status.currentTemperature, 19);
+  assert.equal(mappedThermostat.status.currentTemperature, 23);
   assert.equal(unmappedThermostat.status.currentTemperature, 19);
 });
 

@@ -5,10 +5,14 @@ import type {
     KseniaOutputData,
     KseniaScenarioData,
     KseniaZoneData,
+    OutputOptIn,
+    ScenarioOptIn,
 } from '../types';
 import { normalizeDeviceName } from '../websocket/device-state-projector';
-import { parseOutputData, parseZoneData } from './device-parsers';
+import { resolveOutputExposure } from '../websocket/output-classifier';
+import { outputOptInTypes, parseOutputData, parseZoneData, scenarioOptInIds } from './device-parsers';
 import { adoptDiscoveredDevice } from './discovered-device';
+import { ExposureReport, replaceHiddenDevices, type ReadFindings } from './exposure-report';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { forEachIsolated } from '../isolation';
 import { discoverScenarios } from './scenario-discovery';
@@ -20,6 +24,10 @@ export interface DiscoveryReadHandlerDeps {
     state: WebSocketClientState;
     log: Logger;
     exposePartialArmScenarios?: boolean;
+    /** Outputs of an unrecognized category to expose anyway (`exposeOutputs`). */
+    exposeOutputs?: readonly OutputOptIn[];
+    /** Scenarios of an unrecognized category to expose anyway (`exposeScenarios`). */
+    exposeScenarios?: readonly ScenarioOptIn[];
     statusUpdater: StatusUpdater;
     thermostats: ThermostatReadHandler;
     emitDeviceDiscovered: (device: KseniaDevice) => void;
@@ -29,9 +37,15 @@ export interface DiscoveryReadHandlerDeps {
  * Device discovery from the configuration reads: zones (`ZONES`) and the
  * outputs, scenarios and BUS sensors of `MULTI_TYPES`. Every discovered
  * device gets any status that arrived before it (pending statuses).
+ * Outputs and scenarios go through the fail-closed exposure policy: what it
+ * hides never enters `state.devices`, so it is neither exposed nor commanded.
  */
 export class DiscoveryReadHandler {
-    constructor(private readonly deps: DiscoveryReadHandlerDeps) {}
+    private readonly report: ExposureReport;
+
+    constructor(private readonly deps: DiscoveryReadHandlerDeps) {
+        this.report = new ExposureReport(deps.log);
+    }
 
     public handleZones(zones: KseniaZoneData[]): void {
         this.deps.log.info(`Found ${zones.length} zones`);
@@ -44,24 +58,54 @@ export class DiscoveryReadHandler {
 
     public handleOutputs(outputs: KseniaOutputData[]): void {
         this.deps.log.info(`Found ${outputs.length} outputs`);
+        const optIns = outputOptInTypes(this.deps.exposeOutputs);
+        const findings: ReadFindings = { hidden: [], ignoredOptIns: [], pinFlagged: [] };
+        const listed = new Set<string>();
         forEachIsolated(this.deps.log, 'READ_RES/MULTI_TYPES OUTPUTS output', outputs, (output: KseniaOutputData): void => {
+            const panelId = String(output.ID);
+            listed.add(panelId);
             this.deps.thermostats.recordOutput(output);
-            const parsed = parseOutputData(output);
-            if (parsed) {
-                const device = adoptDiscoveredDevice(this.deps.state.devices, parsed);
-                this.deps.emitDeviceDiscovered(device);
-                this.deps.statusUpdater.applyPendingOutputStatus(output.ID);
+            const exposure = resolveOutputExposure(output, optIns);
+            if (!exposure.exposed) {
+                const name = normalizeDeviceName(output.DES) || `Output ${panelId}`;
+                findings.hidden.push({
+                    deviceId: `light_${panelId}`,
+                    kind: 'output',
+                    panelId,
+                    name,
+                    category: exposure.category,
+                    ...(exposure.mode ? { mode: exposure.mode } : {}),
+                    optInAllowed: true,
+                });
+                this.deps.log.debug(`Output ${name} not exposed: category ${exposure.category || 'none'} is not recognized`);
+                return;
             }
+            if (exposure.source === 'category' && optIns.has(panelId)) {
+                findings.ignoredOptIns.push(`exposeOutputs: output ${panelId} is exposed as ${exposure.type} without it`);
+            }
+            const device = adoptDiscoveredDevice(this.deps.state.devices, parseOutputData(output));
+            if (device.type === 'thermostat') this.deps.thermostats.applyOutputRole(device);
+            this.deps.emitDeviceDiscovered(device);
+            this.deps.statusUpdater.applyPendingOutputStatus(output.ID);
         });
+        for (const panelId of optIns.keys()) {
+            if (!listed.has(panelId)) findings.ignoredOptIns.push(`exposeOutputs: output ${panelId} is not listed by the panel`);
+        }
+        replaceHiddenDevices(this.deps.state, 'output', findings.hidden);
+        this.report.recordOutputs(findings);
     }
 
     public handleScenarios(scenarios: KseniaScenarioData[]): void {
-        discoverScenarios(scenarios, {
+        const findings = discoverScenarios(scenarios, {
             state: this.deps.state,
             log: this.deps.log,
             exposePartialArmScenarios: this.deps.exposePartialArmScenarios,
+            optInIds: scenarioOptInIds(this.deps.exposeScenarios),
             onDeviceDiscovered: (device): void => this.deps.emitDeviceDiscovered(device),
         });
+        replaceHiddenDevices(this.deps.state, 'scenario', findings.hidden);
+        this.report.recordScenarios(findings);
+        this.report.flush();
     }
 
     public handleBusSensors(sensors: KseniaBusHaData[]): void {
@@ -99,5 +143,7 @@ export class DiscoveryReadHandler {
             this.deps.emitDeviceDiscovered(lightDevice);
             this.deps.statusUpdater.applyPendingSensorStatus(normalizedSensorId);
         });
+        // A MULTI_TYPES read without SCENARIOS: report the outputs here.
+        this.report.flush();
     }
 }

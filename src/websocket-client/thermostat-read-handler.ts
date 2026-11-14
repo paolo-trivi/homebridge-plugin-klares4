@@ -7,8 +7,11 @@ import type {
     KseniaProgramThermostatRaw,
 } from '../types';
 import { determineOutputType, outputCategory } from '../websocket/output-classifier';
+import { stripDevicePrefix } from '../device-id';
+import { deriveThermostatOutputRole } from '../thermostat-role';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
+import { handleCfgChangeNotification, recordCfgRead } from './thermostat-cfg-freshness';
 import { applyThermostatConfigSnapshot } from './thermostat-config-sync';
 import type { ThermostatStatusUpdater } from './thermostat-status-updater';
 import type { WebSocketClientState } from './types';
@@ -25,7 +28,8 @@ export interface ThermostatReadHandlerDeps {
 /**
  * Thermostat side of the discovery reads: thermostat outputs of MULTI_TYPES,
  * `PRG_THERMOSTATS` (programs: output ↔ cfg id ↔ DOMUS sensor),
- * `CFG_THERMOSTATS` (cfg cache used by writes) and the cfg → status sync.
+ * `CFG_THERMOSTATS` (cfg cache used by writes), the cfg → status sync and the
+ * panel's cfg change notifications.
  */
 export class ThermostatReadHandler {
     constructor(private readonly deps: ThermostatReadHandlerDeps) {}
@@ -45,11 +49,17 @@ export class ThermostatReadHandler {
     /** Called once a MULTI_TYPES read has been fully processed. */
     public afterMultiTypes(): void {
         this.refreshDomusThermostatMapping();
-        this.applyThermostatConfigSnapshot();
+        this.applyOutputRoles();
         this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
     }
 
-    public handleCfgThermostats(entries: unknown[]): void {
+    /**
+     * Only the cfg entries of this response are applied to the thermostats'
+     * state: a cfg cached by an earlier session is never replayed over it.
+     * `prgCheck` is the response's `PRG_CHECK`, the panel's change counter.
+     */
+    public handleCfgThermostats(entries: unknown[], prgCheck?: unknown): void {
+        const readIds = new Set<string>();
         for (const entry of entries) {
             if (!entry || typeof entry !== 'object') {
                 continue;
@@ -59,21 +69,41 @@ export class ThermostatReadHandler {
                 continue;
             }
             this.deps.state.thermostatCfgById.set(thermostatId, entry as Record<string, unknown>);
+            readIds.add(thermostatId);
         }
+        recordCfgRead(this.deps.state, [...readIds], prgCheck);
         if (this.deps.logLevel >= LogLevel.DEBUG) {
             this.deps.log.debug(
                 `Cached thermostat configs: ${this.deps.state.thermostatCfgById.size}`,
             );
         }
-        this.applyThermostatConfigSnapshot();
+        applyThermostatConfigSnapshot({
+            state: this.deps.state,
+            emitDeviceStatusUpdate: (device): void => this.deps.emitDeviceStatusUpdate(device),
+            cfgIds: readIds,
+        });
         this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
     }
 
     public handlePrgThermostats(entries: KseniaProgramThermostatRaw[]): void {
         this.cacheProgramThermostats(entries);
         this.refreshDomusThermostatMapping();
-        this.applyThermostatConfigSnapshot();
+        this.applyOutputRoles();
         this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
+    }
+
+    /**
+     * NOT_MASK_UNSOLICITED / NM_CHANGES (`PAYLOAD.PRG_CHECK`), sent by the panel
+     * about a second after a cfg change. Drops the cfg cache when the change
+     * was not ours, so the next write reads the cfg again.
+     */
+    public handleChangeNotification(payload: unknown): void {
+        const prgCheck = payload && typeof payload === 'object'
+            ? (payload as Record<string, unknown>).PRG_CHECK
+            : undefined;
+        if (handleCfgChangeNotification(this.deps.state, prgCheck)) {
+            this.deps.log.debug('Panel configuration changed elsewhere: thermostat cfg cache cleared');
+        }
     }
 
     /** Debug trace of the initial STATUS_OUTPUTS entries that belong to a thermostat. */
@@ -125,10 +155,28 @@ export class ThermostatReadHandler {
         }
     }
 
-    private applyThermostatConfigSnapshot(): void {
-        applyThermostatConfigSnapshot({
-            state: this.deps.state,
-            emitDeviceStatusUpdate: (device): void => this.deps.emitDeviceStatusUpdate(device),
-        });
+    /**
+     * `status.outputRole` of a thermostat from the program that names its
+     * output (`HEATING_OUT` / `COOLING_OUT`), else from the panel's own output
+     * name. Called before a thermostat is announced, so Matter registers it
+     * with its role when the programs are already known (`.ksa` cache, re-login).
+     * Returns whether the role changed.
+     */
+    public applyOutputRole(device: KseniaDevice): boolean {
+        if (device.type !== 'thermostat') return false;
+        const outputId = stripDevicePrefix(device.id);
+        const state = this.deps.state;
+        const programId = state.thermostatProgramIdByOutputId.get(outputId);
+        const program = programId === undefined ? undefined : state.thermostatProgramById.get(programId);
+        const role = deriveThermostatOutputRole(outputId, program, state.thermostatOutputs.get(outputId)?.DES);
+        if (role === undefined || role === device.status.outputRole) return false;
+        device.status.outputRole = role;
+        return true;
+    }
+
+    private applyOutputRoles(): void {
+        for (const device of this.deps.state.devices.values()) {
+            if (this.applyOutputRole(device)) this.deps.emitDeviceStatusUpdate(device);
+        }
     }
 }

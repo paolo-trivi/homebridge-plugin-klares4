@@ -6,7 +6,9 @@
  *
  * The output is an *intersection* of three constraints:
  *
- *  - Matter spec §1.7.7.1 — nodeLabel/Basic.nodeLabel: UTF-8 string, max 32 chars.
+ *  - Matter spec §1.7.7.1 — nodeLabel/Basic.nodeLabel: string, max 32. Homebridge
+ *    and matter.js count it in UTF-16 code units (see `NameLengthUnit`), and
+ *    Homebridge cuts a longer displayName at 32 units, possibly mid-character.
  *  - HAP-NodeJS `checkName` rule (Apple HomeKit naming guidance):
  *      ^[\p{L}\p{N}][\p{L}\p{N}’ '.,-]*[\p{L}\p{N}’]$
  *  - Empirical Alexa/Google tolerance — both controllers happily accept the
@@ -20,12 +22,17 @@
 
 import { cleanDisplayName, truncateDisplayName } from '../display-name';
 
+/** In UTF-16 code units, like `string.length`. */
 const MAX_NAME_LENGTH = 32;
+
+function truncate(name: string, maxLength: number): string {
+    return truncateDisplayName(name, maxLength, 'utf16');
+}
 
 export function isValidMatterAccessoryName(name: string): boolean {
     return typeof name === 'string'
         && name.length > 0
-        && Array.from(name).length <= MAX_NAME_LENGTH
+        && name.length <= MAX_NAME_LENGTH
         && /^[\p{L}\p{N}][\p{L}\p{N}’ '.,-]*$/u.test(name)
         && name.normalize('NFKC') === name;
 }
@@ -40,13 +47,13 @@ export function sanitizeMatterAccessoryName(name: string, fallback = 'Device'): 
 }
 
 function clean(raw: string): string {
-    return cleanDisplayName(raw, MAX_NAME_LENGTH);
+    return cleanDisplayName(raw, MAX_NAME_LENGTH, 'utf16');
 }
 
 /**
  * Italian, HomeKit-safe collision suffix per Lares4 device type.
- * Abbreviations chosen so even the longest sanitised name (32 chars) + suffix
- * stays within the 32-char Matter limit when the head is itself reasonable.
+ * Abbreviations chosen so even the longest sanitised name (32 units) + suffix
+ * stays within the 32-unit Matter limit when the head is itself reasonable.
  * For pathologically long names the head is truncated, never the suffix.
  */
 const TYPE_SUFFIX: Record<string, string> = {
@@ -62,9 +69,9 @@ const TYPE_SUFFIX: Record<string, string> = {
 /**
  * Priority: higher = retains the clean name on collision.
  * User-controllable devices (cover, light, thermostat, gate, scenario)
- * outrank passive sensors (zone, sensor) — so a "Finestra Cucina" cover
+ * outrank passive sensors (zone, sensor) — so a "Vetrata Nord" cover
  * keeps the clean label while the matching contact-sensor zone gets
- * "Finestra Cucina - Sens.".
+ * "Vetrata Nord - Sens.".
  */
 const TYPE_PRIORITY: Record<string, number> = {
     cover: 10,
@@ -85,8 +92,8 @@ const SUFFIX_SEPARATOR = ' - ';
 
 function nameAlreadyMentions(name: string, suffix: string): boolean {
     // Treat the suffix as a *root*: strip any trailing "." so "Tapp." → "Tapp",
-    // and match it at any word boundary. This way "Tapparella Studio" is
-    // recognised as already mentioning "Tapp.", and "Termostato Sala" as
+    // and match it at any word boundary. This way "Tapparella Ovest" is
+    // recognised as already mentioning "Tapp.", and "Termostato Nord" as
     // already mentioning "Term.". Avoids redundant " - Tapp." / " - Term."
     // tags on names that already describe their own type.
     const root = suffix.replace(/\.$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -103,7 +110,7 @@ export function buildTypedSuffix(name: string, deviceType: string | undefined): 
     const tail = `${SUFFIX_SEPARATOR}${suffix}`;
     const maxNameLen = MAX_NAME_LENGTH - tail.length;
     if (maxNameLen <= 0) return null;
-    const head = truncateDisplayName(name, maxNameLen);
+    const head = truncate(name, maxNameLen);
     if (!head) return null;
     return `${head}${tail}`;
 }
@@ -113,8 +120,8 @@ export function buildUuidFallbackSuffix(name: string, uuid: string, tagLength = 
     const tag = compactId.slice(-tagLength) || 'id';
     const tail = `${SUFFIX_SEPARATOR}${tag}`;
     const maxNameLen = MAX_NAME_LENGTH - tail.length;
-    if (maxNameLen <= 0) return truncateDisplayName(name, MAX_NAME_LENGTH);
-    const head = truncateDisplayName(name, maxNameLen);
+    if (maxNameLen <= 0) return truncate(name, MAX_NAME_LENGTH);
+    const head = truncate(name, maxNameLen);
     return `${head}${tail}`;
 }
 
@@ -139,7 +146,7 @@ export function buildFullIdFallbackName(base: string, uuid: string, isFree: (can
     const tag = Array.from(compactId).slice(-(MAX_NAME_LENGTH - 10)).join('');
     for (let sequence = 2; ; sequence += 1) {
         const tail = ` ${sequence}${SUFFIX_SEPARATOR}${tag}`;
-        const candidate = `${truncateDisplayName(base, Math.max(0, MAX_NAME_LENGTH - Array.from(tail).length))}${tail}`.trim();
+        const candidate = `${truncate(base, Math.max(0, MAX_NAME_LENGTH - tail.length))}${tail}`.trim();
         if (isFree(candidate)) return candidate;
     }
 }

@@ -11,6 +11,19 @@ function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
 }
 
+// MAT-04: rename goes in place first. These tests cover the fallback, taken
+// only when the endpoint does not show the new label.
+function fallbackCoordinator(unregister) {
+    return {
+        readNodeLabel: async () => undefined,
+        readUniqueId: async () => undefined,
+        renameInPlace: async () => false,
+        updateCachedRecord: async () => {},
+        restoreUniqueId: async () => true,
+        unregister,
+    };
+}
+
 /**
  * Two devices both need a rename. The first one's unregister rejects — the
  * production failure mode where Homebridge throws on the `{ UUID }` stub. The
@@ -40,14 +53,12 @@ test('a failing rename does not abort the rest of the batch', async (t) => {
 
     const renamed = [];
     await finalizeMatterNameMap(devices, {
-        topologyCoordinator: {
-            unregister: async (uuid) => {
-                if (uuid === 'zone_18') {
-                    throw new TypeError("Cannot read properties of undefined (reading 'deviceType')");
-                }
-                return true;
-            },
-        },
+        topologyCoordinator: fallbackCoordinator(async (uuid) => {
+            if (uuid === 'zone_18') {
+                throw new TypeError("Cannot read properties of undefined (reading 'deviceType')");
+            }
+            return true;
+        }),
         log,
         nameService: new MatterNameService(storage, log),
         registrations,
@@ -75,7 +86,7 @@ test('an unobservable unregister skips that device without throwing', async (t) 
 
     const renamed = [];
     await finalizeMatterNameMap(devices, {
-        topologyCoordinator: { unregister: async () => false },
+        topologyCoordinator: fallbackCoordinator(async () => false),
         log,
         nameService: new MatterNameService(storage, log),
         registrations,

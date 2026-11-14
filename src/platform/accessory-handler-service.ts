@@ -7,16 +7,7 @@ import { ScenarioAccessory } from '../accessories/scenario-accessory';
 import { SensorAccessory } from '../accessories/sensor-accessory';
 import { ThermostatAccessory } from '../accessories/thermostat-accessory';
 import { ZoneAccessory } from '../accessories/zone-accessory';
-import type {
-    KseniaCover,
-    KseniaDevice,
-    KseniaGate,
-    KseniaLight,
-    KseniaScenario,
-    KseniaSensor,
-    KseniaThermostat,
-    KseniaZone,
-} from '../types';
+import type { KseniaDevice } from '../types';
 import type { Lares4Platform } from './index';
 import type { AccessoryHandler } from './types';
 
@@ -58,7 +49,7 @@ export class AccessoryHandlerService {
                 this.log.debug(`Created handler for thermostat: ${device.name}`);
                 break;
             case 'scenario':
-                handler = new ScenarioAccessory(this.platform, accessory, device as KseniaScenario);
+                handler = new ScenarioAccessory(this.platform, accessory, device);
                 this.log.debug(`Created handler for scenario: ${device.name}`);
                 break;
             default:
@@ -69,38 +60,29 @@ export class AccessoryHandlerService {
         return handler;
     }
 
+    /** Hands the new state of a device to its handler; a handler of another kind is left alone. */
     public updateAccessoryHandler(handler: AccessoryHandler, device: KseniaDevice): void {
-        if (
-            device.type === 'gate' &&
-            'updateDevice' in handler &&
-            typeof handler.updateDevice === 'function'
-        ) {
-            handler.updateDevice(device as KseniaGate);
-            return;
-        }
-
-        if (!('updateStatus' in handler) || typeof handler.updateStatus !== 'function') {
-            return;
-        }
-
         switch (device.type) {
             case 'light':
-                (handler as LightAccessory).updateStatus(device as KseniaLight);
+                if (handler instanceof LightAccessory) handler.updateStatus(device);
                 break;
             case 'cover':
-                (handler as CoverAccessory).updateStatus(device as KseniaCover);
+                if (handler instanceof CoverAccessory) handler.updateStatus(device);
                 break;
             case 'thermostat':
-                (handler as ThermostatAccessory).updateStatus(device as KseniaThermostat);
+                if (handler instanceof ThermostatAccessory) handler.updateStatus(device);
                 break;
             case 'sensor':
-                (handler as SensorAccessory).updateStatus(device as KseniaSensor);
+                if (handler instanceof SensorAccessory) handler.updateStatus(device);
                 break;
             case 'zone':
-                (handler as ZoneAccessory).updateStatus(device as KseniaZone);
+                if (handler instanceof ZoneAccessory) handler.updateStatus(device);
+                break;
+            case 'gate':
+                if (handler instanceof GateAccessory) handler.updateDevice(device);
                 break;
             case 'scenario':
-            case 'gate':
+                if (handler instanceof ScenarioAccessory) handler.updateDevice(device);
                 break;
         }
     }

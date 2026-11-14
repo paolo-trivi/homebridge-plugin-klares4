@@ -5,15 +5,16 @@
     "main": "dist/index.js",
     "scripts": {
         "build": "tsc",
+        "prebuild": "node scripts/clean-dist.js",
+        "build:release": "npm run build -- --sourceMap false",
         "check:max-lines": "node scripts/check-max-lines.js src 350",
+        "check:pack": "node scripts/check-pack.js",
         "verify": "npm run check:max-lines && npx tsc --noEmit --noUnusedLocals --noUnusedParameters && npm test",
         "release:dry-run": "npm publish --tag rc --dry-run",
-        "release:rc": "npm publish --tag rc",
-        "release:beta": "npm publish --tag beta",
         "test": "npm run build && node --test --test-timeout=30000 $(find test -name '*.test.js' -print)",
         "test:contract": "npm run build && node --test --test-timeout=60000 test/matter-real-stack-contract.test.js",
-        "test:coverage": "npm run build && node --test --test-timeout=30000 --enable-source-maps --experimental-test-coverage --test-coverage-exclude='test/**' $(find test -name '*.test.js' -print)",
-        "prepublishOnly": "npm run build"
+        "test:coverage": "npm run build && node --test --test-timeout=30000 --enable-source-maps --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='scripts/**' --test-coverage-lines=92 --test-coverage-branches=87 --test-coverage-functions=93 $(find test -name '*.test.js' -print)",
+        "prepack": "npm run build:release"
     },
     "keywords": [
         "homebridge-plugin",
@@ -35,7 +36,6 @@
         "homebridge": "^1.6.0 || ^2.0.0-beta.0"
     },
     "dependencies": {
-        "@sentry/node": "^11.12.0",
         "mqtt": "^5.3.4",
         "ws": "^8.14.2"
     },
@@ -60,6 +60,7 @@
     "homepage": "https://github.com/paolo-trivi/homebridge-plugin-klares4#readme",
     "files": [
         "dist",
+        "!dist/**/*.map",
         "config.schema.json",
         "README.md",
         "CHANGELOG.md",

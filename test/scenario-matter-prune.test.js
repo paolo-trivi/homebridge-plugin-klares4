@@ -34,7 +34,11 @@ test('F43: the client reports which scenarios the arming policy suppresses', () 
 test('F43: a suppressed scenario is not Matter-eligible, so its cached endpoint is pruned', () => {
     const platform = Object.create(Lares4Platform.prototype);
     platform.wsClient = clientWithScenarios();
-    platform.discoveryService = { resolveMatterPolicy: () => ({ exposed: true }) };
+    // As the platform wires it: the client's arming policy reaches Matter through DiscoveryService.
+    const { DiscoveryService } = require('../dist/platform/discovery-service.js');
+    const { clientExposurePolicy } = require('../dist/platform/client-options.js');
+    platform.discoveryService = new DiscoveryService({ platform: 'x' }, log);
+    platform.discoveryService.attachExposurePolicy(clientExposurePolicy(platform.wsClient));
     const scenario = (id) => ({ id, type: 'scenario', name: 'x', status: {} });
     assert.equal(platform['isMatterEligible'](scenario('scenario_3')), false);
     assert.equal(platform['isMatterEligible'](scenario('scenario_5')), true);

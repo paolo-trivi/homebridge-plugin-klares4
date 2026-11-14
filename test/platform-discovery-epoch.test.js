@@ -30,8 +30,8 @@ const count = (log, pattern) => log.lines.filter((line) => pattern.test(line)).l
 const syncs = (log) => count(log, /Initial synchronization completed/);
 const matterPasses = (log) => count(log, /\[Matter\] (cycle #\d+|Prune skipped for this sync)/);
 
-async function session(t, { failReads = [], matter = true, cached = [] } = {}) {
-    const panel = await startMockPanel({ data: { SCENARIOS }, failReads });
+async function session(t, { failReads = [], matter = true, cached = [], data = {} } = {}) {
+    const panel = await startMockPanel({ data: { SCENARIOS, ...data }, failReads });
     t.after(() => panel.close());
     const hb = matter ? makeHbMatterApi() : undefined;
     const { platform, api, log } = createPlatform(t, { port: panel.port, matter: hb?.api.matter });
@@ -136,10 +136,67 @@ test('a reconnect with an unchanged panel removes nothing', async (t) => {
     assert.equal(count(log, /Missing (candidate|accessory)/), 0);
 });
 
-test.todo('PLAT-04 / MAT-02 (F1): matter-prune-tracker needs the per-family guard of hap-prune-policy; '
-    + 'until then SyncLifecycle skips the whole Matter prune of a sync in which a known family is silent');
-test.todo('MAT-02 (F1): endpoints restored from the Matter cache and never registered in this session are never '
-    + 'pruned (third pass over cached, exposed, undiscovered endpoints)');
-test.todo('PLAT-04 (F1): a system temperature probe reporting NA must not count as missing');
-test.todo('PLAT-02 (F1): AccessoryRegistry.addAccessory leaves the handler of an accessory HAP refused '
-    + '(bridge limit) in accessoryHandlers');
+test('PLAT-04 / MAT-02: a silent family protects only its own devices; the others are still pruned on Matter', async (t) => {
+    const { panel, hb, log, reconnect } = await session(t);
+    panel.data.ZONES = [{ ID: '1', DES: 'Zone One' }, { ID: '2', DES: 'Zone Two' }];
+    await reconnect();
+    await waitFor(() => hb.endpoints.has('zone_2') && hb.endpoints.has('scenario_1'));
+
+    // zone_2 deleted on the panel while MULTI_TYPES (outputs, scenarios, DOMUS) reports nothing.
+    // A refused MULTI_TYPES no longer completes a sync (WS-05): the sections are left out instead.
+    panel.data.ZONES = [{ ID: '1', DES: 'Zone One' }];
+    panel.data = { ...panel.data, OUTPUTS: undefined, SCENARIOS: undefined, BUS_HAS: undefined };
+    for (let i = 0; i < 3; i += 1) await reconnect();
+    await waitFor(() => hb.unregisterCalls.includes('zone_2'));
+    assert.deepEqual(hb.unregisterCalls, ['zone_2'], 'scenarios, whose family did not answer, stay');
+    assert.equal(count(log, /Prune skipped for this sync/), 0, 'the whole-prune skip is gone');
+});
+
+test('MAT-02: an endpoint restored from the Matter cache and not on the panel any more is pruned after 3 syncs', async (t) => {
+    const cachedScenario = { id: 'scenario_7', type: 'scenario', name: 'Old Scenario', description: '', status: { active: false } };
+    const hb = makeHbMatterApi({ restored: [{
+        UUID: 'scenario_7', displayName: 'Old Scenario', deviceType: { name: 'OnOffLightSwitch', deviceType: 259, behaviors: { onOff: {} } },
+        clusters: { onOff: { onOff: false } },
+    }] });
+    const panel = await startMockPanel({ data: { SCENARIOS } });
+    t.after(() => panel.close());
+    const { platform, api, log } = createPlatform(t, { port: panel.port, matter: hb.api.matter });
+    platform.configureMatterAccessory({ UUID: 'scenario_7', displayName: 'Old Scenario', deviceType: hb.api.matter.deviceTypes.OnOffSwitch, context: { device: cachedScenario } });
+    api.emit('didFinishLaunching');
+    await waitFor(() => matterPasses(log) === 1);
+    for (let i = 0; i < 2; i += 1) {
+        const m = matterPasses(log);
+        panel.dropConnections();
+        await waitFor(() => matterPasses(log) === m + 1);
+    }
+    await waitFor(() => hb.unregisterCalls.includes('scenario_7'));
+    assert.ok(!hb.endpoints.has('scenario_7'));
+    assert.equal(count(log, /Missing candidate: Old Scenario .* [12]\/3/), 2);
+});
+
+test('PLAT-04: a system temperature probe reporting NA never counts as missing', async (t) => {
+    const probe = { id: 'sensor_system_temp_out', type: 'sensor', name: 'Outdoor probe', description: '', status: { sensorType: 'temperature', value: 9, unit: 'C' } };
+    const { api, log, reconnect } = await session(t, {
+        matter: false, cached: [probe], data: { STATUS_SYSTEM: [{ ID: '1', TEMP: { IN: '22.0', OUT: 'NA' } }] },
+    });
+    for (let i = 0; i < 3; i += 1) await reconnect();
+    assert.equal(count(log, /Outdoor probe — absent for/), 0);
+    assert.ok(!api.unregistered.includes('sensor_system_temp_out'));
+});
+
+test('PLAT-02: an accessory HAP refused (bridge limit) leaves no handler behind', async (t) => {
+    const panel = await startMockPanel({ data: { SCENARIOS } });
+    t.after(() => panel.close());
+    const refused = hap.uuid.generate('light_6');
+    const { platform, api, log } = createPlatform(t, {
+        port: panel.port,
+        onRegister: (accessories) => {
+            if (accessories.some((a) => a.UUID === refused)) throw new Error('Cannot Bridge more than 149 Accessories');
+        },
+    });
+    api.emit('didFinishLaunching');
+    await waitFor(() => syncs(log) === 1);
+    assert.ok(api.registered.includes('light_5'));
+    assert.equal(platform.accessories.has(refused), false);
+    assert.equal(platform.accessoryHandlers.has(refused), false);
+});

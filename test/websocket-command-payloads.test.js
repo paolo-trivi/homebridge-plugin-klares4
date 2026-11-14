@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 
 const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
 const { calculateCRC16 } = require('../dist/websocket-client/crc16.js');
+const { seedDevices } = require('./fixtures/command-client.js');
 
 const SYNTHETIC_PIN = '135790';
 const silentLog = () => ({ info() {}, warn() {}, error() {}, debug() {}, success() {} });
@@ -22,6 +23,8 @@ function loggedInClient() {
     const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', SYNTHETIC_PIN, silentLog(), { commandTimeoutMs: 200 });
     client['state'].idLogin = '77';
     client['state'].ws = { readyState: 1 };
+    // Commands only reach discovered outputs (WS-01 defense in depth).
+    seedDevices(client, ['light_12', 'cover_4']);
     const sent = [];
     client['wsTransport'].send = async (_ws, raw) => {
         const m = JSON.parse(raw);
@@ -62,6 +65,7 @@ test('LOGIN and CMD_USR frames are logged without the PIN (string and numeric)',
         const { log, lines } = recordingLog();
         const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', pin, log, { logLevel: 2, debug: true });
         client['state'].ws = { readyState: 1 };
+        seedDevices(client, ['gate_3']);
         const sent = [];
         client['wsTransport'].send = async (_ws, raw) => {
             const m = JSON.parse(raw);

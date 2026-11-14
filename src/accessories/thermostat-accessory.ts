@@ -8,7 +8,7 @@ import {
     domainModeToHomeKitTarget,
     homeKitTargetToDomainMode,
 } from '../thermostat-mode';
-import { syncThermostatTopLevelFromStatus, updateThermostatStatus } from '../thermostat-state';
+import { syncThermostatTopLevelFromStatus } from '../thermostat-state';
 
 /**
  * Thermostat Accessory Handler
@@ -79,7 +79,12 @@ export class ThermostatAccessory {
         const tempDefaults = (this.platform.config as Lares4Config).temperatureDefaults ?? {};
         this.tempMin = tempDefaults.min ?? 10;
         this.tempMax = tempDefaults.max ?? 38;
-        this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).setProps({
+        // hap-nodejs checks the value it holds against the new limits: move it
+        // inside both the default (10..38) and the configured ones first.
+        const targetCharacteristic = this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature);
+        const held = Number(targetCharacteristic.value);
+        targetCharacteristic.updateValue(Math.max(Math.max(this.tempMin, 10), Math.min(Math.min(this.tempMax, 38), held)));
+        targetCharacteristic.setProps({
             minValue: this.tempMin,
             maxValue: this.tempMax,
             minStep: tempDefaults.step ?? 0.5,
@@ -103,8 +108,9 @@ export class ThermostatAccessory {
             if (!this.platform.wsClient) {
                 throw new Error('WebSocket client not initialized');
             }
+            // The client updates the shared state once the panel acknowledged
+            // it, and tells HomeKit, Matter and MQTT through its status event.
             await this.platform.wsClient.setThermostatMode(this.device.id, newMode);
-            updateThermostatStatus(this.device, { mode: newMode });
 
             this.platform.log.info(`${this.device.name}: Mode ${newMode}`);
         } catch (error: unknown) {
@@ -148,18 +154,28 @@ export class ThermostatAccessory {
             );
             return defaultTemp;
         }
-        return this.device.targetTemperature;
+        return this.clampTarget(this.device.targetTemperature);
     }
 
+    /**
+     * Reached by HomeKit (already held to the characteristic's limits) and by
+     * MQTT commands: a setpoint outside temperatureDefaults.min/max is refused.
+     */
     public async setTargetTemperature(value: CharacteristicValue): Promise<void> {
         const targetTemperature = value as number;
+        if (typeof targetTemperature !== 'number' || !Number.isFinite(targetTemperature)
+            || targetTemperature < this.tempMin || targetTemperature > this.tempMax) {
+            this.platform.log.warn(
+                `${this.device.name}: setpoint ${String(value)} refused, outside ${this.tempMin}..${this.tempMax} (temperatureDefaults)`,
+            );
+            throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.INVALID_VALUE_IN_REQUEST);
+        }
 
         try {
             if (!this.platform.wsClient) {
                 throw new Error('WebSocket client not initialized');
             }
             await this.platform.wsClient.setThermostatTemperature(this.device.id, targetTemperature);
-            updateThermostatStatus(this.device, { targetTemperature });
 
             this.platform.log.info(`${this.device.name}: Target temperature ${targetTemperature}C`);
         } catch (error: unknown) {
@@ -217,11 +233,12 @@ export class ThermostatAccessory {
 
         const defaultTemp =
             (this.platform.config as Lares4Config).temperatureDefaults?.target ?? 21;
-        const targetTemp =
+        const targetTemp = this.clampTarget(
             this.device.targetTemperature !== undefined &&
                 this.device.targetTemperature !== null
                 ? this.device.targetTemperature
-                : defaultTemp;
+                : defaultTemp,
+        );
 
         this.service.updateCharacteristic(
             this.platform.Characteristic.CurrentTemperature,
@@ -253,7 +270,7 @@ export class ThermostatAccessory {
         );
         this.service.updateCharacteristic(
             this.platform.Characteristic.TargetTemperature,
-            newDevice.targetTemperature,
+            this.clampTarget(newDevice.targetTemperature),
         );
         this.service.updateCharacteristic(
             this.platform.Characteristic.TargetHeatingCoolingState,
@@ -275,6 +292,15 @@ export class ThermostatAccessory {
         );
     }
 
+    /**
+     * The panel accepts setpoints (5..40) wider than the characteristic's
+     * limits (temperatureDefaults.min/max): HomeKit gets the nearest limit
+     * instead of a value hap-nodejs would reject with a warning at every update.
+     */
+    private clampTarget(value: number): number {
+        return Math.max(this.tempMin, Math.min(this.tempMax, value));
+    }
+
     /** 0 = Celsius (default), 1 = Fahrenheit. */
     private storedDisplayUnits(): 0 | 1 {
         return this.accessory.context.temperatureDisplayUnits === 1 ? 1 : 0;
@@ -290,6 +316,7 @@ export class ThermostatAccessory {
             device.currentTemperature,
             device.targetTemperature,
             device.status.hvacOutputActive,
+            device.status.season,
         );
     }
 }

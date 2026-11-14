@@ -51,7 +51,9 @@ test('cancel removes a pending confirmation without settling it', () => {
   const first = tracker.register('12', 500, () => false);
   first.cancel();
 
-  const second = tracker.register('12', 500, () => true);
+  const second = tracker.register('12', 500, (status) => status.STA === 'ON');
+  // A transition after registration (WS-06): a state alone no longer confirms.
+  tracker.observe({ ID: '12', STA: 'OFF' });
   tracker.observe({ ID: '12', STA: 'ON' });
   return second.promise;
 });

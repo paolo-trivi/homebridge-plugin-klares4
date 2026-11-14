@@ -1,172 +1,88 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { CommandService } = require('../dist/websocket-client/command-service.js');
-const { buildThermostatSetpointCommandPayload } = require('../dist/websocket-client/thermostat-command-payload.js');
-const { createInitialWebSocketClientState } = require('../dist/websocket-client/state.js');
-const { ThermostatStatusUpdater } = require('../dist/websocket-client/thermostat-status-updater.js');
+const { createThermostatPanel, realisticCfg } = require('./fixtures/thermostat-panel');
 
-const log = { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined };
-
-// Synthetic cfg shaped like a real CFG_THERMOSTATS entry.
-function cfg(season) {
-    return { ID: '1', ACT_MODE: 'OFF', ACT_SEA: season, MAN_HRS: '0', TOF: '5.0', WIN: { TM: '21.5' }, SUM: { TM: '26.0' } };
+// F06: a setpoint lands in the block of the season the panel is in.
+// TH-02 changed the payload: a setpoint is `{ID, <season>: block}` only.
+function connected(cfgOptions, options = {}) {
+    const sim = createThermostatPanel({
+        thermostats: [{ out: '18', sensor: '1', cfg: '1' }],
+        cfgs: [realisticCfg('1', cfgOptions)],
+        ...options,
+    });
+    sim.login();
+    sim.realtime('1');
+    return sim;
 }
 
-function makeService({ season = 'WIN', snapshot } = {}) {
-    const writes = [];
-    const state = {
-        idLogin: '3',
-        ws: { readyState: 1 },
-        thermostatProgramById: new Map([['1', { ID: '1', PERIPH: { PID: '1' }, HEATING_OUT: '18' }]]),
-        thermostatProgramIdByOutputId: new Map([['18', '1']]),
-        domusSensorIdByThermostatProgramId: new Map([['1', '1']]),
-        thermostatCommandIdByOutputId: new Map(),
-        thermostatCfgById: new Map([['1', cfg(season)]]),
-        thermostatRealtimeSeasonByOutputId: new Map(snapshot ? [['18', snapshot]] : []),
-        domusThermostatConfig: { enabled: true, manualPairs: [], manualCommandPairs: [], sensorFreshnessMs: 300000 },
-        thermostatToDomus: new Map([['18', '1']]),
-        missingThermostatProgramWarningOutputIds: new Set(),
-    };
-    const service = new CommandService({
-        state, sender: 's', pin: '0000', log, logLevel: 1, options: {},
-        commandDispatcher: { enqueueDeviceCommand: (_id, task) => task() },
-        wsTransport: { send: async () => undefined },
-        emitRawMessage: () => undefined,
-    });
-    let reject = false;
-    service.sendKseniaCommand = async (cmd, type, payload) => {
-        writes.push(payload.CFG_THERMOSTATS[0]);
-        if (reject) throw new Error('WRITE_CFG_RES RESULT=FAIL');
-    };
-    return { service, state, writes, rejectNext: (v) => { reject = v; } };
-}
-
-test('F06: summer cfg without a session hint writes the summer setpoint', () => {
-    const payload = buildThermostatSetpointCommandPayload({
-        systemThermostatId: '1', temperature: 23, existingCfg: cfg('SUM'),
-    });
-    assert.equal(payload.ACT_SEA, 'SUM');
-    assert.equal(payload.SUM.TM, '23.0');
-    assert.equal(payload.WIN.TM, '21.5');
+test('F06: summer cfg without a session hint writes the summer setpoint', async () => {
+    const sim = connected({ mode: 'OFF', season: 'SUM' });
+    await sim.service.setThermostatTemperature('thermostat_18', 23);
+    const write = sim.panel.writes[0];
+    assert.deepEqual(Object.keys(write), ['ID', 'SUM']);
+    assert.equal(write.SUM.TM, '23.0');
+    assert.equal(sim.panel.cfg.get('1').WIN.TM, '20.0');
 });
 
-test('a setpoint keeps the thermostat mode: OFF stays OFF, AUTO stays AUTO, MAN stays MAN', () => {
+test('a setpoint keeps the thermostat mode: OFF stays OFF, AUTO stays AUTO, MAN stays MAN', async () => {
     for (const mode of ['OFF', 'AUTO', 'MAN']) {
-        const existingCfg = { ...cfg('WIN'), ACT_MODE: mode };
-        const payload = buildThermostatSetpointCommandPayload({ systemThermostatId: '1', temperature: 22, existingCfg });
-        assert.equal(payload.ACT_MODE, mode);
-        assert.equal(payload.WIN.TM, '22.0');
-        // Everything but the active season's TM is written back unchanged.
-        assert.deepEqual({ ...payload, WIN: undefined }, { ...existingCfg, WIN: undefined });
+        const sim = connected({ mode });
+        await sim.service.setThermostatTemperature('thermostat_18', 22);
+        assert.equal('ACT_MODE' in sim.panel.writes[0], false, mode);
+        assert.equal(sim.panel.cfg.get('1').ACT_MODE, mode);
+        assert.equal(sim.panel.cfg.get('1').WIN.TM, '22.0');
     }
 });
 
-test('a setpoint uses MAN only when the cfg has no mode', () => {
-    const withoutMode = { ...cfg('SUM') };
-    delete withoutMode.ACT_MODE;
-    const payload = buildThermostatSetpointCommandPayload({ systemThermostatId: '1', temperature: 24, existingCfg: withoutMode });
-    assert.equal(payload.ACT_MODE, 'MAN');
-    assert.equal(payload.SUM.TM, '24.0');
-
-    const noCfg = buildThermostatSetpointCommandPayload({ systemThermostatId: '1', temperature: 24 });
-    assert.equal(noCfg.ACT_MODE, 'MAN');
-});
-
-test('a setpoint on an OFF thermostat does not switch it on', async () => {
-    const h = makeService({ season: 'WIN' });
-    await h.service.setThermostatTemperature('thermostat_18', 19);
-    assert.equal(h.writes[0].ACT_MODE, 'OFF');
-    assert.equal(h.writes[0].WIN.TM, '19.0');
-    assert.equal(h.state.thermostatCfgById.get('1').ACT_MODE, 'OFF');
-});
-
-test('F06: after a restart a setpoint on a summer thermostat changes SUM.TM', async () => {
-    const h = makeService({ season: 'SUM' });
-    await h.service.setThermostatTemperature('thermostat_18', 23);
-    assert.equal(h.writes[0].ACT_SEA, 'SUM');
-    assert.equal(h.writes[0].SUM.TM, '23.0');
+test('a setpoint never forces MAN, even when the cfg has no mode', async () => {
+    const sim = connected({ mode: 'MAN', season: 'SUM' });
+    delete sim.panel.cfg.get('1').ACT_MODE;
+    await sim.service.setThermostatTemperature('thermostat_18', 24);
+    assert.deepEqual(Object.keys(sim.panel.writes[0]), ['ID', 'SUM']);
 });
 
 test('F06: a rejected "cool" command does not move later setpoints to the summer season', async () => {
-    const h = makeService({ season: 'WIN' });
-    h.rejectNext(true);
-    await assert.rejects(() => h.service.setThermostatMode('thermostat_18', 'cool'));
-    h.rejectNext(false);
-    await h.service.setThermostatTemperature('thermostat_18', 21);
-    const last = h.writes.at(-1);
-    assert.equal(last.ACT_SEA, 'WIN');
-    assert.equal(last.WIN.TM, '21.0');
-    assert.equal(last.SUM.TM, '26.0');
+    const sim = connected({ mode: 'MAN', season: 'WIN' });
+    sim.panel.writeFails = true;
+    await assert.rejects(() => sim.service.setThermostatMode('thermostat_18', 'cool'));
+    sim.panel.writeFails = false;
+    await sim.service.setThermostatTemperature('thermostat_18', 21);
+    const panel = sim.panel.cfg.get('1');
+    assert.deepEqual([panel.ACT_SEA, panel.WIN.TM, panel.SUM.TM], ['WIN', '21.0', '26.0']);
 });
 
 test('F06: a season changed on the panel (realtime) wins over an older acknowledged write', async () => {
-    const h = makeService({ season: 'WIN' });
-    await h.service.setThermostatMode('thermostat_18', 'cool');
-    // Later the keypad switches back to winter; the panel reports it in realtime.
-    h.state.thermostatRealtimeSeasonByOutputId.set('18', { season: 'WIN', updatedAt: Date.now() + 1000 });
-    await h.service.setThermostatTemperature('thermostat_18', 20);
-    const last = h.writes.at(-1);
-    assert.equal(last.ACT_SEA, 'WIN');
-    assert.equal(last.WIN.TM, '20.0');
+    const sim = connected({ mode: 'MAN', season: 'WIN' }, { realtimeAfterWrite: false });
+    await sim.service.setThermostatMode('thermostat_18', 'cool');
+    sim.keypad('1', (c) => { c.ACT_SEA = 'WIN'; }, { notify: false });
+    await sim.service.setThermostatTemperature('thermostat_18', 20);
+    assert.deepEqual(Object.keys(sim.panel.writes.at(-1)), ['ID', 'WIN']);
+    assert.equal(sim.panel.cfg.get('1').WIN.TM, '20.0');
 });
 
 test('F06: an acknowledged "cool" is used for the next setpoint before realtime catches up', async () => {
-    const h = makeService({ season: 'WIN', snapshot: { season: 'WIN', updatedAt: Date.now() - 60000 } });
-    await h.service.setThermostatMode('thermostat_18', 'cool');
-    await h.service.setThermostatTemperature('thermostat_18', 25);
-    const last = h.writes.at(-1);
-    assert.equal(last.ACT_SEA, 'SUM');
-    assert.equal(last.SUM.TM, '25.0');
+    const sim = connected({ mode: 'MAN', season: 'WIN' }, { realtimeAfterWrite: false });
+    await sim.service.setThermostatMode('thermostat_18', 'cool');
+    await sim.service.setThermostatTemperature('thermostat_18', 25);
+    assert.deepEqual(Object.keys(sim.panel.writes.at(-1)), ['ID', 'SUM']);
+    assert.equal(sim.panel.cfg.get('1').SUM.TM, '25.0');
 });
 
-// Swapped (cfg, sensor) pairs, as on real installs: Foresteria output 21 is
-// cfg 3 with DOMUS sensor 4, Atrio output 20 is cfg 4 with DOMUS sensor 3.
-// STATUS_TEMPERATURES is keyed by the DOMUS sensor id, never by the cfg id.
-function makeSwappedPairs() {
-    const state = createInitialWebSocketClientState();
-    state.idLogin = '3';
-    state.ws = { readyState: 1 };
-    for (const id of ['20', '21']) {
-        state.devices.set('thermostat_' + id, {
-            id: 'thermostat_' + id, type: 'thermostat', name: id, description: id,
-            status: { currentTemperature: 20, targetTemperature: 21, mode: 'heat' },
-        });
-    }
-    state.thermostatProgramById.set('3', { ID: '3', PERIPH: { PID: '4' }, HEATING_OUT: '21' });
-    state.thermostatProgramById.set('4', { ID: '4', PERIPH: { PID: '3' }, HEATING_OUT: '20' });
-    state.thermostatProgramIdByOutputId.set('21', '3').set('20', '4');
-    state.domusSensorIdByThermostatProgramId.set('3', '4').set('4', '3');
-    state.thermostatToDomus.set('21', '4').set('20', '3');
-    // Cached cfgs both say winter; the panel has since moved cfg 3 to summer.
-    state.thermostatCfgById.set('3', { ...cfg('WIN'), ID: '3', ACT_MODE: 'MAN' });
-    state.thermostatCfgById.set('4', { ...cfg('WIN'), ID: '4', ACT_MODE: 'MAN' });
-    const updater = new ThermostatStatusUpdater({ state, emitDeviceStatusUpdate: () => undefined });
-    updater.updateTemperatureStatuses([
-        { ID: '4', TEMP: '24.0', THERM: { ACT_MODEL: 'MAN', ACT_SEA: 'SUM', TEMP_THR: { T: 'M', VAL: '26.0' } } },
-        { ID: '3', TEMP: '20.0', THERM: { ACT_MODEL: 'MAN', ACT_SEA: 'WIN', TEMP_THR: { T: 'M', VAL: '21.5' } } },
-    ]);
-    const writes = [];
-    const service = new CommandService({
-        state, sender: 's', pin: '0000', log, logLevel: 1, options: {},
-        commandDispatcher: { enqueueDeviceCommand: (_id, task) => task() },
-        wsTransport: { send: async () => undefined },
-        emitRawMessage: () => undefined,
+// Swapped (cfg, sensor) pairs, as on real installs: output 21 is cfg 3 with
+// DOMUS sensor 4, output 20 is cfg 4 with DOMUS sensor 3. STATUS_TEMPERATURES
+// is keyed by the DOMUS sensor id, never by the cfg id.
+test('F06: the season is looked up for the thermostat written, not for the sensor sharing its cfg id', async () => {
+    const sim = createThermostatPanel({
+        thermostats: [{ out: '21', sensor: '4', cfg: '3' }, { out: '20', sensor: '3', cfg: '4' }],
+        cfgs: [realisticCfg('3', { season: 'SUM', winTm: '21.5' }), realisticCfg('4', { season: 'WIN' })],
     });
-    service.sendKseniaCommand = async (_cmd, _type, payload) => { writes.push(payload.CFG_THERMOSTATS[0]); };
-    return { service, writes };
-}
-
-test('F06: the realtime season is looked up for the thermostat written, not for the sensor sharing its cfg id', async () => {
-    const h = makeSwappedPairs();
-    await h.service.setThermostatTemperature('thermostat_21', 24);
-    assert.equal(h.writes[0].ID, '3');
-    assert.equal(h.writes[0].ACT_SEA, 'SUM');
-    assert.equal(h.writes[0].SUM.TM, '24.0');
-    assert.equal(h.writes[0].WIN.TM, '21.5');
-
-    await h.service.setThermostatTemperature('thermostat_20', 22);
-    assert.equal(h.writes[1].ID, '4');
-    assert.equal(h.writes[1].ACT_SEA, 'WIN');
-    assert.equal(h.writes[1].WIN.TM, '22.0');
+    sim.login();
+    sim.realtime('3');
+    sim.realtime('4');
+    await sim.service.setThermostatTemperature('thermostat_21', 24);
+    assert.deepEqual(sim.panel.writes[0], { ID: '3', SUM: { ...realisticCfg('3').SUM, TM: '24.0' } });
+    await sim.service.setThermostatTemperature('thermostat_20', 22);
+    assert.equal(sim.panel.writes[1].ID, '4');
+    assert.equal(sim.panel.writes[1].WIN.TM, '22.0');
 });

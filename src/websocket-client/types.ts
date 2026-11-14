@@ -136,11 +136,47 @@ export interface WebSocketClientState {
      */
     thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number }>;
     missingThermostatProgramWarningOutputIds: Set<string>;
+    /** CFG_THERMOSTATS cache bookkeeping; created on first use (thermostat-cfg-freshness.ts). */
+    thermostatCfgFreshness?: ThermostatCfgFreshness;
     /** Normalized CAT of every scenario listed by MULTI_TYPES, exposed or not. */
     scenarioCategoryById: Map<string, string>;
+    /**
+     * Outputs and scenarios of the latest discovery read that the exposure
+     * policy kept out of `devices`, by the device ID they would have had.
+     * Created by the first discovery read (`exposure-report.ts`).
+     */
+    hiddenByExposurePolicy?: Map<string, HiddenDevice>;
+}
+
+/** An output or scenario the exposure policy does not expose (see `device-parsers.ts`). */
+export interface HiddenDevice {
+    /** The device ID it would have had (`light_7`, `scenario_4`), as in 2.2.0. */
+    deviceId: string;
+    kind: 'output' | 'scenario';
+    panelId: string;
+    name: string;
+    /** Normalized category as listed by the panel; empty when absent. */
+    category: string;
+    mode?: string;
+    /** False for ARM/DISARM and PARTIAL, which no per-device opt-in can expose. */
+    optInAllowed: boolean;
 }
 
 export interface MessagePipeline {
     routeMessage: (message: KseniaMessage) => void;
     resolvePending: (message: KseniaMessage) => void;
+}
+
+/**
+ * Whether the CFG_THERMOSTATS cache still matches the panel. Every READ_RES and
+ * NM_CHANGES carries `PRG_CHECK.CFG`, a counter the panel bumps at every cfg
+ * change; each acknowledged write of ours bumps it by one.
+ */
+export interface ThermostatCfgFreshness {
+    /** Last `PRG_CHECK.CFG` known to match the cache. */
+    counter?: number;
+    /** Own writes acknowledged since `counter` was learned. */
+    ownWritesSinceCounter: number;
+    /** When each cfg id was last read from the panel (epoch ms). */
+    readAt: Map<string, number>;
 }
