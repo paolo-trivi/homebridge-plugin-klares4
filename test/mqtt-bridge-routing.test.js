@@ -18,13 +18,12 @@ function light(id, name, calls) {
   };
 }
 
-function setup({ handlers = [], roomMapping, mqttConfig = {}, isDeviceExcluded, runtimeConfig, config = {} } = {}) {
+function setup({ handlers = [], roomMapping, mqttConfig = {}, isDeviceExcluded, config = {} } = {}) {
   const log = recordingLog();
   const mqtt = fakeMqtt();
   const platform = {
     accessoryHandlers: new Map(handlers.map((handler, i) => [`uuid-${i}`, handler])),
     config: { ...config, ...(roomMapping ? { roomMapping } : {}) },
-    ...(runtimeConfig ? { runtimeConfig } : {}),
   };
   const bridge = new MqttBridge(
     { enabled: true, broker: 'mqtt://broker.example', ...mqttConfig },
@@ -92,24 +91,6 @@ test('SP-09: an excluded device restored from the cache is not commandable', asy
   });
   client.deliver('homebridge/klares4/light/light_2/set', '{"on":true}');
   client.deliver('homebridge/klares4/light/luce_due/set', '{"on":true}');
-  client.deliver('homebridge/klares4/light/light_4/set', '{"on":true}');
-  await waitFor(() => calls.length === 1);
-  await settle();
-  assert.deepEqual(calls, ['light_4:true']);
-});
-
-test('SP-09: by default the exclusion lists of the platform\'s validated config apply', async () => {
-  const { resolveRuntimeConfig, toPlatformConfig } = require('../dist/platform/runtime-config.js');
-  const raw = { ip: '192.0.2.1', pin: '1', excludeOutputs: ['2'] };
-  const quiet = recordingLog().logger;
-  const runtimeConfig = resolveRuntimeConfig(raw, quiet);
-  const calls = [];
-  const { client } = setup({
-    handlers: [light('light_2', 'Luce Due', calls), light('light_4', 'Luce Quattro', calls)],
-    runtimeConfig,
-    config: toPlatformConfig(raw, runtimeConfig),
-  });
-  client.deliver('homebridge/klares4/light/light_2/set', '{"on":true}');
   client.deliver('homebridge/klares4/light/light_4/set', '{"on":true}');
   await waitFor(() => calls.length === 1);
   await settle();

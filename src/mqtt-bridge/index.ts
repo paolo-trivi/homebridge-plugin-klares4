@@ -4,8 +4,7 @@ import type { Logger } from 'homebridge';
 import type { KseniaDevice, MqttConfig, MqttPanelConnection, MqttStatusPayload } from '../types';
 import { buildStatusTopic, isValidTopicPrefix } from '../mqtt/topic-parser';
 import { checkBrokerUrl } from '../mqtt/broker-url';
-import { DiscoveryService } from '../platform/discovery-service';
-import type { Lares4Platform, RuntimeConfig } from '../platform';
+import type { Lares4Platform } from '../platform';
 import { AccessoryIndexService } from './accessory-index-service';
 import { BrokerSession, DEFAULT_RECONNECT_BACKOFF, type MqttConnectFn, type ReconnectBackoff } from './broker-session';
 import { CommandExecutor } from './command-executor';
@@ -17,15 +16,17 @@ import { ThrottledWarnings } from './throttled-log';
 export type { MqttConnectFn, ReconnectBackoff } from './broker-session';
 
 /** What the bridge reads from the platform; `Lares4Platform` provides it. */
-export type MqttBridgePlatform = Pick<Lares4Platform, 'accessoryHandlers' | 'config'> & {
-    readonly runtimeConfig?: RuntimeConfig;
-};
+export type MqttBridgePlatform = Pick<Lares4Platform, 'accessoryHandlers' | 'config'>;
 
 export interface MqttBridgeDeps {
     /** Creates the MQTT client; `mqtt.connect` by default. Tests pass a fake. */
     connect?: MqttConnectFn;
     reconnectBackoff?: ReconnectBackoff;
-    /** Devices excluded in the config; derived from the platform's validated config by default. */
+    /**
+     * The platform's single decision on excluded devices (config lists and
+     * exposure policy): such a device is never a command target, even with a
+     * handler restored from the cache. Without it only the handlers decide.
+     */
     isDeviceExcluded?: (device: KseniaDevice) => boolean;
 }
 
@@ -55,7 +56,7 @@ export class MqttBridge {
         const rooms = new RoomResolver(() => platform.config.roomMapping, log);
         this.publisher = new StatePublisher({ topicPrefix: this.topicPrefix, qos: this.qos, retain: config.retain ?? true, log, rooms });
         const accessoryIndex = new AccessoryIndexService(platform, log, {
-            isDeviceExcluded: deps.isDeviceExcluded ?? MqttBridge.exclusionFor(platform, log),
+            isDeviceExcluded: deps.isDeviceExcluded,
             roomFor: (deviceId: string): string | null => rooms.roomFor(deviceId),
             roomsEnforced: (): boolean => rooms.enabled,
             warnings,
@@ -71,13 +72,6 @@ export class MqttBridge {
         if (config.enabled) {
             this.start(deps);
         }
-    }
-
-    private static exclusionFor(platform: MqttBridgePlatform, log: Logger): ((device: KseniaDevice) => boolean) | undefined {
-        const runtime = platform.runtimeConfig;
-        if (!runtime) return undefined;
-        const discovery = new DiscoveryService(platform.config, log, runtime);
-        return (device: KseniaDevice): boolean => discovery.isDeviceExcluded(device);
     }
 
     private start(deps: MqttBridgeDeps): void {

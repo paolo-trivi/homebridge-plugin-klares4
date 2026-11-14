@@ -15,6 +15,8 @@ export interface SyncLifecycleDeps {
     eligibleMatterDevices: () => KseniaDevice[];
     /** Runs once, at the end of the first complete sync, with every device ID the panel reported. */
     onFirstSyncComplete?: (discoveredIds: ReadonlySet<string>) => void;
+    /** The panel connection went up or down (published by the MQTT bridge on its status topic). */
+    onPanelConnection?: (connected: boolean) => void;
 }
 
 /** A completed sync, as the Matter prune sees it. */
@@ -50,7 +52,6 @@ export class SyncLifecycle {
     constructor(private readonly deps: SyncLifecycleDeps) {}
 
     public attach(client: KseniaWebSocketClient, deviceEvents: DeviceEventRouter): void {
-        const { matterRegistry } = this.deps;
         client.onSyncStarted = (): void => this.startSync();
         client.onDeviceDiscovered = (device: KseniaDevice): void => {
             this.discoveredIds.add(device.id);
@@ -62,11 +63,17 @@ export class SyncLifecycle {
             deviceEvents.handleDeviceStatusUpdate(device);
         };
         client.onInitialSyncComplete = (): void => this.handleInitialSyncComplete();
-        client.onConnected = (): void => matterRegistry.setPanelReachable(true);
-        client.onDisconnected = (): void => matterRegistry.setPanelReachable(false);
+        client.onConnected = (): void => this.panelConnection(true);
+        client.onDisconnected = (): void => this.panelConnection(false);
         // Not connected yet: if the panel stays unreachable past the grace
         // period, the endpoints Homebridge restored from its cache say so.
-        matterRegistry.setPanelReachable(false);
+        this.panelConnection(false);
+    }
+
+    private panelConnection(connected: boolean): void {
+        this.deps.matterRegistry.setPanelReachable(connected);
+        const { onPanelConnection } = this.deps;
+        if (onPanelConnection) runIsolated(this.deps.log, 'MQTT panel status', () => onPanelConnection(connected));
     }
 
     /** Opens the discovery cycle of a new sync on HAP and Matter. */
