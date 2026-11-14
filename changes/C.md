@@ -37,7 +37,13 @@ None added, changed or removed in `config.schema.json`. Three **internal** clien
 ## Migration notes
 - No persisted data, UUIDs, MQTT topics or config keys change.
 - Users whose panel refuses the login (wrong PIN) used to need a Homebridge restart after 3 failures; now the plugin retries once per hour on its own. Fix the PIN and restart Homebridge to reconnect immediately.
-- MQTT zone payload is unchanged (`open`, `armed`, `fault`, `bypassed`); the new tamper flag is only on HomeKit for now (adding it to the MQTT payload is left to the MQTT task).
+- MQTT zone payload is unchanged (`open`, `armed`, `fault`, `bypassed`); the tamper flag is shown on HomeKit only (adding it to the MQTT payload would be an additive change of the golden payload, not done in 2.3.0).
+
+## Integration done at the end of wave 1
+- Task A: `exposeOutputs` / `exposeScenarios` reach the discovery through the client; `isScenarioSuppressed` honours the scenario opt-in; new facade method `KseniaWebSocketClient.isHiddenByExposurePolicy(deviceId)`, used by `clientExposurePolicy` so cached accessories of hidden **outputs** are treated as excluded like hidden scenarios.
+- Task D: `NOT_MASK_UNSOLICITED / NM_CHANGES` reaches the thermostat cfg cache; `PRG_CHECK` of `CFG_THERMOSTATS` is the change-counter baseline; the command service publishes the thermostat state on ACK; the legacy `MODE` of `STATUS_OUTPUTS` uses `parseKseniaMode` (an unknown mode no longer reads as off); `state.ts` initialises `hiddenByExposurePolicy` and `thermostatCfgFreshness`.
+- Task B: `command-dispatcher.ts` reads RESULT through `websocket/protocol-result.ts`; a RESULT that is not a string is now a refusal there too (it used to be "no RESULT").
+- Every fake panel in the tests signs its frames (`test/fixtures/panel-frame.js`).
 
 ## Documentation notes (task L)
 - Troubleshooting: the new log lines — "The panel refused the <TYPE> read (...)", "The panel refused the realtime registration (...)", "The panel did not complete the synchronization within 60s", "<...> frame with a wrong CRC_16: dropped (N frame(s) dropped in this session so far)", "The panel refused or did not answer the login N times in a row ... one attempt every 60 min", "Zone status field X reported "Y", a value not observed before".
