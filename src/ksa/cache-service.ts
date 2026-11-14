@@ -51,10 +51,6 @@ export class KsaCacheService {
         this.cachePath = path.join(storagePath, CACHE_FILE_NAME);
     }
 
-    public get path(): string {
-        return this.cachePath;
-    }
-
     public async save(cache: KsaSanitizedCache): Promise<void> {
         await writeJsonAtomic(this.cachePath, cache, 2);
     }
