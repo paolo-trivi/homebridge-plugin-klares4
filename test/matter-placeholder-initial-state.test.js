@@ -12,6 +12,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '10';
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { markStatusPlaceholder } = require('../dist/device-observation.js');
 const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -34,7 +35,7 @@ test('a fresh measurement endpoint starts with a null measuredValue, not the dis
     await reg.addOrUpdateAccessory(placeholderSensor('sensor_t', 'temperature'));
     await reg.addOrUpdateAccessory(placeholderSensor('sensor_h', 'humidity'));
     await reg.addOrUpdateAccessory(placeholderSensor('sensor_l', 'light'));
-    await delay(60);
+    await waitFor(() => ['sensor_t', 'sensor_h', 'sensor_l'].every((id) => reg.getStatus(id) === 'registered'));
 
     assert.equal(hb.endpoints.get('sensor_t').clusters.temperatureMeasurement.measuredValue, null);
     assert.equal(hb.endpoints.get('sensor_h').clusters.relativeHumidityMeasurement.measuredValue, null);
@@ -60,7 +61,7 @@ test('a thermostat TemperatureSensor fallback also starts with a null measuredVa
     };
     markStatusPlaceholder(device);
     await reg.addOrUpdateAccessory(device);
-    await delay(60);
+    await waitFor(() => reg.getStatus('thermostat_5') === 'registered');
     assert.equal(hb.endpoints.get('thermostat_5').deviceType.name, 'TemperatureSensor');
     assert.equal(hb.endpoints.get('thermostat_5').clusters.temperatureMeasurement.measuredValue, null);
 });
@@ -75,7 +76,7 @@ test('state known from the Homebridge cache still seeds the endpoint', async () 
         context: { device: { id: 'sensor_t', type: 'sensor', name: 'Sensore temperature', description: '', status: { sensorType: 'temperature', value: 19 } } },
     });
     await reg.addOrUpdateAccessory(placeholderSensor('sensor_t', 'temperature'));
-    await delay(60);
+    await waitFor(() => reg.getStatus('sensor_t') === 'registered');
     assert.equal(hb.endpoints.get('sensor_t').clusters.temperatureMeasurement.measuredValue, 1900);
 });
 
@@ -90,7 +91,8 @@ test('a thermostat that falls back during recovery does not publish its placehol
     };
     markStatusPlaceholder(device);
     await reg.addOrUpdateAccessory(device);
-    await delay(800);
+    await waitFor(() => reg.getStatus('thermostat_6') === 'registered'
+        && hb.endpoints.get('thermostat_6')?.deviceType.name === 'TemperatureSensor');
     assert.equal(hb.endpoints.get('thermostat_6').deviceType.name, 'TemperatureSensor');
     assert.equal(reg.getStatus('thermostat_6'), 'registered');
     assert.equal(hb.endpoints.get('thermostat_6').clusters.temperatureMeasurement.measuredValue, null);

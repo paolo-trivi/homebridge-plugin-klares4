@@ -12,6 +12,7 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,6 +31,7 @@ async function bootWithCache(cachedName, currentName) {
     });
     await registry.addOrUpdateAccessory(light(currentName));
     await delay(60);
+    await waitFor(() => registry.getStatus('light_8') === 'registered');
     assert.equal(registry.getStatus('light_8'), 'registered');
     return { hb, registry };
 }

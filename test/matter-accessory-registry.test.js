@@ -12,6 +12,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '20';
 process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 function tmpStorage() {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-test-'));
@@ -154,6 +155,7 @@ test('addOrUpdateAccessory: register → pending → settled → registered', as
     assert.equal(registered.length, 1);
     assert.equal(registry.getStatus('light_1'), 'pending');
     await delay(200); // > MATTER_REGISTER_SETTLE_MS
+    await waitFor(() => registry.getStatus('light_1') === 'registered');
     assert.equal(registry.getStatus('light_1'), 'registered');
     assert.equal(metadataUpdates.length, 0, 'must not call updatePlatformAccessories because it drops endpoints in HB2');
     assert.equal(registered[0].manufacturer, 'Ksenia');
@@ -218,6 +220,7 @@ test('thermostat: registers as Thermostat when matter accepts it', async () => {
     const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_50'));
     await delay(200);
+    await waitFor(() => registry.getStatus('thermostat_50') === 'registered');
     assert.equal(registry.getStatus('thermostat_50'), 'registered');
     assert.equal(registered[0].deviceType._t, 'Thermostat');
 });
@@ -239,6 +242,7 @@ test('thermostat: falls back to TemperatureSensor when matter rejects the Thermo
     assert.equal(registered.length, 1, 'first attempt failed, fallback was retried with TemperatureSensor');
     assert.equal(registered[0].deviceType._t, 'TemperatureSensor');
     await delay(200);
+    await waitFor(() => registry.getStatus('thermostat_60') === 'registered');
     assert.equal(registry.getStatus('thermostat_60'), 'registered');
 });
 
@@ -258,6 +262,7 @@ test('thermostat: async missing registration falls back before state updates', a
     await registry.updateAccessoryState(thermostatDevice('thermostat_async_missing', { currentTemperature: 19.5 }));
     await delay(FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
 
+    await waitFor(() => registry.getStatus('thermostat_async_missing') === 'registered');
     assert.equal(registry.getStatus('thermostat_async_missing'), 'registered');
     assert.equal(registered[0].deviceType._t, 'Thermostat');
     assert.equal(registered[1].deviceType._t, 'TemperatureSensor');
@@ -294,6 +299,7 @@ test('stale matter.js endpoint: every recovery attempt unregisters before re-reg
     });
     await delay(FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
 
+    await waitFor(() => registry.getStatus('scenario_stale') === 'registered');
     assert.equal(registry.getStatus('scenario_stale'), 'registered');
     assert.equal(registerCount, 3, 'three register calls: initial + recovery#1 + recovery#2-after-purge');
     assert.deepEqual(unregistered, ['scenario_stale', 'scenario_stale'], 'each recovery attempt unregisters before re-registering');
@@ -484,6 +490,7 @@ test('two simulated boots: same device keeps UUID/serialNumber/displayName stabl
     registry1.startDiscoveryCycle();
     await registry1.addOrUpdateAccessory(device);
     await delay(200);
+    await waitFor(() => registry1.getStatus('light_boot') === 'registered');
     assert.equal(registry1.getStatus('light_boot'), 'registered');
     const firstRegistration = boot1.registered[0];
 
@@ -494,6 +501,7 @@ test('two simulated boots: same device keeps UUID/serialNumber/displayName stabl
     await registry2.addOrUpdateAccessory(device);
     await delay(200);
 
+    await waitFor(() => registry2.getStatus('light_boot') === 'registered');
     assert.equal(registry2.getStatus('light_boot'), 'registered');
     const secondRegistration = boot2.registered[0];
     assert.equal(secondRegistration.UUID, firstRegistration.UUID, 'UUID must survive across boots');
@@ -679,6 +687,7 @@ test('matterExposure: a registered type disabled later is pruned after 3 consecu
     await registry.addOrUpdateAccessory(zone);
     await registry.addOrUpdateAccessory(lightDevice('light_1'));
     await delay(200);
+    await waitFor(() => registry.getStatus('zone_1') === 'registered');
     assert.equal(registry.getStatus('zone_1'), 'registered');
 
     // User disables zones in matterExposure.

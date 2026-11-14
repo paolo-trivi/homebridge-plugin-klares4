@@ -12,6 +12,7 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -95,6 +96,7 @@ test('F04: a re-discovery that renames the light does not disable the dimmer upg
 
     await registry.addOrUpdateAccessory(light({ on: false, dimmable: false }));
     await delay(150);
+    await waitFor(() => registry.getStatus('light_5') === 'registered');
     assert.equal(registry.getStatus('light_5'), 'registered');
 
     // Reconnect: READ_RES carries a new name, the status already knows the level.
