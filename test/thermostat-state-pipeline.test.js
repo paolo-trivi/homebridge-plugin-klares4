@@ -5,6 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
+const { signFrame } = require('./fixtures/panel-frame.js');
 const { realisticCfg, silentLog } = require('./fixtures/thermostat-panel');
 
 function client() {
@@ -14,8 +15,8 @@ function client() {
     c.onDeviceStatusUpdate = (d) => {
         if (d.type === 'thermostat') emits.push({ mode: d.status.mode, target: d.status.targetTemperature, current: d.status.currentTemperature });
     };
-    const msg = (CMD, PAYLOAD_TYPE, PAYLOAD) => c.messageService.handleMessage(JSON.stringify({
-        SENDER: 'p', RECEIVER: 'x', CMD, ID: '1', PAYLOAD_TYPE, PAYLOAD, TIMESTAMP: '0', CRC_16: '0x0',
+    const msg = (CMD, PAYLOAD_TYPE, PAYLOAD) => c.messageService.handleMessage(signFrame({
+        SENDER: 'p', RECEIVER: 'x', CMD, ID: '1', PAYLOAD_TYPE, PAYLOAD, TIMESTAMP: '0',
     }));
     const multi = (sensors = [{ ID: '1', DES: 'Room' }]) => msg('READ_RES', 'MULTI_TYPES', {
         RESULT: 'OK', OUTPUTS: [{ ID: '18', DES: 'Riscaldamento Room', CAT: 'THERMO', MOD: 'C' }], BUS_HAS: sensors, SCENARIOS: [],

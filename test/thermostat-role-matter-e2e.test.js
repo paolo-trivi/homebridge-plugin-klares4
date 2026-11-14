@@ -8,6 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
+const { signFrame } = require('./fixtures/panel-frame.js');
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { realMatterStackSession } = require('./fixtures/real-matter-stack.js');
 const { waitFor } = require('./fixtures/wait-for.js');
@@ -25,8 +26,8 @@ function panelClient(options = {}) {
     const client = new KseniaWebSocketClient('127.0.0.1', 443, true, 'x', '000000', silentLog(), options);
     const discovered = new Map();
     client.onDeviceDiscovered = (device) => discovered.set(device.id, { ...device, status: { ...device.status } });
-    const msg = (CMD, PAYLOAD_TYPE, PAYLOAD) => client.messageService.handleMessage(JSON.stringify({
-        SENDER: 'p', RECEIVER: 'x', CMD, ID: '1', PAYLOAD_TYPE, PAYLOAD, TIMESTAMP: '0', CRC_16: '0x0',
+    const msg = (CMD, PAYLOAD_TYPE, PAYLOAD) => client.messageService.handleMessage(signFrame({
+        SENDER: 'p', RECEIVER: 'x', CMD, ID: '1', PAYLOAD_TYPE, PAYLOAD, TIMESTAMP: '0',
     }));
     const multi = () => msg('READ_RES', 'MULTI_TYPES', { RESULT: 'OK', OUTPUTS, BUS_HAS: [{ ID: '1', DES: 'Room' }], SCENARIOS: [] });
     const prg = () => msg('READ_RES', 'PRG_THERMOSTATS', { RESULT: 'OK', PRG_THERMOSTATS: [PROGRAM] });
