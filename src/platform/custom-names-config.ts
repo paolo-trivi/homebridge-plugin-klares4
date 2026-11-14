@@ -1,3 +1,5 @@
+import { cite, ConfigIssues, hasOwn, isPlainObject, setOwn, typeName } from './config-values';
+
 /**
  * `customNames` in either accepted form.
  *
@@ -46,34 +48,143 @@ function emptyMap(): CustomNamesMap {
     return { zones: {}, outputs: {}, sensors: {}, scenarios: {} };
 }
 
-/**
- * Always yields the category map. Rows without a usable device ID or name are
- * dropped rather than throwing: a malformed row in the UI must not stop the
- * platform from starting.
- */
-export function normalizeCustomNames(configured: CustomNamesConfig | undefined): CustomNamesMap {
-    const normalized = emptyMap();
-    if (!configured) return normalized;
-    if (!Array.isArray(configured)) {
-        for (const category of Object.keys(normalized) as Array<keyof CustomNamesMap>) {
-            normalized[category] = { ...(configured[category] ?? {}) };
-        }
-        return normalized;
-    }
+/** One validated name: the category and panel ID it applies to, and the ID as the user wrote it. */
+export interface CustomNameRow {
+    deviceId: string;
+    category: keyof CustomNamesMap;
+    id: string;
+    name: string;
+}
 
-    for (const entry of configured) {
-        const deviceId = typeof entry?.deviceId === 'string' ? entry.deviceId.trim() : '';
-        const name = typeof entry?.name === 'string' ? entry.name.trim() : '';
-        if (!deviceId || !name) continue;
-        for (const [pattern, category] of CATEGORY_BY_PREFIX) {
-            const match = pattern.exec(deviceId);
-            if (match) {
-                normalized[category][match[1]] = name;
-                break;
+export interface ParsedCustomNames {
+    /** The category map the platform looks names up in. */
+    map: CustomNamesMap;
+    /** Valid rows, in config order. */
+    rows: CustomNameRow[];
+    /** The user's config reduced to its valid entries, in the form it was written in. */
+    cleaned: CustomNamesConfig | undefined;
+}
+
+const MAP_CATEGORIES: Array<keyof CustomNamesMap> = ['zones', 'outputs', 'sensors', 'scenarios'];
+
+function isBlank(value: unknown): boolean {
+    return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+}
+
+function isPanelIdKey(category: keyof CustomNamesMap, id: string): boolean {
+    return /^\d+$/.test(id) || (category === 'sensors' && isSystemSensorId(id));
+}
+
+function parseMapForm(configured: Record<string, unknown>, issues: ConfigIssues): ParsedCustomNames {
+    const map = emptyMap();
+    const rows: CustomNameRow[] = [];
+    const cleaned: Partial<CustomNamesMap> = {};
+    for (const key of Object.keys(configured)) {
+        if (!MAP_CATEGORIES.some((category) => category === key)) {
+            issues.warn('customNames', `unknown category ${cite(key)}; ignoring it`);
+        }
+    }
+    for (const category of MAP_CATEGORIES) {
+        const names = configured[category];
+        if (names === undefined || names === null) continue;
+        if (!isPlainObject(names)) {
+            issues.warn(`customNames.${category}`, `expected an object, received ${typeName(names)}; ignoring it`);
+            continue;
+        }
+        const kept: Record<string, string> = {};
+        cleaned[category] = kept;
+        for (const id of Object.keys(names)) {
+            const value = names[id];
+            const name = typeof value === 'string' ? value.trim() : '';
+            if (!isPanelIdKey(category, id)) {
+                issues.warn(`customNames.${category}`, `${cite(id)} is not a panel device ID; ignoring it`);
+            } else if (!name) {
+                issues.warn(`customNames.${category}`, `the name of ${cite(id)} must be a non-empty string, received ${typeName(value)}; ignoring it`);
+            } else {
+                setOwn(map[category], id, name);
+                setOwn(kept, id, name);
+                rows.push({ deviceId: isSystemSensorId(id) ? id : `${ENTRY_PREFIX[category]}${id}`, category, id, name });
             }
         }
     }
-    return normalized;
+    return { map, rows, cleaned };
+}
+
+function parseArrayForm(configured: unknown[], issues: ConfigIssues): ParsedCustomNames {
+    const map = emptyMap();
+    const rows: CustomNameRow[] = [];
+    configured.forEach((entry: unknown, index: number): void => {
+        const where = `customNames[${index}]`;
+        if (!isPlainObject(entry)) {
+            issues.warn(where, `expected an object with deviceId and name, received ${typeName(entry)}; ignoring it`);
+            return;
+        }
+        const deviceId = typeof entry.deviceId === 'string' ? entry.deviceId.trim() : '';
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        // The empty row the Homebridge UI leaves behind is not worth a warning.
+        if (isBlank(entry.deviceId) && isBlank(entry.name)) return;
+        if (!deviceId) {
+            issues.warn(where, `deviceId must be a non-empty string, received ${typeName(entry.deviceId)}; ignoring the row`);
+            return;
+        }
+        if (!name) {
+            issues.warn(where, `the name of ${cite(deviceId)} must be a non-empty string, received ${typeName(entry.name)}; ignoring the row`);
+            return;
+        }
+        for (const [pattern, category] of CATEGORY_BY_PREFIX) {
+            const match = pattern.exec(deviceId);
+            if (!match) continue;
+            const previous = hasOwn(map[category], match[1]) ? map[category][match[1]] : undefined;
+            if (previous !== undefined && previous !== name) {
+                issues.warn(where, `${cite(deviceId)} is named more than once; the last name wins`);
+            }
+            setOwn(map[category], match[1], name);
+            rows.push({ deviceId, category, id: match[1], name });
+            return;
+        }
+        issues.warn(where, `${cite(deviceId)} is not a valid device ID (for example zone_3 or light_37); ignoring the row`);
+    });
+    const cleaned = rows.map((row): CustomNameEntry => ({ deviceId: row.deviceId, name: row.name }));
+    return { map, rows, cleaned };
+}
+
+/**
+ * Validates `customNames` in either accepted form, with the same rules for
+ * both: a row or pair that is not a device ID with a non-empty string name is
+ * dropped and reported, never thrown on (a malformed row must not stop the
+ * platform from starting, nor poison the MQTT slugs derived from the name).
+ */
+export function parseCustomNames(configured: unknown, issues: ConfigIssues): ParsedCustomNames {
+    if (configured === undefined || configured === null) return { map: emptyMap(), rows: [], cleaned: undefined };
+    if (Array.isArray(configured)) return parseArrayForm(configured, issues);
+    if (isPlainObject(configured)) return parseMapForm(configured, issues);
+    issues.warn('customNames', `expected an array of { deviceId, name }, received ${typeName(configured)}; ignoring it`);
+    return { map: emptyMap(), rows: [], cleaned: undefined };
+}
+
+/**
+ * Always yields the category map. Quiet by default: the platform reports the
+ * problems once at startup through `parseCustomNames`.
+ */
+export function normalizeCustomNames(
+    configured: unknown,
+    issues: ConfigIssues = new ConfigIssues(),
+): CustomNamesMap {
+    return parseCustomNames(configured, issues).map;
+}
+
+/** `category:id` of the name slot a device ID is looked up in, or undefined for an ID no name applies to. */
+export function customNameSlot(deviceId: string): string | undefined {
+    for (const [pattern, category] of CATEGORY_BY_PREFIX) {
+        const match = pattern.exec(deviceId);
+        if (match) return `${category}:${match[1]}`;
+    }
+    return undefined;
+}
+
+/** Lookup restricted to own properties: a panel ID such as `constructor` names nothing. */
+export function lookupCustomName(names: Record<string, string>, id: string): string | undefined {
+    return hasOwn(names, id) ? names[id] : undefined;
 }
 
 const ENTRY_PREFIX: Record<keyof CustomNamesMap, string> = {

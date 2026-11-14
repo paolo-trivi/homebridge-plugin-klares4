@@ -1,8 +1,8 @@
 import type { Logger } from 'homebridge';
-import { getEffectiveLogLevel } from '../log-levels';
 import type { KsaSanitizedCache, KseniaWebSocketOptions } from '../types';
 import { KseniaWebSocketClient } from '../websocket-client';
-import type { Lares4Config } from './types';
+import type { RuntimeConfig } from './runtime-config';
+import type { RawLares4Config } from './types';
 
 /** Everything `KseniaWebSocketClient` needs from the config, besides the logger. */
 export interface ClientConnectionSettings {
@@ -14,51 +14,55 @@ export interface ClientConnectionSettings {
     options: KseniaWebSocketOptions;
 }
 
+/** The connection fields are present: `ip` and `pin` have no default. */
+export type ConnectableRuntimeConfig = RuntimeConfig & { ip: string; pin: string };
+
 /** Logs what is missing and returns false when the client cannot be built. */
-export function hasConnectionConfig(config: Lares4Config | undefined, log: Logger): boolean {
+export function hasConnectionConfig(config: RawLares4Config | undefined, runtime: RuntimeConfig, log: Logger): boolean {
     if (!config) {
         log.error('No configuration found');
         return false;
     }
-    if (!config.ip) {
-        log.error('IP address missing in configuration');
+    if (!runtime.ip) {
+        // A non-string address was already reported by the validation.
+        if (config.ip === undefined || config.ip === null || config.ip === '') log.error('IP address missing in configuration');
         return false;
     }
-    if (!config.pin) {
-        log.error('PIN missing in configuration');
+    if (!runtime.pin) {
+        // A PIN of an unusable type was already reported by the validation.
+        if (!runtime.pinRejected) log.error('PIN missing in configuration');
         return false;
     }
     return true;
 }
 
 export function buildClientConnectionSettings(
-    config: Lares4Config & { ip: string; pin: string },
+    config: ConnectableRuntimeConfig,
     ksaCache: KsaSanitizedCache | undefined,
 ): ClientConnectionSettings {
-    const useHttps = config.https !== false;
     return {
         ip: config.ip,
-        port: config.port ?? (useHttps ? 443 : 80),
-        useHttps,
-        sender: config.sender ?? 'homebridge',
+        port: config.port,
+        useHttps: config.https,
+        sender: config.sender,
         pin: config.pin,
         options: {
-            debug: config.debug ?? false,
-            logLevel: getEffectiveLogLevel(config.logLevel, config.debug),
-            reconnectInterval: config.reconnectInterval ?? 5000,
-            heartbeatInterval: config.heartbeatInterval ?? 30000,
-            commandTimeoutMs: config.commandTimeoutMs ?? 8000,
-            allowInsecureTls: config.allowInsecureTls ?? false,
-            exposePartialArmScenarios: config.exposePartialArmScenarios === true,
+            debug: config.debug,
+            logLevel: config.logLevel,
+            reconnectInterval: config.reconnectInterval,
+            heartbeatInterval: config.heartbeatInterval,
+            commandTimeoutMs: config.commandTimeoutMs,
+            allowInsecureTls: config.allowInsecureTls,
+            exposePartialArmScenarios: config.exposePartialArmScenarios,
             domusThermostat: config.domusThermostat,
             ksaCache,
         },
     };
 }
 
-/** Creates the panel client from the config; nothing connects until `connect()`. */
+/** Creates the panel client from the runtime config; nothing connects until `connect()`. */
 export function createWebSocketClient(
-    config: Lares4Config & { ip: string; pin: string },
+    config: ConnectableRuntimeConfig,
     log: Logger,
     ksaCache: KsaSanitizedCache | undefined,
 ): KseniaWebSocketClient {

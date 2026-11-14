@@ -13,6 +13,8 @@ export interface SyncLifecycleDeps {
     matterRegistry: MatterAccessoryRegistry;
     /** Matter-named snapshots of the devices currently exposed on Matter. */
     eligibleMatterDevices: () => KseniaDevice[];
+    /** Runs once, at the end of the first complete sync, with every device ID the panel reported. */
+    onFirstSyncComplete?: (discoveredIds: ReadonlySet<string>) => void;
 }
 
 /** What the Matter prune of a completed sync may do. */
@@ -46,6 +48,9 @@ export class SyncLifecycle {
     private prunedEpoch?: number;
     private matterRun?: Promise<void>;
     private matterRunQueued = false;
+    /** Every device the panel reported, excluded ones included (an override on them still has a target). */
+    private readonly discoveredIds = new Set<string>();
+    private firstSyncReported = false;
 
     constructor(private readonly deps: SyncLifecycleDeps) {}
 
@@ -53,9 +58,11 @@ export class SyncLifecycle {
         const { matterRegistry } = this.deps;
         client.onSyncStarted = (): void => this.startSync();
         client.onDeviceDiscovered = (device: KseniaDevice): void => {
+            this.discoveredIds.add(device.id);
             if (deviceEvents.handleDeviceDiscovered(device)) this.recordSeen(device);
         };
         client.onDeviceStatusUpdate = (device: KseniaDevice): void => {
+            this.discoveredIds.add(device.id);
             if (deviceEvents.handleDeviceStatusUpdate(device)) this.recordSeen(device);
         };
         client.onInitialSyncComplete = (): void => this.handleInitialSyncComplete();
@@ -80,6 +87,11 @@ export class SyncLifecycle {
             silentFamilies: [...this.knownFamilies].filter((family) => !this.syncFamilies.has(family)),
         };
         for (const family of this.syncFamilies) this.knownFamilies.add(family);
+        if (!this.firstSyncReported) {
+            this.firstSyncReported = true;
+            const { onFirstSyncComplete } = this.deps;
+            if (onFirstSyncComplete) runIsolated(log, 'Config override check', () => onFirstSyncComplete(this.discoveredIds));
+        }
         this.scheduleMatterPass();
     }
 

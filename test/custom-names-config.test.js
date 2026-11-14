@@ -100,12 +100,16 @@ test('F02/F38: no per-device setting in the UI schema is a free-form map or an u
     assert.deepEqual(offenders, []);
 });
 
-test('F38: overrides that hide devices from Matter are reported at startup', () => {
+test('F38: overrides that hide devices from Matter are reported once the devices are discovered', () => {
+    // MAT-10: reported at the end of the first sync, counting only devices the panel reported.
+    const { resolveRuntimeConfig } = require('../dist/platform/runtime-config.js');
+    const { reportConfigOverrides } = require('../dist/platform/override-reconciliation.js');
     const warnings = [];
-    new DiscoveryService({ matterOverrides: [
+    const runtime = resolveRuntimeConfig({ matterOverrides: [
         { deviceId: 'zone_18', name: 'Contatto Studio', exposed: false },
         { deviceId: 'zone_19', name: 'Contatto Cucina', exposed: true },
-    ] }, { ...log, warn: (m) => warnings.push(m) });
+    ] }, log);
+    reportConfigOverrides(runtime, new Set(['zone_18', 'zone_19']), { ...log, warn: (m) => warnings.push(m) });
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /zone_18/);
     assert.doesNotMatch(warnings[0], /zone_19/);

@@ -56,6 +56,53 @@ export interface ResolvedMatterPolicy {
     names: ResolvedDeviceNames;
 }
 
+/**
+ * The config exactly as Homebridge hands it over: anything the user can write
+ * in `config.json`, so every key is `unknown` until `resolveRuntimeConfig`
+ * validates it (`runtime-config.ts`).
+ */
+export interface RawLares4Config extends PlatformConfig {
+    ip?: unknown;
+    sender?: unknown;
+    pin?: unknown;
+    https?: unknown;
+    port?: unknown;
+    debug?: unknown;
+    logLevel?: unknown;
+    maxSeconds?: unknown;
+    reconnectInterval?: unknown;
+    heartbeatInterval?: unknown;
+    commandTimeoutMs?: unknown;
+    allowInsecureTls?: unknown;
+    excludeZones?: unknown;
+    excludeOutputs?: unknown;
+    excludeSensors?: unknown;
+    excludeScenarios?: unknown;
+    exposePartialArmScenarios?: unknown;
+    matterExposure?: unknown;
+    matterOverrides?: unknown;
+    matterRecoveryRequests?: unknown;
+    matterUnregisterTimeoutMs?: unknown;
+    customNames?: unknown;
+    scenarioAutoOffDelay?: unknown;
+    coverStepSize?: unknown;
+    temperatureDefaults?: unknown;
+    devicesSummaryDelay?: unknown;
+    mqtt?: unknown;
+    roomMapping?: unknown;
+    domusThermostat?: unknown;
+    ksaImport?: unknown;
+    generateDebugFile?: unknown;
+    debugCaptureDurationMs?: unknown;
+}
+
+/**
+ * The config as the rest of the plugin reads it (`platform.config`): the keys
+ * the plugin consumes already validated and normalized by `resolveRuntimeConfig`
+ * (booleans are real booleans, numbers are inside the schema limits, lists are
+ * clean). Consumers should prefer `platform.runtimeConfig`, where nothing is
+ * optional; this shape stays for the code that still reads `platform.config`.
+ */
 export interface Lares4Config extends PlatformConfig {
     ip?: string;
     sender?: string;

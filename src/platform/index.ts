@@ -26,18 +26,22 @@ import { DeviceListService } from './device-list-service';
 import { DeviceEventRouter } from './device-event-router';
 import { DiscoveryService } from './discovery-service';
 import { KsaImportService } from './ksa-import-service';
-import { normalizeMatterRecoveryRequests } from './matter-override-config';
+import { reportConfigOverrides } from './override-reconciliation';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
+import { resolveRuntimeConfig, toPlatformConfig, type RuntimeConfig } from './runtime-config';
 import { SyncLifecycle } from './sync-lifecycle';
-import type { AccessoryHandler, Lares4Config } from './types';
+import type { AccessoryHandler, Lares4Config, RawLares4Config } from './types';
 
-export type { AccessoryHandler, Lares4Config, MatterExposureConfig, DeviceListItem, DevicesList } from './types';
+export type { AccessoryHandler, Lares4Config, MatterExposureConfig, DeviceListItem, DevicesList, RawLares4Config } from './types';
+export type { RuntimeConfig } from './runtime-config';
 
 export class Lares4Platform implements DynamicPlatformPlugin {
     public readonly Service: typeof Service;
     public readonly Characteristic: typeof Characteristic;
     public readonly accessories: Map<string, PlatformAccessory> = new Map();
     public readonly accessoryHandlers: Map<string, AccessoryHandler> = new Map();
+    /** The user's config with every key this plugin reads already validated (see `runtimeConfig`). */
+    public readonly config: Lares4Config;
 
     public wsClient?: KseniaWebSocketClient;
     public mqttBridge?: MqttBridge;
@@ -53,18 +57,22 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly ksaImportService: KsaImportService;
     private readonly deviceEvents: DeviceEventRouter;
     private readonly syncLifecycle: SyncLifecycle;
+    private runtime: RuntimeConfig;
     private debugCapture?: DebugCaptureManager;
     /** Set at shutdown: an initialization still in progress must not connect afterwards. */
     private shuttingDown = false;
 
     constructor(
         public readonly log: Logger,
-        public readonly config: Lares4Config,
+        config: RawLares4Config,
         public readonly api: API,
     ) {
         this.Service = api.hap.Service;
         this.Characteristic = api.hap.Characteristic;
-        this.discoveryService = new DiscoveryService(this.config, this.log);
+        // The only place the raw config is interpreted: problems are logged here, once.
+        this.runtime = resolveRuntimeConfig(config, this.log);
+        this.config = toPlatformConfig(config, this.runtime);
+        this.discoveryService = new DiscoveryService(this.config, this.log, this.runtime);
         this.lifecycleService = new PlatformLifecycleService(this.log);
         this.deviceListService = new DeviceListService({
             log: this.log,
@@ -95,10 +103,10 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             log: this.log,
             getWsClient: () => this.wsClient,
             storagePath: this.api.user.storagePath(),
-            momentaryAutoOffMs: this.config?.scenarioAutoOffDelay,
+            momentaryAutoOffMs: this.runtime.scenarioAutoOffDelay,
             isDeviceExposed: (device: KseniaDevice): boolean => this.isMatterEligible(device),
-            recoveryRequests: normalizeMatterRecoveryRequests(this.config.matterRecoveryRequests),
-            unregisterTimeoutMs: this.config.matterUnregisterTimeoutMs,
+            recoveryRequests: this.runtime.matterRecoveryRequests,
+            unregisterTimeoutMs: this.runtime.matterUnregisterTimeoutMs,
         });
         this.deviceEvents = new DeviceEventRouter({
             log: this.log,
@@ -114,11 +122,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             matterRegistry: this.matterRegistry,
             eligibleMatterDevices: (): KseniaDevice[] => [...this.deviceEvents.matterSnapshots]
                 .filter((device: KseniaDevice): boolean => this.isMatterEligible(device)),
+            onFirstSyncComplete: (discoveredIds: ReadonlySet<string>): void =>
+                reportConfigOverrides(this.runtime, discoveredIds, this.log),
         });
 
-        if (!hasConnectionConfig(config, this.log)) return;
-        // A PIN typed as a number in the JSON editor would escape every string-based mask and scrub.
-        this.config.pin = String(config.pin);
+        if (!hasConnectionConfig(config, this.runtime, this.log)) return;
 
         initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW, [
             this.config.ip,
@@ -140,6 +148,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         });
     }
 
+    /** Validated config with nothing optional where a default exists; prefer it to `config`. */
+    public get runtimeConfig(): RuntimeConfig {
+        return this.runtime;
+    }
+
     public configureMatterAccessory(accessory: MatterAccessory): void {
         this.matterRegistry.configureCachedAccessory(accessory);
     }
@@ -149,29 +162,32 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             if (this.initAborted()) return;
             this.log.info('Initializing Ksenia Lares4 connection...');
 
-            if (!this.config.ip || !this.config.pin) {
-                this.log.error('Configurazione mancante: IP e PIN sono obbligatori');
+            if (!this.runtime.ip || !this.runtime.pin) {
+                this.log.error('Configuration missing: IP and PIN are required');
                 return;
             }
-            const { ip, pin } = this.config;
 
             const ksaCache = await this.ksaImportService.prepare(this.config, PLATFORM_NAME);
             // Nothing below awaits until connect(): one check covers the client,
             // the MQTT bridge, the debug capture and the connection.
             if (this.initAborted()) return;
 
-            this.wsClient = createWebSocketClient({ ...this.config, ip, pin }, this.log, ksaCache);
+            // The KSA import may have replaced mappings in `this.config`: read them back.
+            this.runtime = resolveRuntimeConfig(this.config, this.log);
+            const { ip, pin } = this.runtime;
+            if (!ip || !pin) return;
+            this.wsClient = createWebSocketClient({ ...this.runtime, ip, pin }, this.log, ksaCache);
 
             this.syncLifecycle.attach(this.wsClient, this.deviceEvents);
             // MQTT and debug capture must not depend on the first connect: if the
             // panel is offline at boot, connect() rejects while the client keeps
             // reconnecting in the background.
-            if (this.config.mqtt?.enabled) {
-                this.mqttBridge = new MqttBridge(this.config.mqtt, this.log, this);
+            if (this.runtime.mqtt?.enabled) {
+                this.mqttBridge = new MqttBridge(this.runtime.mqtt, this.log, this);
                 this.log.info('MQTT Bridge initialized');
             }
 
-            if (this.config.generateDebugFile) {
+            if (this.runtime.generateDebugFile) {
                 this.debugCapture = startRequestedDebugCapture(this.config, this.log, this.api.user.storagePath(), this.wsClient);
                 void this.configFileService.disableDebugFlag(PLATFORM_NAME);
             }
@@ -183,7 +199,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.log.error('Lares4 initialization error:', error instanceof Error ? error.message : String(error));
             // A TLS failure fixed by allowInsecureTls is a setup issue, already
             // explained in the log by the client: it is not a bug to report.
-            const tlsContext = { useHttps: this.config.https !== false, allowInsecureTls: this.config.allowInsecureTls === true };
+            const tlsContext = { useHttps: this.runtime.https, allowInsecureTls: this.runtime.allowInsecureTls };
             if (!tlsConfigurationHint(error, tlsContext)) {
                 captureError(error, { context: 'initializeLares4' });
             }
