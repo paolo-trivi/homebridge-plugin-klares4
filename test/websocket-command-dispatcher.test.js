@@ -29,8 +29,10 @@ test('CommandDispatcher resolves pending command on expected response', async ()
 
   dispatcher.resolvePendingCommand({ ID: '42', CMD: 'WRITE_RES' });
 
-  await pending;
-  assert.ok(true);
+  const ack = await pending;
+  assert.equal(ack.status, 'acknowledged');
+  assert.equal(ack.correlation, 'exact-id');
+  assert.equal(ack.responseCmd, 'WRITE_RES');
 });
 
 test('CommandDispatcher resolves single compatible pending command when response ID mismatches', async () => {
@@ -39,18 +41,24 @@ test('CommandDispatcher resolves single compatible pending command when response
 
   dispatcher.resolvePendingCommand({ ID: '999', CMD: 'WRITE_RES' });
 
-  await pending;
-  assert.ok(true);
+  const ack = await pending;
+  assert.equal(ack.correlation, 'single-compatible');
+  assert.equal(ack.responseCmd, 'WRITE_RES');
 });
 
 test('CommandDispatcher does not resolve on mismatched ID when multiple compatible pending commands exist', async () => {
   const dispatcher = new CommandDispatcher();
-  const pendingA = dispatcher.registerPendingCommand('42', 500, ['WRITE_RES']);
-  const pendingB = dispatcher.registerPendingCommand('43', 500, ['WRITE_RES']);
+  const pendingA = dispatcher.registerPendingCommand('42', 40, ['WRITE_RES']);
+  const pendingB = dispatcher.registerPendingCommand('43', 40, ['WRITE_RES']);
 
   dispatcher.resolvePendingCommand({ ID: '999', CMD: 'WRITE_RES' });
 
-  await assert.rejects(Promise.all([pendingA, pendingB]), /timed out/);
+  // Neither may be acknowledged by a foreign ID: both run into the timeout.
+  const [a, b] = await Promise.allSettled([pendingA, pendingB]);
+  assert.equal(a.status, 'rejected');
+  assert.match(a.reason.message, /timed out/);
+  assert.equal(b.status, 'rejected');
+  assert.match(b.reason.message, /timed out/);
 });
 
 test('CommandDispatcher rejects on timeout', async () => {
