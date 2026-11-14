@@ -29,12 +29,16 @@ The Matter code reads both only through these optional status fields. Task D add
 - A Matter thermostat command that cannot reach the panel (no connection) is reported as failed and the previous value comes back, instead of looking accepted. (TH-17, MAT-15)
 - The Matter fallback store no longer rewrites a file it does not understand (a version written as text, an unknown layout): it is left untouched and the state is kept in memory. An unreadable file is copied to `klares4-matter-fallback.json.unreadable.bak` before the store starts again. A recovery in progress is no longer reported as "interrupted" by the plugin itself while it is still running. (TH-14)
 
+- On the first start without a `.ksa` backup, the panel lists the outputs before the thermostat programs, so a thermostat was registered with the role its name suggested and kept that shape (for example heating and cooling on a heating-only output) until Homebridge restarted. The Matter thermostat is now replaced, keeping its identity, as soon as the program data gives the real role, and also when the program is changed on the panel. Panels that do not provide the programs keep the name-based role and are registered at once. (TH-05)
+- On Homebridge versions that accept only the older thermostat payload, the plugin no longer has every thermostat refused and retried at each start: it remembers which payload worked and starts from it, and moves to the other payload by itself if Homebridge later refuses the remembered one. (TH-01)
+
 ### Changed
 - Heating-only thermostats (and cooling-only ones, when the program data says so) are exposed to Matter with only that capability: no cooling slider, no Auto. Thermostats whose output does both keep heating, cooling and Auto. (TH-01, TH-05)
 
 ## Migration notes
 - **Homebridge 2.5 users** (every thermostat was a temperature sensor): at the first start of 2.3.0 each thermostat in `klares4-matter-fallback.json` is removed as a temperature sensor and registered as a thermostat, once. In Apple Home / Alexa / Google the temperature sensor disappears and a thermostat appears (new accessory: rooms and automations that used the sensor must be set again). Watch the log for `was saved as a TemperatureSensor fallback by an earlier version; trying the native Thermostat once`. If it falls back again, the log says why; `matterRecoveryRequests` still allows another explicit attempt.
 - **Users whose thermostats were native** (Homebridge versions that accepted the 2.2.0 payload): the cluster now has fewer features (no Occupancy, no Auto/Cooling on heating-only outputs). Homebridge sees a different endpoint shape in its cache and replaces the endpoint at the first start; controllers may show it as changed.
+- The store file also records, for a thermostat registered with the older payload, `nativeShape: "legacy"` with its `nativeShapeRevision` (records with `mode: "native"`); a thermostat registered with the current payload adds nothing unless it already had a record. 2.2.0 ignores the field.
 - The store file gains an optional field `nativeShapeRevision` (the Thermostat payload revision of the last native attempt). 2.2.0 reads the file unchanged (the field is kept as is).
 - Without the program data (no `PRG_THERMOSTATS` and no `.ksa`), the plugin still decides heating-only vs heating-and-cooling from the name, as 2.2.0 did, until the discovery layer fills `outputRole` (see below).
 
@@ -45,6 +49,16 @@ The Matter code reads both only through these optional status fields. Task D add
 - `matter-registration-flow.ts`: `recoveryDeps()` passes `thermostatEchoTracker`.
 - The attempt itself is `registerNextThermostatAttempt` in `matter-thermostat-attempts.ts`: rebuilds the cluster with the 2.2.0 payload, unregisters the refused endpoint, records the new payload as pushed (echo guard), registers and lets the probe decide. F1's strict probe checks the declared clusters (`thermostat`), so a heating-only Thermostat is queryable (tested on the real stack).
 - Existing tests that modelled "Thermostat refused once → TemperatureSensor" now refuse both payloads (`matter-accessory-registry`, `matter-placeholder-initial-state`, `matter-registration-race`): the fallback is reached after the second attempt.
+
+### Role known after the registration (first login without `.ksa`) and remembered payload
+
+Two ways were possible for a thermostat registered before `PRG_THERMOSTATS` arrives: (a) hold its registration until the program data is known or known to be missing, or (b) replace the endpoint when the role changes. (b) is the one implemented: the registry does not know whether the panel will answer `PRG_THERMOSTATS` (some answer `CMD_NOT_AVAILABLE`), so (a) needs a protocol-level "programs final" signal and a timeout to avoid a registration left waiting, and the role can change at runtime anyway (program edited on the panel), which only (b) handles. What (b) does (`matter-registration-flow.ts`, `matter-thermostat-attempts.ts`):
+- every state update of a registered native Thermostat compares the static attribute set of the live cluster (declared attributes and control sequence) with the one the device needs now; a difference means the role changed;
+- the endpoint is replaced with F2's `replaceEndpoint(…, 'same-device')` (same output, still a thermostat: `uniqueId` kept) and registered again with the new attributes, in the registration gate; a role change seen while the registration was pending is checked when it completes;
+- if the old endpoint cannot be removed, the registration stays as it is and is not tried again in the session.
+On a panel with programs and no `.ksa`, the first start registers each thermostat once with the name-based role and replaces it once if the program says otherwise (the endpoint is absent for about a second). With the `.ksa` cache or from the second login the role is known at registration and nothing is replaced.
+
+The payload that worked natively is remembered in the fallback store (`nativeShape`, `nativeShapeRevision`); each registry starts a thermostat from it (`startThermostatAttempts`) and moves to the other payload only if the runtime refuses it. A remembered payload of another revision is ignored.
 
 ### D (or integration) — fill `outputRole` and `status.season`
 - `status.outputRole` from `PRG_THERMOSTATS` / the `.ksa` cache (D already does this in its branch). Only the panel's own name may be used as fallback, never a custom/Matter name.

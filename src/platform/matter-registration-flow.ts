@@ -19,6 +19,8 @@ import { buildStateUpdates } from './matter-state-updates';
 import type { MatterStateUpdateQueue } from './matter-state-update-queue';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { resolvePersistedThermostatFallback } from './matter-thermostat-recovery-request';
+import { needsThermostatReshape, reshapeThermostatEndpoint, startThermostatAttempts } from './matter-thermostat-attempts';
+import { thermostatShapeOf } from './matter-thermostat-shape';
 import type { MatterTopologyCoordinator } from './matter-topology-coordinator';
 
 const MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR = true;
@@ -62,13 +64,15 @@ export interface MatterRegistrationContext {
  * the endpoint answers, then `registered`; failures go to
  * `matter-registration-recovery.ts`. One registration in flight per device.
  *
- * Thermostat-specific steps sit in two places only: `resolveShape` (which
- * shape to register) and `onRegistered` (what a successful native register
- * clears).
+ * Thermostat-specific steps: `resolveShape` (which shape to register),
+ * `onRegistered` (what a successful native register clears and remembers) and
+ * `reshapeThermostat` (a registered Thermostat whose output role changed).
  */
 export class MatterRegistrationFlow {
     private readonly gate = new MatterRegistrationGate();
     private readonly settlement: RegisterSettlement;
+    /** Thermostats whose payload attempts this registry has started. */
+    private readonly thermostatAttemptsStarted = new Set<string>();
 
     constructor(private readonly ctx: MatterRegistrationContext) {
         this.settlement = new RegisterSettlement(ctx.api);
@@ -93,7 +97,12 @@ export class MatterRegistrationFlow {
 
     public enqueueStateFor(device: KseniaDevice): void {
         const reg = this.ctx.registrations.get(device.id);
-        if (!reg || !hasObservedState(device)) return;
+        if (!reg) return;
+        if (device.type === 'thermostat' && reg.status === 'registered' && needsThermostatReshape(reg.matterAccessory, device)) {
+            void this.reshapeThermostat(device);
+            return;
+        }
+        if (!hasObservedState(device)) return;
         enqueueDeviceState(reg, device, device.type === 'thermostat' && this.ctx.thermostatFallbackUUIDs.has(device.id));
     }
 
@@ -114,6 +123,10 @@ export class MatterRegistrationFlow {
     /** Which shape this device registers with: a persisted thermostat fallback stays a TemperatureSensor. */
     private async resolveShape(device: KseniaDevice): Promise<{ accessory?: MatterAccessory; fallback: boolean }> {
         const { ctx } = this;
+        if (device.type === 'thermostat' && !this.thermostatAttemptsStarted.has(device.id)) {
+            this.thermostatAttemptsStarted.add(device.id);
+            startThermostatAttempts(device.id, ctx.fallbackStore.rememberedShape(device.id));
+        }
         const fallback = await resolvePersistedThermostatFallback(
             device.id,
             device.type === 'thermostat' && ctx.thermostatFallbackUUIDs.has(device.id),
@@ -214,14 +227,31 @@ export class MatterRegistrationFlow {
         ctx.reachability.onRegistered(uuid);
         // A level reported while the registration was pending was only queued.
         const latest = reg.matterAccessory.context?.device as KseniaDevice | undefined;
-        if (latest && needsDimmableUpgrade(reg, latest)) void ctx.updateAccessoryState(latest);
+        if (latest && (needsDimmableUpgrade(reg, latest) || needsThermostatReshape(reg.matterAccessory, latest))) {
+            void ctx.updateAccessoryState(latest);
+        }
+    }
+
+    /**
+     * The output's role became known (program data read after the outputs) or
+     * changed on the panel: the endpoint is replaced by one with the new
+     * attribute set, keeping its identity. A caller arriving meanwhile joins.
+     */
+    private reshapeThermostat(device: KseniaThermostat): Promise<void> {
+        return this.gate.run(device.id, async () => {
+            const reg = this.ctx.registrations.get(device.id);
+            if (!reg || reg.status !== 'registered' || !needsThermostatReshape(reg.matterAccessory, device)) return;
+            if (!await reshapeThermostatEndpoint(reg, device, { log: this.ctx.log, topologyCoordinator: this.ctx.topologyCoordinator, fmtErr })) return;
+            this.ctx.registrations.delete(device.id);
+            await this.performRegistration(device, { reason: 'upgrade', inheritUniqueId: reg.inheritedUniqueId });
+        }, () => this.ctx.updateAccessoryState(device));
     }
 
     /** A thermostat that registered natively drops its stale fallback marker. */
     private onRegistered(reg: MatterRegistration): void {
         if (reg.deviceType !== 'thermostat' || isFallbackTemperatureSensor(reg)) return;
         this.ctx.thermostatFallbackUUIDs.delete(reg.uuid);
-        this.ctx.fallbackStore.markNative(reg.uuid);
+        this.ctx.fallbackStore.markNative(reg.uuid, thermostatShapeOf(reg.uuid));
     }
 
     private republishKnownState(uuid: string): void {

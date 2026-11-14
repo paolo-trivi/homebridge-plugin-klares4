@@ -3,7 +3,7 @@ import * as path from 'path';
 import type { Logger } from 'homebridge';
 import { writeJsonAtomicSync } from '../atomic-file';
 import { PLUGIN_VERSION_RAW } from '../plugin-version';
-import { THERMOSTAT_SHAPE_REVISION } from './matter-thermostat-shape';
+import { THERMOSTAT_SHAPE_REVISION, type ThermostatShape } from './matter-thermostat-shape';
 
 const STORE_FILENAME = 'klares4-matter-fallback.json';
 const STORE_VERSION = 2;
@@ -22,6 +22,12 @@ export interface MatterFallbackRecord {
      * attempt with the current payload.
      */
     nativeShapeRevision?: number;
+    /**
+     * The Thermostat payload the runtime accepted at the last native
+     * registration, of revision `nativeShapeRevision`. The next start begins
+     * with it instead of re-trying a payload the runtime refuses.
+     */
+    nativeShape?: ThermostatShape;
     pluginVersion: string;
 }
 
@@ -114,17 +120,41 @@ export class MatterFallbackStore {
             lastProcessedRecoveryRequest: existing?.lastProcessedRecoveryRequest,
             // A fallback decided now was decided with the current payload.
             nativeShapeRevision: Math.max(existing?.nativeShapeRevision ?? 0, THERMOSTAT_SHAPE_REVISION),
+            nativeShape: undefined,
             pluginVersion: PLUGIN_VERSION_RAW,
         });
         this.write();
     }
 
-    public markNative(deviceId: string): void {
+    /**
+     * A native Thermostat registration worked with `shape`. Only a payload other
+     * than the preferred one creates a record; an existing record is updated.
+     */
+    public markNative(deviceId: string, shape: ThermostatShape = 'conformant'): void {
         this.ensureLoaded();
         const existing = this.records.get(deviceId);
-        if (!existing) return;
-        this.records.set(deviceId, { ...existing, mode: 'native', reason: 'recovered' });
+        if (!existing && shape === 'conformant') return;
+        if (existing?.mode === 'native' && existing.nativeShape === shape
+            && existing.nativeShapeRevision === THERMOSTAT_SHAPE_REVISION) return;
+        this.records.set(deviceId, {
+            deviceId,
+            attempts: 0,
+            ...existing,
+            mode: 'native',
+            reason: 'recovered',
+            nativeShape: shape,
+            nativeShapeRevision: THERMOSTAT_SHAPE_REVISION,
+            pluginVersion: PLUGIN_VERSION_RAW,
+        });
         this.write();
+    }
+
+    /** The payload that last worked natively, when it is of the current revision. */
+    public rememberedShape(deviceId: string): ThermostatShape | undefined {
+        this.ensureLoaded();
+        const record = this.records.get(deviceId);
+        if (record?.mode !== 'native' || record.nativeShapeRevision !== THERMOSTAT_SHAPE_REVISION) return undefined;
+        return record.nativeShape;
     }
 
     public remove(deviceId: string): void {
@@ -258,6 +288,7 @@ function toRecord(value: unknown): MatterFallbackRecord | undefined {
         ...(typeof r.lastFailureAt === 'string' ? { lastFailureAt: r.lastFailureAt } : {}),
         ...(isCount(r.lastProcessedRecoveryRequest) ? { lastProcessedRecoveryRequest: r.lastProcessedRecoveryRequest } : {}),
         ...(isCount(r.nativeShapeRevision) ? { nativeShapeRevision: r.nativeShapeRevision } : {}),
+        ...(r.nativeShape === 'conformant' || r.nativeShape === 'legacy' ? { nativeShape: r.nativeShape } : {}),
         pluginVersion: r.pluginVersion,
     };
 }

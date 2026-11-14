@@ -17,30 +17,55 @@
  *   occupancy and deadband attribute plus the preset workaround that matter.js
  *   0.17 alphas wanted. Only for a runtime that refused the conformant one.
  *
- * The choice is per device UUID and per process: every path that builds the
- * cluster (register, re-map, state update) reads it here, so a registration
- * switched to `legacy` keeps getting updates of the same shape. A restart
- * starts again from `conformant`.
+ * The choice is per device UUID: every path that builds the cluster
+ * (register, re-map, state update) reads it here, so a registration switched
+ * to `legacy` keeps getting updates of the same shape. Each registry starts a
+ * device from the shape that last worked for it, as the fallback store
+ * remembers it (`startThermostatShapes`), and moves to the next untried shape
+ * only when the runtime refuses the current one (`advanceThermostatShape`).
  */
 
 export type ThermostatShape = 'conformant' | 'legacy';
 
+/** Preferred order when nothing is remembered. */
+const SHAPE_ORDER: readonly ThermostatShape[] = ['conformant', 'legacy'];
+
 /**
  * Revision of the payload the first attempt sends (1 = the 2.2.0 payload, 2 =
  * the conformant one). A persisted fallback older than this revision was never
- * tried with it and gets one automatic attempt (`matter-fallback-store.ts`).
+ * tried with it and gets one automatic attempt; a remembered shape of another
+ * revision is not trusted (`matter-fallback-store.ts`).
  */
 export const THERMOSTAT_SHAPE_REVISION = 2;
 
-const legacyShapeUUIDs = new Set<string>();
+const currentShapes = new Map<string, ThermostatShape>();
+const triedShapes = new Map<string, Set<ThermostatShape>>();
 
 export function thermostatShapeOf(uuid: string): ThermostatShape {
-    return legacyShapeUUIDs.has(uuid) ? 'legacy' : 'conformant';
+    return currentShapes.get(uuid) ?? SHAPE_ORDER[0];
 }
 
-export function setThermostatShape(uuid: string, shape: ThermostatShape): void {
-    if (shape === 'legacy') legacyShapeUUIDs.add(uuid);
-    else legacyShapeUUIDs.delete(uuid);
+/** A new series of attempts for `uuid`, starting from `first`. */
+export function startThermostatShapes(uuid: string, first: ThermostatShape = SHAPE_ORDER[0]): void {
+    currentShapes.set(uuid, first);
+    triedShapes.set(uuid, new Set([first]));
+}
+
+/** Moves `uuid` to the next shape not tried in this series; `undefined` when all were tried. */
+export function advanceThermostatShape(uuid: string): ThermostatShape | undefined {
+    const tried = triedShapes.get(uuid) ?? new Set([thermostatShapeOf(uuid)]);
+    const next = SHAPE_ORDER.find((shape) => !tried.has(shape));
+    if (!next) return undefined;
+    tried.add(next);
+    triedShapes.set(uuid, tried);
+    currentShapes.set(uuid, next);
+    return next;
+}
+
+/** Forgets `uuid`: the next build uses the preferred shape. */
+export function resetThermostatShapes(uuid: string): void {
+    currentShapes.delete(uuid);
+    triedShapes.delete(uuid);
 }
 
 // PresetScenarioEnum (Matter spec §4.3.8.16)

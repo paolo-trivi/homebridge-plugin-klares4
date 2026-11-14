@@ -155,7 +155,9 @@ test('TH-01: on a runtime that only accepts the preset payload, the registry end
     assert.ok(endpoint.clusters.thermostat.presetTypes, 'the second (2.2.0) payload is the one live');
     assert.ok(lines.some((l) => /trying the payload of earlier versions/.test(l)));
     assert.equal(lines.some((l) => /falling back to TemperatureSensor before/.test(l)), false);
-    assert.equal(fs.existsSync(path.join(storagePath, FALLBACK_FILE)), false, 'no fallback persisted');
+    const record = JSON.parse(fs.readFileSync(path.join(storagePath, FALLBACK_FILE), 'utf8')).thermostats[0];
+    assert.equal(record.mode, 'native', 'no fallback persisted');
+    assert.equal(record.nativeShape, 'legacy', 'the payload that worked is remembered');
     // State updates keep the attribute set of the live payload.
     const next = { ...device, status: { ...device.status, targetTemperature: 22 } };
     markStatusObserved(next);
@@ -251,4 +253,80 @@ test('TH-01: a failed automatic recovery returns to TemperatureSensor and is not
     const boot3 = await registryWith(t, device, { hb: makeHbMatterApi(), storagePath, recoveryRequests: { thermostat_45: 1 } });
     assert.equal(boot3.hb.endpoints.get('thermostat_45').deviceType.name, 'Thermostat');
     assert.equal(store().mode, 'native');
+});
+
+/** Payload kind of every Thermostat register call the plugin makes. */
+function recordAttempts(hb, uuid) {
+    const attempts = [];
+    const register = hb.api.matter.registerPlatformAccessories;
+    hb.api.matter.registerPlatformAccessories = async (plugin, platform, list) => {
+        for (const a of list) {
+            if (a.UUID === uuid) attempts.push(a.clusters.thermostat ? (a.clusters.thermostat.presetTypes ? 'legacy' : 'conformant') : 'sensor');
+        }
+        return register(plugin, platform, list);
+    };
+    return attempts;
+}
+
+test('TH-01: the payload that worked is where the next start begins, and the plugin follows a runtime that changes', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-thermo-role-');
+    const device = thermostat(47, { role: 'heating' });
+    t.after(() => resetThermostatAttempts(device.id));
+    const onlyLegacy = (a) => a.clusters?.thermostat !== undefined && !a.clusters.thermostat.presetTypes;
+    const onlyConformant = (a) => a.clusters?.thermostat !== undefined && !!a.clusters.thermostat.presetTypes;
+    const store = () => JSON.parse(fs.readFileSync(path.join(storagePath, FALLBACK_FILE), 'utf8')).thermostats[0];
+
+    // Each boot: a new registry and a new Homebridge (restored from the previous one's cache).
+    const boot = async (failRegistration, restored = []) => {
+        const hb = makeHbMatterApi({ failRegistration, restored });
+        const attempts = recordAttempts(hb, device.id);
+        const { registry } = await registryWith(t, device, { hb, storagePath });
+        await waitFor(() => registry.getStatus(device.id) === 'registered', 5000);
+        return { hb, attempts };
+    };
+
+    const boot1 = await boot(onlyLegacy);
+    assert.deepEqual(boot1.attempts, ['conformant', 'legacy']);
+    assert.equal(store().nativeShape, 'legacy');
+
+    const boot2 = await boot(onlyLegacy, boot1.hb.cacheSnapshot());
+    assert.deepEqual(boot2.attempts, ['legacy'], 'no refused attempt at the second start');
+    assert.equal(boot2.hb.endpoints.get(device.id).deviceType.name, 'Thermostat');
+
+    // Homebridge updated: now only the conformant payload is accepted.
+    // (the new runtime could not restore the cached endpoint built with the old payload)
+    const boot3 = await boot(onlyConformant);
+    assert.deepEqual(boot3.attempts, ['legacy', 'conformant']);
+    assert.equal(boot3.hb.endpoints.get(device.id).deviceType.name, 'Thermostat');
+    assert.equal(store().nativeShape, 'conformant');
+    assert.equal(store().mode, 'native');
+
+    const boot4 = await boot(onlyConformant, boot3.hb.cacheSnapshot());
+    assert.deepEqual(boot4.attempts, ['conformant']);
+});
+
+test('TH-01: a remembered payload of another revision is not trusted', (t) => {
+    const storagePath = tmpStorage(t, 'klares4-thermo-role-');
+    fs.writeFileSync(path.join(storagePath, FALLBACK_FILE), JSON.stringify({ version: 2, thermostats: [
+        { deviceId: 'thermostat_48', mode: 'native', reason: 'recovered', attempts: 0, nativeShape: 'legacy', nativeShapeRevision: 1, pluginVersion: '2.3.0' },
+    ] }));
+    const { MatterFallbackStore } = require('../dist/platform/matter-fallback-store.js');
+    const store = new MatterFallbackStore(storagePath, recordingLog().log);
+    assert.equal(store.rememberedShape('thermostat_48'), undefined);
+});
+
+test('TH-01: a 2.2.0 fallback file (no version) on a runtime that takes only the second payload ends native and is remembered', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-thermo-role-');
+    fs.writeFileSync(path.join(storagePath, FALLBACK_FILE), JSON.stringify({ thermostatAsTemperatureSensor: ['thermostat_49'] }));
+    const device = thermostat(49, { role: 'heating' });
+    t.after(() => resetThermostatAttempts(device.id));
+    const hb = makeHbMatterApi({ failRegistration: (a) => a.clusters?.thermostat !== undefined && !a.clusters.thermostat.presetTypes });
+    const attempts = recordAttempts(hb, device.id);
+    const { registry, lines } = await registryWith(t, device, { hb, storagePath });
+    await waitFor(() => registry.getStatus(device.id) === 'registered' && hb.endpoints.get(device.id)?.clusters?.thermostat, 5000);
+    assert.ok(lines.some((l) => /trying the native Thermostat once/.test(l)));
+    assert.deepEqual(attempts, ['conformant', 'legacy']);
+    const record = JSON.parse(fs.readFileSync(path.join(storagePath, FALLBACK_FILE), 'utf8')).thermostats[0];
+    assert.deepEqual([record.mode, record.nativeShape, record.attempts], ['native', 'legacy', 1]);
+    assert.ok(fs.existsSync(path.join(storagePath, `${FALLBACK_FILE}.v1.bak`)));
 });
