@@ -11,13 +11,11 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '0';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { SyncLifecycle } = require('../dist/platform/sync-lifecycle.js');
-const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 const { recordingLog } = require('./fixtures/lares4-mock-panel.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
@@ -25,13 +23,11 @@ const zone = (n, name) => ({ id: `zone_${n}`, type: 'zone', name, description: '
 const cover = (n, name) => ({ id: `cover_${n}`, type: 'cover', name, description: '', status: { position: 0, state: 'stopped' } });
 
 function storage(t) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-single-flight-'));
-    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    return dir;
+    return tmpStorage(t, 'klares4-single-flight-');
 }
 
 async function setup(t) {
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const log = recordingLog();
     const registry = new MatterAccessoryRegistry({ api: hb.api, log, getWsClient: () => undefined, storagePath: storage(t) });
     const devices = [1, 2, 3].map((n) => zone(n, `Window ${n}`));

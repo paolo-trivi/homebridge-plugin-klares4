@@ -15,7 +15,7 @@ const hap = require('@homebridge/hap-nodejs');
 
 const { startMockPanel } = require('./fixtures/lares4-mock-panel.js');
 const { createPlatform } = require('./fixtures/platform-session-harness.js');
-const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
 async function panelFor(t, options) {
@@ -31,7 +31,7 @@ test('PLAT-02: a HAP failure on one device does not stop HAP, Matter or MQTT for
     // No status for light_5: only its discovery can register it on Matter.
     const { DEFAULT_DATA } = require('./fixtures/lares4-mock-panel.js');
     const panel = await panelFor(t, { data: { STATUS_OUTPUTS: DEFAULT_DATA.STATUS_OUTPUTS.filter((o) => o.ID !== '5') } });
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const { platform, api, log } = createPlatform(t, {
         port: panel.port,
         matter: hb.api.matter,
@@ -60,7 +60,7 @@ test('PLAT-02: a HAP failure on one device does not stop HAP, Matter or MQTT for
 
 test('PLAT-02: MQTT and HAP failures on a status update do not block the other subsystems', async (t) => {
     const panel = await panelFor(t);
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const { platform, api, log } = createPlatform(t, { port: panel.port, matter: hb.api.matter });
     const published = [];
     platform.mqttBridge = {
@@ -98,7 +98,7 @@ test('HAP bridge limit: one clear warning, and the devices beyond it still reach
             STATUS_ZONES: zones.map((z) => ({ ID: z.ID, STA: 'R', BYP: 'NO', A: 'N', FM: 'F' })),
         },
     });
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const bridge = new hap.Bridge('Synthetic Bridge', hap.uuid.generate('synthetic-bridge'));
     const { platform, api, log } = createPlatform(t, { port: panel.port, matter: hb.api.matter, bridge });
     const published = [];
@@ -129,7 +129,7 @@ test('HAP bridge limit: one clear warning, and the devices beyond it still reach
 
 test('PLAT-06 / SP-09: an excluded device is neither published on MQTT nor forwarded to Matter or HAP', async (t) => {
     const panel = await panelFor(t);
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const { platform, api, log } = createPlatform(t, {
         port: panel.port,
         matter: hb.api.matter,

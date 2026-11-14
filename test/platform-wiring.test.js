@@ -46,8 +46,8 @@ function bootSpiedPlatform(t, config) {
     const platform = new Lares4Platform(silentLog(), { platform: 'Lares4Complete', ip: '127.0.0.1', port: 1, https: false, pin: '135790', telemetry: false, ...config }, api);
     t.after(() => api.emit('shutdown'));
     const seen = { hap: [], hapUpdate: [], mqtt: [], matter: [], matterUpdate: [] };
-    platform.addAccessory = (d) => seen.hap.push(d);
-    platform.updateAccessory = (d) => seen.hapUpdate.push(d);
+    platform['accessoryRegistry'].addAccessory = (d) => seen.hap.push(d);
+    platform['accessoryRegistry'].updateAccessory = (d) => seen.hapUpdate.push(d);
     platform.mqttBridge = { publishDeviceState: (d) => seen.mqtt.push(d), disconnect() {} };
     platform.matterRegistry.addOrUpdateAccessory = async (d) => { seen.matter.push(d); };
     platform.matterRegistry.updateAccessoryState = async (d) => { seen.matterUpdate.push(d); };
@@ -57,8 +57,8 @@ const zone = (id, name) => ({ id: `zone_${id}`, type: 'zone', name, description:
 
 test('a device excluded in the config reaches neither HAP, MQTT nor Matter', (t) => {
     const { platform, seen } = bootSpiedPlatform(t, { excludeZones: ['7'] });
-    platform['handleDeviceDiscovered'](zone(7, 'Zona esclusa'));
-    platform['handleDeviceDiscovered'](zone(8, 'Zona esposta'));
+    platform['deviceEvents'].handleDeviceDiscovered(zone(7, 'Zona esclusa'));
+    platform['deviceEvents'].handleDeviceDiscovered(zone(8, 'Zona esposta'));
     assert.deepEqual(seen.hap.map((d) => d.id), ['zone_8']);
     assert.deepEqual(seen.matter.map((d) => d.id), ['zone_8']);
 });
@@ -66,8 +66,8 @@ test('a device excluded in the config reaches neither HAP, MQTT nor Matter', (t)
 test('the Matter-only name goes to Matter alone; HAP and MQTT keep the shared name', (t) => {
     const { platform, seen } = bootSpiedPlatform(t, { matterOverrides: [{ deviceId: 'zone_8', name: 'Nome solo Matter' }] });
     const source = zone(8, 'Zona sorgente');
-    platform['handleDeviceDiscovered'](source);
-    platform['handleDeviceStatusUpdate'](source);
+    platform['deviceEvents'].handleDeviceDiscovered(source);
+    platform['deviceEvents'].handleDeviceStatusUpdate(source);
     assert.equal(seen.matter[0].name, 'Nome solo Matter');
     assert.equal(seen.matterUpdate[0].name, 'Nome solo Matter');
     assert.equal(seen.hap[0].name, 'Zona sorgente');
