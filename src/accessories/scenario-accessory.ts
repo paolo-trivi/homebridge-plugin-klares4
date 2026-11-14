@@ -1,6 +1,6 @@
 import type { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
 
-import type { Lares4Platform, Lares4Config } from '../platform';
+import type { Lares4Platform } from '../platform';
 import type { KseniaScenario } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
@@ -11,7 +11,7 @@ import { sanitizeHapDisplayName } from '../display-name';
  */
 export class ScenarioAccessory {
     private service: Service;
-    public readonly device: KseniaScenario;
+    public device: KseniaScenario;
     private autoOffTimeout?: NodeJS.Timeout;
 
     constructor(
@@ -58,8 +58,7 @@ export class ScenarioAccessory {
                 await this.platform.wsClient.triggerScenario(this.device.id);
                 this.platform.log.info(`Scenario ${this.device.name} executed`);
 
-                const autoOffDelay =
-                    (this.platform.config as Lares4Config).scenarioAutoOffDelay ?? 500;
+                const autoOffDelay = this.platform.config.scenarioAutoOffDelay ?? 500;
                 if (this.autoOffTimeout) {
                     clearTimeout(this.autoOffTimeout);
                 }
@@ -87,6 +86,12 @@ export class ScenarioAccessory {
     public async getOn(): Promise<CharacteristicValue> {
         // Scenarios don't have persistent state, always return false
         return false;
+    }
+
+    /** The panel renamed or reconfigured the scenario: the handler (and the cached context) follow. */
+    public updateDevice(device: KseniaScenario): void {
+        this.device = device;
+        this.accessory.context.device = device;
     }
 
     public dispose(): void {

@@ -70,11 +70,12 @@ export class GateAccessory {
             await this.platform.wsClient.toggleGate(this.device.id);
             this.platform.log.info(`${this.device.name}: Gate activated`);
 
-            // Auto-off after 500ms to simulate momentary press
+            // Same delay as the Matter momentary switches and the scenarios.
+            const autoOffDelay = this.platform.config.scenarioAutoOffDelay ?? 500;
             this.autoOffTimeout = setTimeout(() => {
                 this.service.updateCharacteristic(this.platform.Characteristic.On, false);
                 this.platform.log.debug(`${this.device.name}: Auto-off triggered`);
-            }, 500);
+            }, autoOffDelay);
 
         } catch (error: unknown) {
             this.platform.log.error(
