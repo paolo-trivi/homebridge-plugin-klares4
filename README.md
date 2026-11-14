@@ -109,7 +109,7 @@ In-place updates are safe by design: accessory UUIDs, serial numbers and Matter 
 
 Tested with **Ksenia Lares 4.0** central units (firmware exposing the `KS_WSOCK` WebSocket subprotocol on the panel's local IP, with a valid system PIN). If your specific Lares 4.0 model works or has issues, please open an issue so the compatibility list can grow.
 
-Requires Homebridge `>= 1.6.0` (also compatible with the 2.x beta line) and Node.js `>= 22` (Homebridge 2.4 supports Node 22, 24 and 26). **Matter support requires Homebridge 2.x.**
+Requires Homebridge `>= 1.6.0` (also compatible with the 2.x beta line) and Node.js `>= 22.12` (Homebridge 2.4 supports Node 22, 24 and 26). **Matter support requires Homebridge 2.x.**
 
 ---
 
@@ -144,7 +144,7 @@ If this plugin saves you time, please ⭐ the repo — it really helps others di
 ### Prerequisites
 
 - Homebridge >= 1.6.0 (Homebridge 2.x required for Matter)
-- Node.js >= 22.0.0
+- Node.js >= 22.12.0
 - Ksenia Lares4 system with WebSocket access enabled
 
 ### Installation
@@ -530,7 +530,7 @@ Gli aggiornamenti sul posto sono sicuri per costruzione: UUID degli accessori, n
 
 Testato con centrali **Ksenia Lares 4.0** (firmware che espone il sottoprotocollo WebSocket `KS_WSOCK` sull'IP locale del pannello, con PIN di sistema valido). Se il tuo modello specifico Lares 4.0 funziona o ha problemi, apri una issue cosi possiamo ampliare la lista di compatibilita.
 
-Richiede Homebridge `>= 1.6.0` (compatibile anche con la linea 2.x beta) e Node.js `>= 22` (Homebridge 2.4 supporta Node 22, 24 e 26). **Il supporto Matter richiede Homebridge 2.x.**
+Richiede Homebridge `>= 1.6.0` (compatibile anche con la linea 2.x beta) e Node.js `>= 22.12` (Homebridge 2.4 supporta Node 22, 24 e 26). **Il supporto Matter richiede Homebridge 2.x.**
 
 Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davvero altri a trovarlo.
 
@@ -552,7 +552,7 @@ Se questo plugin ti fa risparmiare tempo, lascia una ⭐ al repo — aiuta davve
 ### Prerequisiti
 
 - Homebridge >= 1.6.0 (Homebridge 2.x richiesto per Matter)
-- Node.js >= 22.0.0
+- Node.js >= 22.12.0
 - Sistema Ksenia Lares4 con accesso WebSocket abilitato
 
 ### Installazione

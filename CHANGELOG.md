@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Node.js 22.12 or newer is required (`engines.node >= 22.12.0`), the minimum of `@sentry/node` 11 and of Homebridge's own `hap-nodejs`. Node 22.0–22.11 are no longer supported.
+- Anonymous error reporting moves to `@sentry/node` 11. The events sent and the privacy filtering are unchanged.
+
 ## [2.2.0-rc.4] - 2026-09-26
 
 Stability and compliance release, validated on a real Lares4 panel with Homebridge 2.4.0 on Node 24 (Matter-only child bridge, 109 endpoints). Read **Security** and **Changed** before upgrading.
