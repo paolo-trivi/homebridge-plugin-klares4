@@ -7,11 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [2.2.0] - 2026-11-14
+
+Stable release of the `2.2.0-rc.1` … `2.2.0-rc.4` cycle. It also carries the `2.1.5-rc.1` and `2.1.5-rc.2` fixes, which never reached a stable release, so it is the upgrade from `2.1.4`. `2.2.0-rc.4` was validated on a real Lares4 panel (Homebridge 2.4.0, Node 24, Matter-only child bridge with 109 endpoints paired to Apple Home, Alexa and Google). Per-rc detail is kept below.
+
+### Upgrading from 2.1.x: read first
+
+- **Node.js 22.12 or newer is required.** Node 20 and Node 22.0–22.11 are no longer supported.
+- **Partial-arm scenarios are hidden by default** from HomeKit, Matter and MQTT, because triggering one used the stored PIN without any authentication. Upgrading removes them; set `exposePartialArmScenarios: true` to keep them.
+- Setting a thermostat temperature keeps the current mode (OFF stays OFF, AUTO keeps its program) instead of switching to manual.
+- `customNames` is now a list of `{ deviceId, name }` rows. The legacy map is still read, but the Homebridge UI deletes it on its next save.
+- A KSA import no longer switches `roomMapping` on by itself.
+- An HTTPS panel on Node 24 may need `allowInsecureTls: true` (self-signed certificate, TLS legacy renegotiation); the log now says so when it is missing.
+
+### Highlights
+
+- **Matter on Homebridge 2.4:** renames, pruning and thermostat recovery take effect, dimmers are `DimmableLight`, covers show movement, accessories turn unreachable when the panel is lost, and per-device Matter names and exposure (`matterOverrides`) survive the Homebridge UI.
+- **Security:** PIN masked whatever its type, login stops after 3 rejections so the panel does not lock the user out, MQTT credentials masked, and a private Sentry client.
+- **State and commands:** see `2.2.0-rc.4` below for the full list of fixes.
+
+### Fixed since 2.2.0-rc.4
 
 - A panel that needs TLS legacy renegotiation or has a self-signed certificate no longer fails with only a raw OpenSSL error (`unsafe legacy renegotiation disabled`): the log explains that `allowInsecureTls` fixes it, once rather than on every reconnect, and these setup errors are no longer sent as error reports (#37).
 
-### Changed
+### Changed since 2.2.0-rc.4
 
 - Node.js 22.12 or newer is required (`engines.node >= 22.12.0`), the minimum of `@sentry/node` 11 and of Homebridge's own `hap-nodejs`. Node 22.0–22.11 are no longer supported.
 - Anonymous error reporting moves to `@sentry/node` 11. The events sent and the privacy filtering are unchanged.
