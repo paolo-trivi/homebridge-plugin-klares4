@@ -112,9 +112,9 @@ test('F03: at boot a Matter endpoint restored from cache is not overwritten with
     const path = require('node:path');
     const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
     const { markStatusPlaceholder } = require('../dist/device-observation.js');
-    const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+    const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 
-    const hb = makeHb24MatterApi({
+    const hb = makeHbMatterApi({
         restored: [{ UUID: 'cover_7', deviceType: deviceTypes.WindowCovering, clusters: { windowCovering: {} } }],
     });
     const registry = new MatterAccessoryRegistry({

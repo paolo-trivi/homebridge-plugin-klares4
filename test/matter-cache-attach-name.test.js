@@ -11,7 +11,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '10';
 process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
@@ -21,7 +21,7 @@ const storage = () => fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-attach-name
 const light = (name) => ({ id: 'light_8', type: 'light', name, description: '', status: { on: false, dimmable: false } });
 
 async function bootWithCache(cachedName, currentName) {
-    const hb = makeHb24MatterApi({
+    const hb = makeHbMatterApi({
         restored: [{ UUID: 'light_8', displayName: cachedName, deviceType: deviceTypes.OnOffLight, clusters: { onOff: {} } }],
     });
     const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });

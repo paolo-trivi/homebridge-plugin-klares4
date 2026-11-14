@@ -14,7 +14,7 @@ process.env.KLARES4_MATTER_UNREACHABLE_GRACE_MS = '40';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { Lares4Platform } = require('../dist/platform/index.js');
-const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {}, success: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +26,7 @@ const reachableUpdates = (hb) => hb.updates
     .map((u) => [u.uuid, u.attributes.reachable]);
 
 async function setup() {
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
     await registry.addOrUpdateAccessory(zone('zone_1'));
     await registry.addOrUpdateAccessory(zone('zone_2'));

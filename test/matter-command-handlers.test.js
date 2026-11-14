@@ -10,7 +10,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MS = '5';
 process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '10';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
@@ -32,7 +32,7 @@ function wsClient() {
 }
 
 async function setup(device) {
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const ws = wsClient();
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => ws, storagePath: storage(), momentaryAutoOffMs: 5,

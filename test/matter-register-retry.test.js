@@ -12,7 +12,7 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
 process.env.KLARES4_MATTER_REGISTER_RETRY_MS = '30';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
@@ -22,7 +22,7 @@ const storage = () => fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-retry-'));
 const zone = (open = false) => ({ id: 'zone_4', type: 'zone', name: 'Porta Ingresso', description: '', status: { armed: false, bypassed: false, fault: false, open } });
 
 test('a registration refused while the Matter server is starting is retried on a later update', async () => {
-    const hb = makeHb24MatterApi({ serverStarting: true });
+    const hb = makeHbMatterApi({ serverStarting: true });
     const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
     await registry.addOrUpdateAccessory(zone());
     assert.equal(registry.getStatus('zone_4'), 'failed');
@@ -43,7 +43,7 @@ test('a registration refused while the Matter server is starting is retried on a
 
 test('a thermostat refused while the server is starting is not demoted to the TemperatureSensor fallback', async () => {
     const storagePath = storage();
-    const hb = makeHb24MatterApi({ serverStarting: true });
+    const hb = makeHbMatterApi({ serverStarting: true });
     const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath });
     const thermostat = {
         id: 'thermostat_2', type: 'thermostat', name: 'Riscaldamento Cucina', description: '',
@@ -64,7 +64,7 @@ test('a thermostat refused while the server is starting is not demoted to the Te
 });
 
 test('any other register failure stays failed for the session', async () => {
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const register = hb.api.matter.registerPlatformAccessories;
     hb.api.matter.registerPlatformAccessories = async () => { throw new Error('Matter accessory is missing required serialNumber'); };
     const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });

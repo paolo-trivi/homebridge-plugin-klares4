@@ -11,7 +11,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '10';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { markStatusPlaceholder } = require('../dist/device-observation.js');
-const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
@@ -30,7 +30,7 @@ function registry(hb, storagePath = storage()) {
 }
 
 test('a fresh measurement endpoint starts with a null measuredValue, not the discovery placeholder', async () => {
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const reg = registry(hb);
     await reg.addOrUpdateAccessory(placeholderSensor('sensor_t', 'temperature'));
     await reg.addOrUpdateAccessory(placeholderSensor('sensor_h', 'humidity'));
@@ -52,7 +52,7 @@ test('a fresh measurement endpoint starts with a null measuredValue, not the dis
 test('a thermostat TemperatureSensor fallback also starts with a null measuredValue', async () => {
     const storagePath = storage();
     fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({ thermostatAsTemperatureSensor: ['thermostat_5'] }));
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const reg = registry(hb, storagePath);
     const device = {
         id: 'thermostat_5', type: 'thermostat', name: 'Riscaldamento Bagno', description: '',
@@ -67,7 +67,7 @@ test('a thermostat TemperatureSensor fallback also starts with a null measuredVa
 });
 
 test('state known from the Homebridge cache still seeds the endpoint', async () => {
-    const hb = makeHb24MatterApi();
+    const hb = makeHbMatterApi();
     const reg = registry(hb);
     reg.configureCachedAccessory({
         UUID: 'sensor_t',
@@ -82,7 +82,7 @@ test('state known from the Homebridge cache still seeds the endpoint', async () 
 
 test('a thermostat that falls back during recovery does not publish its placeholder temperature', async () => {
     process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
-    const hb = makeHb24MatterApi({ unqueryableOnce: ['thermostat_6'] });
+    const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_6'] });
     const reg = registry(hb);
     const device = {
         id: 'thermostat_6', type: 'thermostat', name: 'Riscaldamento Studio', description: '',

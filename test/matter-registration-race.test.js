@@ -11,7 +11,7 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '20';
 process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 
 function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
@@ -63,7 +63,7 @@ function recoveryRegistry(api, storagePath) {
 
 test('F05: a state update during thermostat recovery joins the in-flight registration instead of registering twice', async () => {
     const storagePath = storageWithFallback();
-    const hb = makeHb24MatterApi({
+    const hb = makeHbMatterApi({
         restored: [{
             UUID: 'thermostat_18',
             deviceType: deviceTypes.TemperatureSensor,
@@ -91,7 +91,7 @@ test('F05: a state update during thermostat recovery joins the in-flight registr
 
 test('F05: the joined update is still delivered once the registration settles', async () => {
     const storagePath = storageWithFallback();
-    const hb = makeHb24MatterApi({
+    const hb = makeHbMatterApi({
         restored: [{
             UUID: 'thermostat_18',
             deviceType: deviceTypes.TemperatureSensor,
@@ -115,7 +115,7 @@ test('F05: the joined update is still delivered once the registration settles', 
 
 test('F14: fallback after a non-queryable registration unregisters the endpoint before re-registering', async () => {
     const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
-    const hb = makeHb24MatterApi({ unqueryableOnce: ['thermostat_18'] });
+    const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_18'] });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath,
     });
@@ -131,7 +131,7 @@ test('F14: fallback after a non-queryable registration unregisters the endpoint 
 
 test('F14: registration retry unregisters the stale endpoint on the first attempt', async () => {
     const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
-    const hb = makeHb24MatterApi({ unqueryableOnce: ['light_9'] });
+    const hb = makeHbMatterApi({ unqueryableOnce: ['light_9'] });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath,
     });
@@ -149,12 +149,15 @@ test('F14: registration retry unregisters the stale endpoint on the first attemp
 test('F37: a rename waits until Homebridge has really released the UUID before registering again', async () => {
     process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '150';
     const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
-    // Homebridge 2.4 closes the endpoint first (probe already undefined) and
-    // deletes the UUID from its registry only afterwards.
-    const hb = makeHb24MatterApi({ unregisterCloseMs: 80 });
+    // Homebridge closes the endpoint first (probe already undefined) and
+    // deletes the UUID from its registry only afterwards. On 2.4 the unregister
+    // call resolved before that; on 2.5 it resolves after it, and the rename
+    // must not race the close on either.
+    const hb = makeHbMatterApi({ unregisterCloseMs: 80 });
     const coordinator = new MatterTopologyCoordinator(hb.api, silentLog(), 2000);
     const light = (name) => ({
-        UUID: 'light_37', displayName: name, deviceType: deviceTypes.OnOffLight, clusters: { onOff: { onOff: false } },
+        UUID: 'light_37', displayName: name, serialNumber: 'light_37', manufacturer: 'Ksenia', model: 'Lares4 light',
+        deviceType: deviceTypes.OnOffLight, clusters: { onOff: { onOff: false } },
     });
 
     await coordinator.register(light('PC'));
