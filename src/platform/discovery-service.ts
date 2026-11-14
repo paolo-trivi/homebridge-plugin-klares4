@@ -24,6 +24,15 @@ const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
     thermostat: 'thermostats',
 };
 
+/**
+ * What the panel client hid with the fail-closed exposure policy (outputs
+ * of an unrecognized category, scenarios outside the allowlist), by device
+ * ID. Implemented by the client from its latest discovery read.
+ */
+export interface ExposurePolicySource {
+    isHiddenByExposurePolicy(deviceId: string): boolean;
+}
+
 interface Snapshot<T> {
     /** The config value `value` was derived from; a different one means the config was replaced. */
     source: unknown;
@@ -35,6 +44,7 @@ export class DiscoveryService {
     private readonly exclusions = new Map<ExclusionKey, Snapshot<ReadonlySet<string>>>();
     /** `customNames` resolved to the category map; re-derived if the KSA import replaces it. */
     private customNamesSnapshot: Snapshot<CustomNamesMap>;
+    private exposurePolicy: ExposurePolicySource | undefined;
 
     /**
      * Reads the validated values of `runtime`; without it the config is
@@ -52,6 +62,19 @@ export class DiscoveryService {
         this.customNamesSnapshot = { source: config.customNames, value: runtime.customNames };
     }
 
+    /**
+     * A device the exposure policy hides counts as excluded: a cached
+     * accessory of an earlier version that exposed it is removed like one in
+     * an `exclude*` list, and gets no handlers.
+     */
+    public attachExposurePolicy(source: ExposurePolicySource): void {
+        this.exposurePolicy = source;
+    }
+
+    private isHiddenByExposurePolicy(device: KseniaDevice): boolean {
+        return this.exposurePolicy?.isHiddenByExposurePolicy(device.id) === true;
+    }
+
     public getNormalizedId(deviceId: string): string {
         return stripDevicePrefix(deviceId);
     }
@@ -61,6 +84,7 @@ export class DiscoveryService {
      * Safe to call on hot paths (per-status-update Matter eligibility checks).
      */
     public isDeviceExcluded(device: KseniaDevice): boolean {
+        if (this.isHiddenByExposurePolicy(device)) return true;
         const id = this.getNormalizedId(device.id);
 
         if (device.type === 'zone') return this.exclusionIds('excludeZones').has(id);
@@ -83,6 +107,10 @@ export class DiscoveryService {
         if (!this.isDeviceExcluded(device)) return false;
 
         const id = this.getNormalizedId(device.id);
+        if (this.isHiddenByExposurePolicy(device)) {
+            this.log.info(`Not exposed by the exposure policy: ${device.name} (${device.id})`);
+            return true;
+        }
         const label = device.type === 'zone' ? 'Zone'
             : isOutputLikeDevice(device) ? 'Output'
                 : device.type === 'sensor' ? 'Sensor'

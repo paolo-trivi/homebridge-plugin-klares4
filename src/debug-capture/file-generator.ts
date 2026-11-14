@@ -7,6 +7,15 @@ import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { analyzeMessages, countByCommand, extractCommands, getUniquePayloadTypes } from './analysis';
 import type { DeviceSnapshot, RawMessage } from './types';
 
+/** The file names the devices and the state of the alarm system: readable by its owner only. */
+const FILE_OPTIONS = { mode: 0o600 };
+
+const CONFIDENTIALITY_NOTICE =
+    'CONFIDENTIAL. This file lists the names of your devices and the state of your alarm system '
+    + '(which zones are open, whether it is armed, which scenarios exist). PINs, account data, panel '
+    + 'serial numbers and the home position are masked, nothing else is. Do not attach it to a public '
+    + 'issue or post it anywhere: send it privately, and only to someone you trust.';
+
 export class DebugFileGenerator {
     constructor(
         private readonly log: Logger,
@@ -17,7 +26,7 @@ export class DebugFileGenerator {
         rawMessages: RawMessage[],
         deviceSnapshots: DeviceSnapshot[],
         captureDurationMs: number,
-        options: { sync?: boolean } = {},
+        options: { sync?: boolean; droppedMessages?: number } = {},
     ): void {
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
@@ -35,15 +44,18 @@ export class DebugFileGenerator {
                     incomingMessages,
                     outgoingMessages,
                     deviceSnapshotsTaken: deviceSnapshots.length,
+                    droppedMessages: options.droppedMessages ?? 0,
                 },
                 instructions: {
-                    purpose: 'This file contains EVERYTHING needed to diagnose non-working entities',
+                    purpose: 'Traffic between the plugin and the Ksenia Lares4 panel, to diagnose entities that do not work',
+                    privacy: CONFIDENTIALITY_NOTICE,
                     whatToLookFor: [
                         'Check rawMessages[] for complete WebSocket traffic',
                         'Compare deviceSnapshots[] to see how devices change over time',
                         'Look at messagesByType to understand what commands the central supports',
                         'Check commandsSeen[] for all commands that were actually used',
-                        'PIN codes are already masked for security',
+                        'PINs, account data, panel serial numbers and the home position are masked (***MASKED***)',
+                        'captureInfo.droppedMessages counts frames left out when the buffer limit was reached',
                     ],
                 },
                 deviceSnapshots,
@@ -76,17 +88,20 @@ export class DebugFileGenerator {
                 this.log.warn(`   - ${debugData.deviceSnapshots.length} device snapshots`);
                 this.log.warn(`   - ${debugData.statistics.devices} total devices`);
                 this.log.warn('');
-                this.log.warn('[SHARE] Share this file for support - PINs are already masked!');
+                this.log.warn('[PRIVACY] This file is confidential: it lists your devices and the state of your alarm system.');
+                this.log.warn('[PRIVACY] PINs, account data, serial numbers and the home position are masked; nothing else is.');
+                this.log.warn('[PRIVACY] Do not attach it to a public issue: send it privately, and only to someone you trust.');
+                this.log.warn('[PRIVACY] It is readable by the Homebridge user only (mode 0600); delete it when you no longer need it.');
                 this.log.warn('═══════════════════════════════════════════════════════════');
                 this.log.warn('');
             };
             if (options.sync) {
                 // Shutdown path: Homebridge exits shortly after, so the file must be on disk now.
-                writeFileAtomicSync(filepath, serializedData);
+                writeFileAtomicSync(filepath, serializedData, FILE_OPTIONS);
                 reportWritten();
                 return;
             }
-            void writeFileAtomic(filepath, serializedData)
+            void writeFileAtomic(filepath, serializedData, FILE_OPTIONS)
                 .then(reportWritten)
                 .catch((error: unknown): void => {
                     this.log.error(

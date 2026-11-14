@@ -1,16 +1,14 @@
-import * as fs from 'fs';
 import type { ParsedKsaProgram } from './types';
+
+/** A real panel backup is well under 1 MB; the whole file is parsed in memory on the event loop. */
+export const MAX_KSA_FILE_BYTES = 32 * 1024 * 1024;
 
 interface ParsedKsaRoot {
     DATA?: Record<string, unknown>;
 }
 
-export async function readAndParseKsaProgram(filePath: string): Promise<ParsedKsaProgram> {
-    const raw = await fs.promises.readFile(filePath);
-    return parseKsaProgramFromBuffer(raw);
-}
-
 export function parseKsaProgramFromBuffer(raw: Buffer): ParsedKsaProgram {
+    assertKsaFileSize(raw.length);
     const root = parseEmbeddedRoot(raw);
     const data = asObject(root.DATA);
     return {
@@ -24,6 +22,13 @@ export function parseKsaProgramFromBuffer(raw: Buffer): ParsedKsaProgram {
     };
 }
 
+export function assertKsaFileSize(bytes: number): void {
+    if (bytes > MAX_KSA_FILE_BYTES) {
+        const megabytes = (bytes / (1024 * 1024)).toFixed(1);
+        throw new Error(`KSA file is too large (${megabytes} MB; the limit is ${MAX_KSA_FILE_BYTES / (1024 * 1024)} MB)`);
+    }
+}
+
 function parseEmbeddedRoot(raw: Buffer): ParsedKsaRoot {
     const start = raw.indexOf(Buffer.from('{"INFO"'));
     if (start < 0) {
@@ -35,35 +40,33 @@ function parseEmbeddedRoot(raw: Buffer): ParsedKsaRoot {
     return JSON.parse(payload) as ParsedKsaRoot;
 }
 
+const QUOTE = 0x22;
+const BACKSLASH = 0x5c;
+const OPEN_BRACE = 0x7b;
+const CLOSE_BRACE = 0x7d;
+
+/** Scans bytes: in UTF-8 no byte of a multi-byte character equals an ASCII delimiter. */
 function findBalancedJsonObjectEnd(rawJsonSlice: Buffer): number {
     let depth = 0;
     let inString = false;
     let escaped = false;
     for (let index = 0; index < rawJsonSlice.length; index += 1) {
-        const char = String.fromCharCode(rawJsonSlice[index]);
+        const byte = rawJsonSlice[index];
         if (inString) {
             if (escaped) {
                 escaped = false;
-                continue;
-            }
-            if (char === '\\') {
+            } else if (byte === BACKSLASH) {
                 escaped = true;
-                continue;
-            }
-            if (char === '"') {
+            } else if (byte === QUOTE) {
                 inString = false;
             }
             continue;
         }
-        if (char === '"') {
+        if (byte === QUOTE) {
             inString = true;
-            continue;
-        }
-        if (char === '{') {
+        } else if (byte === OPEN_BRACE) {
             depth += 1;
-            continue;
-        }
-        if (char === '}') {
+        } else if (byte === CLOSE_BRACE) {
             depth -= 1;
             if (depth === 0) {
                 return index + 1;

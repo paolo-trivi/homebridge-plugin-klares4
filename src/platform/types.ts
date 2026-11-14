@@ -8,6 +8,7 @@ import type { SensorAccessory } from '../accessories/sensor-accessory';
 import type { ThermostatAccessory } from '../accessories/thermostat-accessory';
 import type { ZoneAccessory } from '../accessories/zone-accessory';
 import type { DomusThermostatConfig, KsaImportConfig, MqttConfig, RoomMappingConfig } from '../types';
+import type { OutputOptIn, ScenarioOptIn } from '../types';
 import type { MatterOverridesConfig, MatterRecoveryRequestsConfig } from './matter-override-config';
 import type { CustomNamesConfig } from './custom-names-config';
 
@@ -79,6 +80,8 @@ export interface RawLares4Config extends PlatformConfig {
     excludeSensors?: unknown;
     excludeScenarios?: unknown;
     exposePartialArmScenarios?: unknown;
+    exposeOutputs?: unknown;
+    exposeScenarios?: unknown;
     matterExposure?: unknown;
     matterOverrides?: unknown;
     matterRecoveryRequests?: unknown;
@@ -94,6 +97,8 @@ export interface RawLares4Config extends PlatformConfig {
     ksaImport?: unknown;
     generateDebugFile?: unknown;
     debugCaptureDurationMs?: unknown;
+    /** Removed in 2.3.0: tolerated in existing configs, never read (`reportDeprecatedKeys`). */
+    telemetry?: unknown;
 }
 
 /**
@@ -122,6 +127,10 @@ export interface Lares4Config extends PlatformConfig {
     excludeScenarios?: string[];
     /** Expose PARTIAL (partial-arm) scenarios. Default false; ARM/DISARM are never exposed. */
     exposePartialArmScenarios?: boolean;
+    /** Outputs of an unrecognized category (GEN, IRR, none) exposed anyway: `[{ outputId, exposeAs }]`. */
+    exposeOutputs?: OutputOptIn[];
+    /** Scenarios of an unrecognized category exposed anyway: `[{ scenarioId }]`. */
+    exposeScenarios?: ScenarioOptIn[];
     matterExposure?: MatterExposureConfig;
     /** Map keyed by device ID, or the array form the Homebridge UI preserves. */
     matterOverrides?: MatterOverridesConfig;
@@ -151,8 +160,6 @@ export interface Lares4Config extends PlatformConfig {
      * — otherwise the capture window closes before you can reproduce the issue from HomeKit.
      */
     debugCaptureDurationMs?: number;
-    /** Opt-out anonymous error reporting via Sentry. Default true. */
-    telemetry?: boolean;
 }
 
 export interface DeviceListItem {

@@ -1,12 +1,14 @@
 import type { Logger } from 'homebridge';
 
+import { CaptureBuffer, DEFAULT_CAPTURE_LIMITS, type CaptureLimits } from './capture-buffer';
 import { DebugFileGenerator } from './file-generator';
 import { captureRawMessage } from './raw-message-capture';
-import type { DeviceSnapshot, RawMessage } from './types';
+import { redactSnapshot } from './redaction';
+import type { DeviceSnapshot } from './types';
 import type { KseniaWebSocketClient, RawMessageDirection } from '../websocket-client';
 
 export class DebugCaptureManager {
-    private rawMessages: RawMessage[] = [];
+    private buffer: CaptureBuffer;
     private isCapturing = false;
     private captureTimer?: NodeJS.Timeout;
     private snapshotInterval?: NodeJS.Timeout;
@@ -19,7 +21,9 @@ export class DebugCaptureManager {
     constructor(
         private readonly log: Logger,
         private readonly storagePath: string,
+        private readonly options: { limits?: Partial<CaptureLimits> } = {},
     ) {
+        this.buffer = this.newBuffer();
         this.fileGenerator = new DebugFileGenerator(this.log, this.storagePath);
     }
 
@@ -41,13 +45,14 @@ export class DebugCaptureManager {
         this.log.warn('   - Change zones');
         this.log.warn('   - Adjust thermostats');
         this.log.warn(`[TIMER] You have ${durationSeconds} seconds...`);
+        this.log.warn('[PRIVACY] The file will be confidential: it lists your devices and the state of your alarm system.');
         this.log.warn('═══════════════════════════════════════════════════════════');
         this.log.warn('');
 
         this.isCapturing = true;
         this.activeClient = wsClient;
         this.captureDurationMs = durationMs;
-        this.rawMessages = [];
+        this.buffer = this.newBuffer();
         this.deviceSnapshots = [];
         this.captureDeviceSnapshot(wsClient, 'START');
         this.hookWebSocket(wsClient);
@@ -103,7 +108,10 @@ export class DebugCaptureManager {
 
         this.captureDeviceSnapshot(wsClient, 'END');
         this.unhookWebSocket();
-        this.fileGenerator.generate(this.rawMessages, this.deviceSnapshots, this.captureDurationMs, options);
+        this.fileGenerator.generate(this.buffer.messages, this.deviceSnapshots, this.captureDurationMs, {
+            ...options,
+            droppedMessages: this.buffer.dropped,
+        });
     }
 
     private captureDeviceSnapshot(
@@ -115,7 +123,7 @@ export class DebugCaptureManager {
             timestamp: new Date().toISOString(),
             label,
             deviceCount: devices.length,
-            devices: JSON.parse(JSON.stringify(devices)),
+            devices: redactSnapshot(JSON.parse(JSON.stringify(devices))),
         });
     }
 
@@ -161,9 +169,18 @@ export class DebugCaptureManager {
         }
     }
 
+    private newBuffer(): CaptureBuffer {
+        return new CaptureBuffer({ ...DEFAULT_CAPTURE_LIMITS, ...this.options.limits });
+    }
+
     private captureRawMessage(direction: 'in' | 'out', rawData: string): void {
         try {
-            this.rawMessages.push(captureRawMessage(direction, rawData));
+            const stored = this.buffer.tryAdd(captureRawMessage(direction, rawData));
+            if (!stored && this.buffer.dropped === 1) {
+                this.log.warn(
+                    '[DEBUG] Capture buffer full: later traffic is counted but not recorded; the capture still ends on time.',
+                );
+            }
         } catch (error: unknown) {
             this.log.error(
                 'Failed to capture message:',

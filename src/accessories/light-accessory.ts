@@ -89,7 +89,11 @@ export class LightAccessory {
         const brightness = value as number;
 
         if (!this.device.status?.dimmable) {
-            return;
+            // Nothing was sent: reporting success would show a brightness the light cannot have.
+            this.platform.log.warn(`${this.device.name}: brightness requested, but this light is not dimmable`);
+            throw new this.platform.api.hap.HapStatusError(
+                this.platform.api.hap.HAPStatus.NOT_ALLOWED_IN_CURRENT_STATE,
+            );
         }
 
         try {

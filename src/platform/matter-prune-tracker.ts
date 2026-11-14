@@ -1,29 +1,20 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import type { API, Logger } from 'homebridge';
-import { writeJsonAtomicSync } from '../atomic-file';
 import type { KseniaDevice } from '../types';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterFallbackStore } from './matter-fallback-store';
+import { MatterPruneCounters } from './matter-prune-counters';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
-
-const COUNTER_STORE_FILENAME = 'klares4-matter-prune.json';
-
-interface CounterStoreShape {
-    version: 1;
-    missing: Record<string, number>;
-}
+import {
+    PRUNE_MIN_DISCOVERY_RATIO, PRUNE_STALE_THRESHOLD_CYCLES, belowDiscoveryFloor, discoveryFamily, familiesOf,
+} from './prune-policy';
 
 /**
  * Minimum number of consecutive discovery cycles an accessory must be absent
- * from before it is treated as genuinely stale and unregistered. A single
- * incomplete/disturbed discovery cycle (WS reconnect mid-sync, slow Klares4
- * response) must never by itself be enough to remove a Matter accessory —
- * see the "P0 — Prune aggressivo" stabilization work in ARCHITECTURE.md.
+ * from before it is treated as genuinely stale and unregistered (see
+ * `prune-policy.ts`, shared with HAP).
  */
-export const MATTER_PRUNE_STALE_THRESHOLD_CYCLES = 3;
-const MATTER_PRUNE_MIN_DISCOVERY_RATIO = 0.5;
+export const MATTER_PRUNE_STALE_THRESHOLD_CYCLES = PRUNE_STALE_THRESHOLD_CYCLES;
 
 interface MatterCycleStats {
     newlyRegistered: number;
@@ -36,6 +27,13 @@ function emptyStats(): MatterCycleStats {
     return { newlyRegistered: 0, cachedRestore: 0, metadataChanged: 0, metadataUnchanged: 0 };
 }
 
+interface PruneCounters {
+    missingCandidates: number;
+    pruneSkipped: number;
+    unregisteredCount: number;
+    familyNotAnswered: number;
+}
+
 export interface MatterPruneDeps {
     api: API;
     topologyCoordinator: MatterTopologyCoordinator;
@@ -44,12 +42,25 @@ export interface MatterPruneDeps {
     cachedUUIDs: Set<string>;
     /** Cached accessory device snapshots (uuid → device), from configureMatterAccessory. */
     cachedDevices?: Map<string, KseniaDevice>;
-    /** Matter-side eligibility (exclusions + matterExposure); undefined = everything exposed. */
+    /** Matter-side eligibility (exclusions + matterExposure + policy); undefined = everything exposed. */
     isDeviceExposed?: (device: KseniaDevice) => boolean;
+    /**
+     * Families that listed at least one device in this sync, whatever its
+     * Matter exposure. Without it, the families of the endpoints seen in this cycle.
+     */
+    answeredFamilies?: ReadonlySet<string>;
     thermostatFallbackUUIDs: Set<string>;
     fallbackStore: MatterFallbackStore;
     thermostatEchoTracker: MatterThermostatEchoTracker;
     fmtErr: (err: unknown) => string;
+}
+
+/** One endpoint of the plugin on the bridge, as the prune judges it. */
+interface PruneSubject {
+    uuid: string;
+    displayName: string;
+    device?: KseniaDevice;
+    registration?: MatterRegistration;
 }
 
 /**
@@ -60,65 +71,12 @@ export interface MatterPruneDeps {
  * consecutive misses instead of on the very first one.
  */
 export class MatterPruneTracker {
-    private readonly missingCycleCounts = new Map<string, number>();
+    private readonly counters: MatterPruneCounters;
     private cycleNumber = 0;
     private stats: MatterCycleStats = emptyStats();
-    private readonly counterFilePath?: string;
-    private countersDirty = false;
-    /** Set when the file comes from a newer plugin version: it is never rewritten. */
-    private countersReadOnly = false;
 
-    /**
-     * When `storagePath` is provided the missing-cycle counters persist across
-     * restarts (`klares4-matter-prune.json`). Without persistence a stable
-     * setup runs exactly ONE prune cycle per boot, the in-memory counter
-     * restarts from zero every time and the 3-consecutive-cycles threshold is
-     * never crossed — so a genuinely stale endpoint (device removed from the
-     * panel, type disabled via `matterExposure`) would survive forever.
-     */
     constructor(private readonly log: Logger, storagePath?: string) {
-        if (storagePath) {
-            this.counterFilePath = path.join(storagePath, COUNTER_STORE_FILENAME);
-            this.loadCounters();
-        }
-    }
-
-    private loadCounters(): void {
-        if (!this.counterFilePath) return;
-        try {
-            if (!fs.existsSync(this.counterFilePath)) return;
-            const parsed = JSON.parse(fs.readFileSync(this.counterFilePath, 'utf8')) as Partial<CounterStoreShape>;
-            if (parsed && typeof parsed.version === 'number' && parsed.version > 1) {
-                this.countersReadOnly = true;
-                this.log.warn(
-                    `[Matter] Prune-counter store ${this.counterFilePath} has unsupported version ${String(parsed.version)}; `
-                    + 'it will not be modified. Counters are kept in memory for this session.',
-                );
-                return;
-            }
-            if (!parsed.missing || typeof parsed.missing !== 'object') return;
-            for (const [uuid, count] of Object.entries(parsed.missing)) {
-                if (typeof count === 'number' && Number.isInteger(count) && count > 0) {
-                    this.missingCycleCounts.set(uuid, count);
-                }
-            }
-        } catch (err) {
-            this.log.warn(`[Matter] Could not load prune-counter store (${this.counterFilePath}): ${err instanceof Error ? err.message : String(err)}`);
-        }
-    }
-
-    private saveCountersIfDirty(): void {
-        if (!this.counterFilePath || !this.countersDirty || this.countersReadOnly) return;
-        this.countersDirty = false;
-        try {
-            const payload: CounterStoreShape = {
-                version: 1,
-                missing: Object.fromEntries([...this.missingCycleCounts.entries()].sort(([a], [b]) => (a < b ? -1 : 1))),
-            };
-            writeJsonAtomicSync(this.counterFilePath, payload, 2);
-        } catch (err) {
-            this.log.warn(`[Matter] Could not write prune-counter store (${this.counterFilePath}): ${err instanceof Error ? err.message : String(err)}`);
-        }
+        this.counters = new MatterPruneCounters(log, storagePath);
     }
 
     /** Resets per-cycle counters. The prune pass advances the cycle number. */
@@ -148,8 +106,7 @@ export class MatterPruneTracker {
 
     /** Device seen in the current cycle: clears its missing-cycle counter, if any. */
     recordSeen(uuid: string, displayName: string): void {
-        if (this.missingCycleCounts.delete(uuid)) {
-            this.countersDirty = true;
+        if (this.counters.delete(uuid)) {
             this.log.debug(`[Matter] Missing-cycle counter reset for ${displayName} (${uuid}) — device reappeared`);
         }
     }
@@ -159,9 +116,8 @@ export class MatterPruneTracker {
      * crossed the stale threshold and should really be unregistered.
      */
     recordMissing(uuid: string, displayName: string): boolean {
-        const missedCycles = (this.missingCycleCounts.get(uuid) ?? 0) + 1;
-        this.missingCycleCounts.set(uuid, missedCycles);
-        this.countersDirty = true;
+        const missedCycles = this.counters.get(uuid) + 1;
+        this.counters.set(uuid, missedCycles);
 
         if (missedCycles < MATTER_PRUNE_STALE_THRESHOLD_CYCLES) {
             this.log.info(
@@ -180,111 +136,104 @@ export class MatterPruneTracker {
 
     /** Clears the missing-cycle counter after a real unregister. */
     clearMissing(uuid: string): void {
-        if (this.missingCycleCounts.delete(uuid)) {
-            this.countersDirty = true;
-        }
-    }
-
-    logCycleSummary(discovered: number, registered: number, missingCandidates: number, pruneSkipped: number, unregistered: number): void {
-        this.log.info(
-            `[Matter] cycle #${this.cycleNumber}${this.isBootstrapCycle ? ' (bootstrap)' : ''}: `
-            + `discovered=${discovered} registered=${registered} `
-            + `newlyRegistered=${this.stats.newlyRegistered} cachedRestore=${this.stats.cachedRestore} `
-            + `metadataChanged=${this.stats.metadataChanged} metadataUnchanged=${this.stats.metadataUnchanged} `
-            + `missingCandidates=${missingCandidates} pruneSkipped=${pruneSkipped} unregistered=${unregistered}`,
-        );
+        this.counters.delete(uuid);
     }
 
     /**
-     * Runs one prune pass over `deps.registrations`: accessories absent from
-     * `activeDiscoveredUUIDs` are only unregistered once they've crossed
-     * `MATTER_PRUNE_STALE_THRESHOLD_CYCLES` consecutive misses (see class doc).
+     * One prune pass, with the discipline of `prune-policy.ts`, over every
+     * endpoint the plugin holds on the bridge: the ones registered in this
+     * session and the ones Homebridge restored from its cache and nobody
+     * registered since (a device deleted on the panel is only ever the latter
+     * after a restart).
      *
-     * A second pass covers *cached-only* endpoints (registered in a previous
-     * session, never re-registered in this one) whose device type has since
-     * been disabled via `matterExposure`: they follow the same
-     * missing-cycles discipline before being unregistered for good.
+     *  - seen in this cycle: its counter is cleared;
+     *  - hidden by config or policy: counts as missing whatever the panel reported;
+     *  - otherwise it counts as missing only when the sync is above the
+     *    discovery floor and its family answered.
      *
      * Ends with a compact topology-churn summary log line.
      */
     async runPruneCycle(deps: MatterPruneDeps): Promise<void> {
         this.cycleNumber += 1;
-        if (this.isDegenerateCycle(deps)) {
-            this.stats = emptyStats();
-            return;
+        const counters: PruneCounters = { missingCandidates: 0, pruneSkipped: 0, unregisteredCount: 0, familyNotAnswered: 0 };
+        const subjects = this.subjects(deps);
+        const exposed = (s: PruneSubject): boolean => !s.device || !deps.isDeviceExposed || deps.isDeviceExposed(s.device);
+        const known = subjects.filter(exposed).length;
+        const discovered = deps.activeDiscoveredUUIDs.size;
+        const partialSync = belowDiscoveryFloor(discovered, known);
+        if (partialSync) {
+            this.log.warn(
+                `[Matter] Prune: discovery returned ${discovered} of ${known} exposed endpoint(s), below the `
+                + `${Math.round(PRUNE_MIN_DISCOVERY_RATIO * 100)}% safety floor; no endpoint counts as missing in this sync`,
+            );
         }
-        const counters = { missingCandidates: 0, pruneSkipped: 0, unregisteredCount: 0 };
+        const answered = deps.answeredFamilies ?? familiesOf(deps.activeDiscoveredUUIDs);
 
-        for (const [uuid, reg] of deps.registrations) {
-            if (reg.status !== 'registered') continue;
-            if (deps.activeDiscoveredUUIDs.has(uuid)) {
-                this.recordSeen(uuid, reg.displayName);
+        for (const subject of subjects) {
+            if (deps.activeDiscoveredUUIDs.has(subject.uuid)) {
+                this.recordSeen(subject.uuid, subject.displayName);
                 continue;
             }
-            await this.pruneCandidate(uuid, reg.displayName, deps, counters);
-        }
-
-        // Cached-only endpoints of exposure-disabled types (config changed
-        // between sessions). Only config-driven absences are handled here —
-        // cached devices that are merely missing from discovery keep the
-        // conservative "wait for a registration to go stale" behaviour.
-        if (deps.cachedDevices && deps.isDeviceExposed) {
-            for (const [uuid, device] of deps.cachedDevices) {
-                if (deps.registrations.has(uuid)) continue;
-                if (deps.isDeviceExposed(device)) continue;
-                await this.pruneCandidate(uuid, device.name, deps, counters);
+            if (exposed(subject)) {
+                // Without a cached device snapshot the family is unknown: keep it.
+                if (partialSync || !subject.device) continue;
+                if (!answered.has(discoveryFamily(subject.uuid))) {
+                    counters.familyNotAnswered += 1;
+                    continue;
+                }
             }
+            await this.pruneCandidate(subject, deps, counters);
         }
 
+        const orphans = this.counters.retainOnly((uuid) => deps.registrations.has(uuid) || deps.cachedUUIDs.has(uuid));
+        if (orphans.length > 0) this.log.debug(`[Matter] Dropped prune counters of endpoints no longer held: ${orphans.join(', ')}`);
         this.saveCountersIfDirty();
-
-        this.logCycleSummary(
-            deps.activeDiscoveredUUIDs.size,
-            deps.registrations.size,
-            counters.missingCandidates,
-            counters.pruneSkipped,
-            counters.unregisteredCount,
-        );
+        this.logCycleSummary(discovered, deps.registrations.size, counters);
         this.stats = emptyStats();
     }
 
-    private isDegenerateCycle(deps: MatterPruneDeps): boolean {
-        const discovered = deps.activeDiscoveredUUIDs.size;
-        const registered = [...deps.registrations.values()].filter((registration) => {
-            if (registration.status !== 'registered') return false;
-            if (!deps.isDeviceExposed) return true;
+    /** Registered endpoints, then cache-restored endpoints with no registration in this session. */
+    private subjects(deps: MatterPruneDeps): PruneSubject[] {
+        const subjects: PruneSubject[] = [];
+        for (const [uuid, registration] of deps.registrations) {
+            if (registration.status !== 'registered') continue;
             const device = registration.matterAccessory.context?.device as KseniaDevice | undefined;
-            return !device || deps.isDeviceExposed(device);
-        }).length;
-        if (registered === 0) return false;
-
-        if (discovered === 0 || discovered < registered * MATTER_PRUNE_MIN_DISCOVERY_RATIO) {
-            this.log.warn(
-                `[Matter] cycle #${this.cycleNumber}: skipping prune — discovery returned ${discovered} `
-                + `of ${registered} exposed registered endpoint(s), below the `
-                + `${Math.round(MATTER_PRUNE_MIN_DISCOVERY_RATIO * 100)}% safety floor`,
-            );
-            return true;
+            subjects.push({ uuid, displayName: registration.displayName, device, registration });
         }
-        return false;
+        for (const uuid of deps.cachedUUIDs) {
+            if (deps.registrations.has(uuid)) continue;
+            const device = deps.cachedDevices?.get(uuid);
+            subjects.push({ uuid, displayName: device?.name ?? uuid, device });
+        }
+        return subjects;
     }
 
-    private async pruneCandidate(
-        uuid: string,
-        displayName: string,
-        deps: MatterPruneDeps,
-        counters: { missingCandidates: number; pruneSkipped: number; unregisteredCount: number },
-    ): Promise<void> {
+    private saveCountersIfDirty(): void {
+        this.counters.saveIfDirty();
+    }
+
+    private logCycleSummary(discovered: number, registered: number, counters: PruneCounters): void {
+        this.log.info(
+            `[Matter] cycle #${this.cycleNumber}${this.isBootstrapCycle ? ' (bootstrap)' : ''}: `
+            + `discovered=${discovered} registered=${registered} `
+            + `newlyRegistered=${this.stats.newlyRegistered} cachedRestore=${this.stats.cachedRestore} `
+            + `metadataChanged=${this.stats.metadataChanged} metadataUnchanged=${this.stats.metadataUnchanged} `
+            + `missingCandidates=${counters.missingCandidates} pruneSkipped=${counters.pruneSkipped} `
+            + `keptFamilyNotAnswered=${counters.familyNotAnswered} unregistered=${counters.unregisteredCount}`,
+        );
+    }
+
+    private async pruneCandidate(subject: PruneSubject, deps: MatterPruneDeps, counters: PruneCounters): Promise<void> {
+        const { uuid } = subject;
         counters.missingCandidates += 1;
-        if (!this.recordMissing(uuid, displayName)) {
+        if (!this.recordMissing(uuid, subject.displayName)) {
             counters.pruneSkipped += 1;
             return;
         }
 
         try {
-            const registration = deps.registrations.get(uuid);
-            const probeCluster = registration
-                ? registrationProbeCluster(registration.matterAccessory)
+            const probeCluster = subject.registration
+                ? registrationProbeCluster(subject.registration.matterAccessory)
                 : 'bridgedDeviceBasicInformation';
             const removed = await deps.topologyCoordinator.unregister(uuid, probeCluster);
             if (!removed) return;
