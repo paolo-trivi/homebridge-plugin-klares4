@@ -12,7 +12,7 @@ function createService(onSend, timeoutMs = 40) {
   state.idLogin = 'login-id';
   state.ws = { readyState: 1 };
   // Scenario 14 was listed by MULTI_TYPES as an ordinary (non-arming) scenario.
-  state.scenarioCategoryById.set('14', 'GENERIC');
+  state.scenarioCategoryById.set('14', 'GEN');
   const dispatcher = new CommandDispatcher();
   const outputConfirmation = new OutputCommandConfirmationTracker();
   const logs = [];
