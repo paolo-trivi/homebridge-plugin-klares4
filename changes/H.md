@@ -48,6 +48,7 @@ No numeric key was added, so `runtime-config-limits.ts` is untouched. No existin
 
 ### Added
 - `<topicPrefix>/status`: retained availability of the bridge (`online`/`offline`, with an MQTT last will) and of the panel connection. (SP-11)
+- Zone state payload: new `tampered` field (the panel's tamper flag, also shown on HomeKit as "Tampered"). It is added after `bypassed`; every existing field keeps its name, type, value and order. Like `open`, `armed`, `fault` and `bypassed`, it is always present and is `false` until the panel reports the flag. (PLAT-13)
 
 ### Changed
 - `mqtt.js` no longer reconnects on its own (`reconnectPeriod: 0`): the plugin schedules the reconnections (backoff 5 s → 60 s). No change for users.
@@ -59,7 +60,7 @@ No numeric key was added, so `runtime-config-limits.ts` is untouched. No existin
 - **Colliding names**: devices that shared a state topic move to `.../<type>/<device id>/state`; the shared retained topic is cleared. Consumers reading those devices by name must switch to the ID topic (or give the devices distinct names). At startup a colliding device can be published once on the shared topic before the second device is known; that message is cleared right after.
 - **Broker URL**: a URL without `mqtt://`/`mqtts://`/`ws://`/`wss://` (or `tcp`, `tls`, `ssl`) no longer connects; fix it in the settings. A password with `/`, `#`, `?` or `@` should be percent-encoded (`%2F`, `%23`, `%3F`, `%40`), or set in `mqtt.password`.
 - Invalid command payloads that used to be ignored silently now produce warnings (rate limited).
-- State topics and payloads are unchanged for every device that does not collide (golden-value tests pin the payload of each device type).
+- State topics and payloads are unchanged for every device that does not collide, except one added key: `tampered` in the zone payload (golden-value tests pin the payload of each device type and check that every 2.2.0 key keeps its value and order). A consumer that rejects unknown keys must accept it.
 
 ## Documentation notes (task L)
 - README EN/IT, MQTT section: add `mqtt.commands`; a "MQTT security" subsection: commands are not authenticated by the plugin; use a broker with authentication, an ACL (example below), TLS (`mqtts://`); set `mqtt.commands: false` when only state is needed. There is no option for a custom CA or `rejectUnauthorized` on `mqtts://`: a broker with a self-signed certificate cannot be used (secure default, document it).
@@ -68,6 +69,7 @@ No numeric key was added, so `runtime-config-limits.ts` is untouched. No existin
 - Credentials in the broker URL take precedence over `mqtt.username`/`mqtt.password` (mqtt.js behaviour); prefer the separate fields.
 - Document `<prefix>/status` (payloads, last will, Home Assistant availability example).
 - Command payloads accepted per type: light `{"on":bool,"brightness":0-100}`, cover `{"position":0-100}`, thermostat `{"mode":"off|heat|cool|auto","targetTemperature":5-40}`, scenario `{"active":true}`; max 4 KB; unknown extra keys are ignored (debug line); while a command runs only the newest one waits.
+- Zone payload: `{"id","name","type","timestamp","open","armed","fault","bypassed","tampered"}`. `tampered` (since 2.3.0) comes from the panel's `T` field (`T` other than `N` → `true`); only resting values were observed on real panels, see `changes/C.md`. As for the other zone flags, `false` also means "not reported yet".
 - Name collisions → ID topics (see migration notes). Gate devices publish `{"active":false}` with the generic shape (unchanged, pinned by test; not a real state).
 - `SECURITY.md`: mention MQTT (unauthenticated commands, `mqtt.commands`, ACL).
 - ARCHITECTURE: `mqtt-bridge/` is now split: `index.ts` (facade `MqttBridge`, accepts an optional 4th argument `MqttBridgeDeps` with an injectable `connect`), `broker-session.ts` (connection, backoff, last will), `state-publisher.ts` + `state-topic-registry.ts` (state topics, collisions), `command-intake.ts` (retained/DUP/size filter), `command-executor.ts` (validation, one running + one waiting per device), `accessory-index-service.ts` (ID/slug/room lookup, exclusions), `room-resolver.ts`, `command-failure.ts`, `throttled-log.ts`. New public method `MqttBridge.setPanelConnected(connected)`, called through `SyncLifecycleDeps.onPanelConnection`. The platform passes `discoveryService.isDeviceExcluded` as `MqttBridgeDeps.isDeviceExcluded` (single source for exclusions and exposure policy); without it (bridge used standalone) no exclusion check is done beyond the handlers present. `accessories/communication-failure.ts` builds the `HapStatusError` with `cause`. `Lares4Platform.isMatterEligible` now reads only `resolveMatterPolicy` (the arming-scenario check is part of the exposure policy; equivalence pinned by `test/matter-eligibility-single-source.test.js`). In `initializeLares4` the MQTT bridge is now created before `SyncLifecycle.attach`, so the initial "panel not connected" reaches it.
