@@ -68,6 +68,25 @@ test('an arming scenario stays refused even when it is a discovered device', asy
     assert.equal(sent.length, 0);
 });
 
+test('a scenario of unknown category is refused for what it is, and runs once listed in exposeScenarios', async () => {
+    for (const exposeScenarios of [undefined, [{ scenarioId: '4' }]]) {
+        const { client, sent } = commandClient({ devices: ['scenario_3'], options: { exposeScenarios } });
+        client['state'].scenarioCategoryById.set('3', 'ARM_AWAY');
+        await assert.rejects(client.triggerScenario('scenario_3'), (error) => error instanceof ValidationKlaresError
+            && /not a known harmless one/.test(error.message) && !/arms or disarms/.test(error.message));
+        assert.equal(sent.length, 0);
+    }
+    const { client, sent } = commandClient({ devices: ['scenario_3'], options: { exposeScenarios: [{ scenarioId: '3' }] } });
+    client['state'].scenarioCategoryById.set('3', 'ARM_AWAY');
+    await client.triggerScenario('scenario_3');
+    assert.deepEqual(sent.map((s) => s.m.PAYLOAD.SCENARIO), [{ ID: '3' }]);
+    // ARM never runs, opt-in or not.
+    const armed = commandClient({ devices: ['scenario_2'], options: { exposeScenarios: [{ scenarioId: '2' }] } });
+    armed.client['state'].scenarioCategoryById.set('2', 'ARM');
+    await assert.rejects(armed.client.triggerScenario('scenario_2'), /arms or disarms/);
+    assert.equal(armed.sent.length, 0);
+});
+
 test('M58: a CMD_USR_RES without RESULT does not acknowledge a mutation', async () => {
     const { client } = commandClient({
         devices: ['gate_9', 'light_5'],

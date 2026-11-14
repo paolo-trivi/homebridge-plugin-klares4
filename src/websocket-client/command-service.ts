@@ -11,10 +11,16 @@ import type { KseniaMessage, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
 import { CommandSender } from './command-sender';
-import { isIgnoredScenarioCategory } from './device-parsers';
+import { resolveScenarioExposure, scenarioOptInIds } from './device-parsers';
 import { type MutationOutcome, mutationOptions, reportMutationOutcome } from './command-outcome';
 import { coverTargetMatches, dimmerLevelMatches, lightStateMatches } from './output-state-matchers';
 import { ValidationKlaresError } from '../errors';
+
+const SCENARIO_REFUSAL = {
+    'arming': 'it arms or disarms the alarm',
+    'partial-arm': 'it partially arms the alarm (exposePartialArmScenarios is off)',
+    'unknown-category': 'its category is not a known harmless one (list it in exposeScenarios to allow it)',
+} as const;
 
 /** WS-08: NaN and Infinity used to become "close" / "off" through the clamp. */
 function requireFinite(value: unknown, kind: string, deviceId: string): number {
@@ -168,14 +174,19 @@ export class CommandService {
         }, { policy: 'reject-while-busy' });
     }
 
-    /** Defense in depth: never run an arming scenario with the stored PIN, even if an accessory exists. */
+    /** Defense in depth: never run a scenario the exposure policy hides, even if an accessory exists. */
     private assertScenarioAllowed(systemScenarioId: string): void {
         const category = this.deps.state.scenarioCategoryById?.get(systemScenarioId);
         if (category === undefined) {
             throw new ValidationKlaresError(`Scenario ${systemScenarioId} refused: not listed by the panel`);
         }
-        if (isIgnoredScenarioCategory(category, this.deps.options.exposePartialArmScenarios ?? false)) {
-            throw new ValidationKlaresError(`Scenario ${systemScenarioId} refused: category ${category} arms or disarms the alarm`);
+        const exposure = resolveScenarioExposure(
+            category,
+            this.deps.options.exposePartialArmScenarios ?? false,
+            scenarioOptInIds(this.deps.options.exposeScenarios).has(systemScenarioId),
+        );
+        if (!exposure.exposed) {
+            throw new ValidationKlaresError(`Scenario ${systemScenarioId} refused: ${SCENARIO_REFUSAL[exposure.reason]}`);
         }
     }
 
