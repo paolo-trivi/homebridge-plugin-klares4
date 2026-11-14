@@ -2,87 +2,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
-// Replace the real mqtt module before the bridge is loaded: no broker is ever contacted.
-const connectCalls = [];
-class FakeMqttClient extends EventEmitter {
-  constructor() {
-    super();
-    this.connected = false;
-    this.published = [];
-    this.subscriptions = [];
-    this.ended = false;
-  }
+const { fakeMqtt, recordingLog } = require('./fixtures/fake-mqtt.js');
 
-  publish(topic, payload, options, callback) {
-    this.published.push({ topic, payload, options });
-    if (callback) callback(undefined);
-    return this;
-  }
-
-  subscribe(topics, options, callback) {
-    this.subscriptions.push({ topics, options });
-    if (callback) callback(null);
-    return this;
-  }
-
-  end() {
-    this.ended = true;
-    this.connected = false;
-    return this;
-  }
-
-  /** Simulates the broker accepting the connection. */
-  simulateConnect() {
-    this.connected = true;
-    this.emit('connect');
-  }
-
-  /** Simulates the connection dropping. */
-  simulateOffline() {
-    this.connected = false;
-    this.emit('offline');
-  }
-}
-const fakeMqtt = {
-  __esModule: true,
-  connect(url, options) {
-    const client = new FakeMqttClient();
-    connectCalls.push({ url, options, client });
-    return client;
-  },
-};
-require.cache[require.resolve('mqtt')] = {
-  id: require.resolve('mqtt'),
-  filename: require.resolve('mqtt'),
-  loaded: true,
-  exports: fakeMqtt,
-};
-
+// The MQTT client is injected: no broker is ever contacted (TD-T-12).
 const { MqttBridge } = require('../dist/mqtt-bridge/index.js');
-
-function createLogger() {
-  const lines = { info: [], debug: [], warn: [], error: [] };
-  const format = (args) => args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-  return {
-    lines,
-    all: () => [...lines.info, ...lines.debug, ...lines.warn, ...lines.error].join('\n'),
-    logger: {
-      info: (...args) => lines.info.push(format(args)),
-      debug: (...args) => lines.debug.push(format(args)),
-      warn: (...args) => lines.warn.push(format(args)),
-      error: (...args) => lines.error.push(format(args)),
-    },
-  };
-}
 
 function createPlatform({ handlers = new Map(), roomMapping } = {}) {
   return { accessoryHandlers: handlers, config: roomMapping ? { roomMapping } : {} };
 }
 
 function createBridge(mqttConfig, platformOptions) {
-  const log = createLogger();
-  const bridge = new MqttBridge({ enabled: true, ...mqttConfig }, log.logger, createPlatform(platformOptions));
-  const call = connectCalls[connectCalls.length - 1];
+  const log = recordingLog();
+  const mqtt = fakeMqtt();
+  const bridge = new MqttBridge({ enabled: true, ...mqttConfig }, log.logger, createPlatform(platformOptions), { connect: mqtt.connect });
+  const call = mqtt.calls[mqtt.calls.length - 1];
   return { bridge, log, call, client: call ? call.client : undefined };
 }
 
@@ -120,7 +53,7 @@ test('MqttBridge never logs credentials embedded in the broker URL', () => {
   const output = log.all();
   assert.ok(!output.includes('s3cr3t-pass'), `password leaked in logs: ${output}`);
   assert.ok(!output.includes('mqttuser'), `username leaked in logs: ${output}`);
-  assert.ok(output.includes('mqtt://***@broker.example:1883'), `masked broker URL missing: ${output}`);
+  assert.ok(output.includes('mqtt://broker.example:1883'), `broker host missing: ${output}`);
 });
 
 function createScenarioHandler(calls) {
@@ -175,7 +108,7 @@ function withStatus(device, status) {
 }
 
 function statePublishes(client) {
-  return client.published.filter((entry) => entry.payload !== '');
+  return client.published.filter((entry) => entry.payload !== '' && entry.topic.endsWith('/state'));
 }
 
 test('MqttBridge does not queue state publishes while the broker is disconnected', () => {
@@ -209,7 +142,7 @@ test('MqttBridge publishes immediately while connected and replays after a recon
   bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
   assert.equal(statePublishes(client).length, 1);
 
-  client.simulateOffline();
+  client.simulateClose();
   bridge.publishDeviceState(withStatus(createLight('light_1', 'Luce Sala'), { on: false }));
   assert.equal(statePublishes(client).length, 1, 'no publish while offline');
 
@@ -237,11 +170,13 @@ test('MqttBridge clears the old topic when a device is renamed while offline', (
   const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
   client.simulateConnect();
   bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
-  client.simulateOffline();
+  client.simulateClose();
   bridge.publishDeviceState(createLight('light_1', 'Luce Salotto'));
   client.simulateConnect();
 
-  const topics = client.published.map((entry) => `${entry.topic}|${entry.payload === '' ? 'clear' : 'state'}`);
+  const topics = client.published
+    .filter((entry) => entry.topic.endsWith('/state'))
+    .map((entry) => `${entry.topic}|${entry.payload === '' ? 'clear' : 'state'}`);
   assert.deepEqual(topics, [
     'homebridge/klares4/light/luce_sala/state|state',
     'homebridge/klares4/light/luce_sala/state|clear',
@@ -249,13 +184,20 @@ test('MqttBridge clears the old topic when a device is renamed while offline', (
   ]);
 });
 
-test('MqttBridge keeps an old topic that another device still publishes to', () => {
+test('MqttBridge gives two devices with the same name topic their own ID topics (SP-10)', () => {
   const { bridge, client } = createBridge({ broker: 'mqtt://broker.example' });
   client.simulateConnect();
   bridge.publishDeviceState(createLight('light_1', 'Luce Sala'));
   bridge.publishDeviceState(createLight('light_2', 'Luce_Sala'));
-  bridge.publishDeviceState(createLight('light_1', 'Luce Salotto'));
-  assert.equal(client.published.filter((entry) => entry.payload === '').length, 0);
+  const live = new Map();
+  for (const entry of client.published.filter((e) => e.topic.endsWith('/state'))) {
+    if (entry.payload === '') live.delete(entry.topic);
+    else live.set(entry.topic, JSON.parse(entry.payload).id);
+  }
+  assert.deepEqual([...live].sort(), [
+    ['homebridge/klares4/light/light_1/state', 'light_1'],
+    ['homebridge/klares4/light/light_2/state', 'light_2'],
+  ]);
 });
 
 test('MqttBridge does not clear anything when retain is disabled or the topic is unchanged', () => {

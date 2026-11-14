@@ -3,6 +3,7 @@ import type { Lares4Platform } from '../platform';
 import type { KseniaLight } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
+import { communicationFailure } from './communication-failure';
 
 /**
  * Light Accessory Handler
@@ -75,9 +76,7 @@ export class LightAccessory {
                 `Light control error ${this.device.name}:`,
                 error instanceof Error ? error.message : String(error),
             );
-            throw new this.platform.api.hap.HapStatusError(
-                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-            );
+            throw communicationFailure(this.platform.api, error);
         }
     }
 
@@ -89,7 +88,11 @@ export class LightAccessory {
         const brightness = value as number;
 
         if (!this.device.status?.dimmable) {
-            return;
+            // Nothing was sent: reporting success would show a brightness the light cannot have.
+            this.platform.log.warn(`${this.device.name}: brightness requested, but this light is not dimmable`);
+            throw new this.platform.api.hap.HapStatusError(
+                this.platform.api.hap.HAPStatus.NOT_ALLOWED_IN_CURRENT_STATE,
+            );
         }
 
         try {
@@ -111,9 +114,7 @@ export class LightAccessory {
                 `Dimmer error ${this.device.name}:`,
                 error instanceof Error ? error.message : String(error),
             );
-            throw new this.platform.api.hap.HapStatusError(
-                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-            );
+            throw communicationFailure(this.platform.api, error);
         }
     }
 

@@ -10,6 +10,12 @@ export interface CoverStatus {
     state: 'stopped' | 'opening' | 'closing';
 }
 
+/**
+ * What the output does inside its thermostat program: it is the program's
+ * `HEATING_OUT`, its `COOLING_OUT`, or both.
+ */
+export type ThermostatOutputRole = 'heating' | 'cooling' | 'heating-cooling';
+
 export interface ThermostatStatus {
     currentTemperature: number;
     targetTemperature: number;
@@ -18,8 +24,8 @@ export interface ThermostatStatus {
     hvacOutputActive?: boolean;
     /** Active season: realtime `ACT_SEA`, else the cfg read from the panel. */
     season?: 'WIN' | 'SUM';
-    /** Role of this output in its PRG_THERMOSTATS program (`HEATING_OUT` / `COOLING_OUT`), when known. */
-    outputRole?: 'heating' | 'cooling';
+    /** Role of this output in its thermostat program (`HEATING_OUT` / `COOLING_OUT`), when known. */
+    outputRole?: ThermostatOutputRole;
     /** When the panel last reported this thermostat in realtime (STATUS_TEMPERATURES), epoch ms. */
     observedAt?: number;
     /**

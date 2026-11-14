@@ -1,6 +1,7 @@
 import type { Logger } from 'homebridge';
 import type { KsaSanitizedCache, KseniaWebSocketOptions } from '../types';
 import { KseniaWebSocketClient } from '../websocket-client';
+import type { ExposurePolicySource } from './discovery-service';
 import type { RuntimeConfig } from './runtime-config';
 import type { RawLares4Config } from './types';
 
@@ -54,6 +55,9 @@ export function buildClientConnectionSettings(
             commandTimeoutMs: config.commandTimeoutMs,
             allowInsecureTls: config.allowInsecureTls,
             exposePartialArmScenarios: config.exposePartialArmScenarios,
+            // Absent rather than empty: the default options stay what they were before these keys.
+            ...(config.exposeOutputs.length > 0 ? { exposeOutputs: config.exposeOutputs } : {}),
+            ...(config.exposeScenarios.length > 0 ? { exposeScenarios: config.exposeScenarios } : {}),
             domusThermostat: config.domusThermostat,
             ksaCache,
         },
@@ -82,4 +86,16 @@ export function createWebSocketClient(
         );
     }
     return client;
+}
+
+/**
+ * What the client hid with the exposure policy, in the form `DiscoveryService`
+ * reads. The facade reports suppressed scenarios today; outputs follow once
+ * it exposes the hidden-device registry (`isHiddenByExposurePolicy`).
+ */
+export function clientExposurePolicy(client: KseniaWebSocketClient): ExposurePolicySource {
+    return {
+        isHiddenByExposurePolicy: (deviceId: string): boolean =>
+            deviceId.startsWith('scenario_') && client.isScenarioSuppressed(deviceId),
+    };
 }

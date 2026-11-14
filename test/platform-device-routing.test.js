@@ -41,7 +41,7 @@ test('PLAT-02: a HAP failure on one device does not stop HAP, Matter or MQTT for
     });
     const published = [];
     // MQTT is not enabled in the config, so the platform never replaces this stub.
-    platform.mqttBridge = { publishDeviceState: (device) => published.push(device.id), disconnect() {} };
+    platform.mqttBridge = { publishDeviceState: (device) => published.push(device.id), disconnect() {}, setPanelConnected() {} };
     api.emit('didFinishLaunching');
     await waitFor(() => synced(log));
 
@@ -69,6 +69,7 @@ test('PLAT-02: MQTT and HAP failures on a status update do not block the other s
             published.push(device.id);
         },
         disconnect() {},
+        setPanelConnected() {},
     };
     api.emit('didFinishLaunching');
     await waitFor(() => synced(log));
@@ -103,7 +104,7 @@ test('HAP bridge limit: one clear warning, and the devices beyond it still reach
     const { platform, api, log } = createPlatform(t, { port: panel.port, matter: hb.api.matter, bridge });
     const published = [];
     // MQTT is not enabled in the config, so the platform never replaces this stub.
-    platform.mqttBridge = { publishDeviceState: (device) => published.push(device.id), disconnect() {} };
+    platform.mqttBridge = { publishDeviceState: (device) => published.push(device.id), disconnect() {}, setPanelConnected() {} };
     api.emit('didFinishLaunching');
     await waitFor(() => synced(log));
 
@@ -137,7 +138,7 @@ test('PLAT-06 / SP-09: an excluded device is neither published on MQTT nor forwa
     });
     const published = [];
     // MQTT is not enabled in the config, so the platform never replaces this stub.
-    platform.mqttBridge = { publishDeviceState: (device) => published.push(device.id), disconnect() {} };
+    platform.mqttBridge = { publishDeviceState: (device) => published.push(device.id), disconnect() {}, setPanelConnected() {} };
     api.emit('didFinishLaunching');
     await waitFor(() => synced(log));
     panel.realtime({
