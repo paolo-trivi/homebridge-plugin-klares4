@@ -475,10 +475,11 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
     // Sync complete → batch name-map + targeted refresh of the outlier zone.
     await registry1.finalizeNameMap([zone, cover]);
     await delay(200);
-    assert.deepEqual(boot1.unregisterCalls, ['zone_19'], 'only the renamed zone is re-registered');
-    const renamed = boot1.registerCalls[2];
-    assert.equal(renamed.UUID, 'zone_19');
-    assert.equal(renamed.displayName, 'Finestra Taverna - Sens.');
+    // MAT-04: the zone is renamed in place, nothing is unregistered or registered again.
+    assert.deepEqual(boot1.unregisterCalls, []);
+    assert.equal(boot1.registerCalls.length, 2);
+    assert.equal(boot1.endpoints.get('zone_19').nodeLabel, 'Finestra Taverna - Sens.');
+    assert.deepEqual(boot1.metadataUpdates, [{ UUID: 'zone_19', displayName: 'Finestra Taverna - Sens.' }]);
     assert.equal(registry1.getStatus('zone_19'), 'registered');
 
     // ---- Boot 2 (map persisted): same discovery order, fresh process ----

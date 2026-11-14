@@ -8,24 +8,30 @@ export type MatterPublicationState =
     | 'failed';
 
 /**
- * How long to wait for an unregistered endpoint to actually disappear.
- *
- * On Homebridge 2.x betas `unregisterPlatformAccessories` given a `{ UUID }`
- * stub frequently removes nothing at all, so this budget is spent in full on
- * every rename that cannot succeed — 3s keeps a whole batch tolerable while
- * still leaving room for a slow-but-working removal. Raise it via config
- * (`matterUnregisterTimeoutMs`) or KLARES4_MATTER_UNREGISTER_TIMEOUT_MS where
- * removals do work but are slow.
+ * Every bridged endpoint carries this cluster whatever the plugin declared
+ * (homebridge/dist/matter/server/AccessoryManager.js:810-832), so it tells an
+ * absent endpoint from a cluster that only lacks readable attributes.
+ */
+const BRIDGED_INFO = 'bridgedDeviceBasicInformation';
+
+/**
+ * Budget for observing a topology or identity change (an unregistered
+ * endpoint gone, a nodeLabel written). Raise it via config
+ * (`matterUnregisterTimeoutMs`) or KLARES4_MATTER_UNREGISTER_TIMEOUT_MS on a
+ * slow host.
  */
 const DEFAULT_UNREGISTER_TIMEOUT_MS = 3_000;
 
 /**
- * Grace period after the endpoint first reads as absent. Homebridge 2.4
- * `unregisterAccessory` awaits `endpoint.close()` before it deletes the UUID
- * from its registry, and `getAccessoryState` already answers `undefined` while
- * the endpoint is closing. A register issued in that window is rejected as
- * "already registered" (only logged). Observed on a real bridge: close takes
- * well under a second.
+ * Grace period after the endpoint first reads as absent, followed by a second
+ * probe. Homebridge 2.4 `unregisterAccessory` awaits `endpoint.close()` before
+ * it deletes the UUID from its registry while `getAccessoryState` already
+ * answers `undefined` for the closing endpoint: a register issued in that
+ * window is rejected as "already registered" (only logged). Homebridge 2.5
+ * resolves the unregister call only once the endpoint is gone
+ * (MatterAPIImpl.js:348-352), but the two cannot be told apart from the
+ * plugin, so the settle stays. Rename no longer goes through here (see
+ * `renameInPlace`); only a device type change and the recovery paths do.
  */
 const DEFAULT_UNREGISTER_SETTLE_MS = 1_000;
 
@@ -38,6 +44,12 @@ function resolveTimeout(configured?: number): number {
     if (Number.isFinite(configured) && (configured as number) > 0) return configured as number;
     const fromEnv = Number(process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS);
     return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_UNREGISTER_TIMEOUT_MS;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve): void => { setTimeout(resolve, ms); });
+
+function errorText(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 export class MatterTopologyCoordinator {
@@ -81,25 +93,103 @@ export class MatterTopologyCoordinator {
     public unregister(uuid: string, probeCluster: string): Promise<boolean> {
         return this.enqueue(uuid, async () => {
             this.states.set(uuid, 'requested');
+            const known = this.knownAccessories.get(uuid);
             try {
                 await this.api.matter!.unregisterPlatformAccessories(
                     PLUGIN_NAME,
                     PLATFORM_NAME,
-                    [this.knownAccessories.get(uuid) ?? ({ UUID: uuid } as MatterAccessory)],
+                    [known ?? ({ UUID: uuid } as MatterAccessory)],
                 );
             } catch (error: unknown) {
                 // A rejection is no more proof that the endpoint survived than a
-                // resolution is proof that it went away — only the probe below decides.
-                this.log.debug(
-                    `[Matter] unregister call for ${uuid} threw, deferring to observation: `
-                    + `${error instanceof Error ? error.message : String(error)}`,
-                );
+                // resolution is proof that it went away — only the probe below
+                // decides. With the accessory object Homebridge registered, a
+                // rejection is an anomaly worth seeing; with the bare stub it is
+                // the expected TypeError (MatterAPIImpl.js:48-50, :335-342).
+                const message = `[Matter] unregister call for ${uuid} threw, deferring to observation: ${errorText(error)}`;
+                if (known) this.log.warn(message);
+                else this.log.debug(message);
             }
             this.states.set(uuid, 'published-unverified');
             const absent = await this.waitUntilAbsent(uuid, probeCluster);
             this.states.set(uuid, absent ? 'locally-published' : 'failed');
             if (absent) this.knownAccessories.delete(uuid);
             return absent;
+        });
+    }
+
+    /**
+     * Renames a live endpoint without touching its topology: the endpoint, its
+     * number and its `uniqueId` stay, so controllers keep rooms and
+     * automations. Writes `nodeLabel` (a writable attribute of
+     * BridgedDeviceBasicInformation; matter.js persists it, so it survives a
+     * restart even before Homebridge saved its cache), then updates the
+     * Homebridge cache record so `displayName` follows. Success is the new
+     * label read back from the endpoint, never the resolution of the calls:
+     * `updateAccessoryState` resolves even when Homebridge fails the update
+     * (MatterAPIImpl.js:368-390, StateManager.js:103-142).
+     */
+    public renameInPlace(accessory: MatterAccessory, name: string): Promise<boolean> {
+        const uuid = accessory.UUID;
+        return this.enqueue(uuid, async () => {
+            try {
+                await this.api.matter!.updateAccessoryState(uuid, BRIDGED_INFO, { nodeLabel: name });
+            } catch (error: unknown) {
+                this.log.debug(`[Matter] nodeLabel update for ${uuid} threw, deferring to observation: ${errorText(error)}`);
+            }
+            const renamed = await this.observe(async () => (await this.readNodeLabel(uuid)) === name);
+            if (renamed) await this.updateCachedRecord({ ...accessory, displayName: name });
+            return renamed;
+        });
+    }
+
+    /**
+     * Updates the record Homebridge keeps for a live endpoint (displayName in
+     * its Matter cache). Homebridge only logs when the record is not cached
+     * yet (server.js:132-160); the next attach in place then writes it.
+     */
+    public async updateCachedRecord(accessory: MatterAccessory): Promise<void> {
+        const known = this.knownAccessories.get(accessory.UUID);
+        if (known) this.knownAccessories.set(accessory.UUID, { ...known, displayName: accessory.displayName });
+        try {
+            await this.api.matter!.updatePlatformAccessories([accessory]);
+        } catch (error: unknown) {
+            this.log.debug(`[Matter] cache update for ${accessory.UUID} failed: ${errorText(error)}`);
+        }
+    }
+
+    /** The nodeLabel the live endpoint shows, or undefined when it cannot be read. */
+    public async readNodeLabel(uuid: string): Promise<string | undefined> {
+        const label = (await this.readBridgedInfo(uuid))?.nodeLabel;
+        return typeof label === 'string' ? label : undefined;
+    }
+
+    /** The endpoint's BridgedDeviceBasicInformation.uniqueId, or undefined. */
+    public async readUniqueId(uuid: string): Promise<string | undefined> {
+        const uniqueId = (await this.readBridgedInfo(uuid))?.uniqueId;
+        return typeof uniqueId === 'string' && uniqueId ? uniqueId : undefined;
+    }
+
+    /**
+     * Gives an endpoint that had to be replaced (new device type, recovery) the
+     * `uniqueId` of the endpoint it replaces. Homebridge does the same in its
+     * own "changed structure" path (AccessoryManager.js:157-162) because a
+     * controller may otherwise treat it as a new device, but only for
+     * endpoints restored from its cache; a register of a live UUID gets a
+     * random one (AccessoryManager.js:190, :827-829). matter.js accepts the
+     * write and persists it across restarts. Observed, not assumed.
+     */
+    public restoreUniqueId(uuid: string, uniqueId: string): Promise<boolean> {
+        return this.enqueue(uuid, async () => {
+            if ((await this.readUniqueId(uuid)) === uniqueId) return true;
+            try {
+                await this.api.matter!.updateAccessoryState(uuid, BRIDGED_INFO, { uniqueId });
+            } catch (error: unknown) {
+                this.log.debug(`[Matter] uniqueId update for ${uuid} threw, deferring to observation: ${errorText(error)}`);
+            }
+            const restored = await this.observe(async () => (await this.readUniqueId(uuid)) === uniqueId);
+            if (!restored) this.log.warn(`[Matter] ${uuid}: could not keep the previous uniqueId; controllers may see a new device`);
+            return restored;
         });
     }
 
@@ -119,28 +209,57 @@ export class MatterTopologyCoordinator {
         const result = this.tail.catch((): void => undefined).then(operation);
         this.tail = result.then((): void => undefined, (error: unknown): void => {
             this.states.set(uuid, 'failed');
-            this.log.warn(
-                `[Matter] topology operation failed for ${uuid}: `
-                + `${error instanceof Error ? error.message : String(error)}`,
-            );
+            this.log.warn(`[Matter] topology operation failed for ${uuid}: ${errorText(error)}`);
         });
         return result;
+    }
+
+    private async readBridgedInfo(uuid: string): Promise<Record<string, unknown> | undefined> {
+        try {
+            const state: unknown = await this.api.matter!.getAccessoryState(uuid, BRIDGED_INFO);
+            return state && typeof state === 'object' ? state as Record<string, unknown> : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    /** Polls `check` with a growing delay until it holds or the budget is spent. */
+    private async observe(check: () => Promise<boolean>): Promise<boolean> {
+        const deadline = Date.now() + this.unregisterTimeoutMs;
+        let delay = 10;
+        for (;;) {
+            if (await check()) return true;
+            if (Date.now() >= deadline) return false;
+            await sleep(delay);
+            delay = Math.min(250, delay * 2);
+        }
+    }
+
+    /**
+     * `getAccessoryState` answers `undefined` for a missing endpoint, but also
+     * for a cluster without readable attributes or a read error
+     * (StateManager.js:211-246): absence needs both the probe cluster and the
+     * bridged information unreadable, twice, around the settle period.
+     */
+    private async isAbsent(uuid: string, clusterName: string): Promise<boolean> {
+        try {
+            if (await this.api.matter!.getAccessoryState(uuid, clusterName) !== undefined) return false;
+            return await this.api.matter!.getAccessoryState(uuid, BRIDGED_INFO) === undefined;
+        } catch {
+            // An API error is not proof that the endpoint disappeared.
+            return false;
+        }
     }
 
     private async waitUntilAbsent(uuid: string, clusterName: string): Promise<boolean> {
         const deadline = Date.now() + this.unregisterTimeoutMs;
         let delay = 100;
         while (Date.now() < deadline) {
-            try {
-                const state = await this.api.matter!.getAccessoryState(uuid, clusterName);
-                if (state === undefined) {
-                    await new Promise((resolve): void => { setTimeout(resolve, resolveSettleMs()); });
-                    return true;
-                }
-            } catch {
-                // An API error is not proof that the endpoint disappeared.
+            if (await this.isAbsent(uuid, clusterName)) {
+                await sleep(resolveSettleMs());
+                if (await this.isAbsent(uuid, clusterName)) return true;
             }
-            await new Promise((resolve): void => { setTimeout(resolve, delay); });
+            await sleep(delay);
             delay = Math.min(1000, Math.round(delay * 1.5));
         }
         this.log.warn(`[Matter] unregister for ${uuid} was not locally observable before timeout`);
@@ -149,5 +268,5 @@ export class MatterTopologyCoordinator {
 }
 
 export function registrationProbeCluster(accessory: MatterAccessory): string {
-    return Object.keys(accessory.clusters ?? {})[0] ?? 'bridgedDeviceBasicInformation';
+    return Object.keys(accessory.clusters ?? {}).find((name) => name !== BRIDGED_INFO) ?? BRIDGED_INFO;
 }

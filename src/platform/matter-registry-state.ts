@@ -91,10 +91,13 @@ export interface CachedEndpointLabel {
 }
 
 /**
- * The name a just-registered endpoint really shows. Homebridge 2.4 attaches a
- * same-shaped registration to the endpoint restored from its cache and keeps
- * that endpoint as it is, so its nodeLabel stays the cached displayName; only
- * a fresh endpoint takes the new one. The name finalizer diffs against this.
+ * Best guess of the name a just-registered endpoint shows, before anything
+ * reads it. Homebridge attaches a same-shaped registration to the endpoint
+ * restored from its cache and keeps that endpoint as it is, so its nodeLabel
+ * stays the cached one; only a fresh endpoint takes the new displayName. The
+ * shape test here is the device type name only, while Homebridge compares five
+ * components (AccessoryManager.js:124-128): the name finalizer therefore reads
+ * the live label and uses this value only when the endpoint cannot be read.
  */
 export function liveNodeLabel(accessory: MatterAccessory, cached: CachedEndpointLabel | undefined): string {
     const attachedInPlace = !!cached?.displayName && cached.deviceTypeName === accessory.deviceType?.name;
