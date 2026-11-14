@@ -7,6 +7,176 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Release 2.3.0 closes the findings of a full review of 2.2.0: security and privacy, fail-closed exposure, command and connection reliability, thermostats, Matter lifecycle, MQTT, configuration validation, documentation and release pipeline. **Read "Upgrading from 2.2.x" first: some devices disappear until you opt them back in, and thermostats become new accessories in your Matter controllers.**
+
+### Upgrading from 2.2.x: read first
+
+**Things you will notice at the first start**
+
+- **Outputs and scenarios of an unrecognized category are hidden.** In 2.2.0 every output that was not a light, cover, gate or thermostat appeared as a light, and every scenario that was not arming appeared as a switch. Sirens (`GEN`, mode `AT`), alarm bridges (`GEN`, `A`), indicators (`GEN`, `S`), generic relays and door strikes (`GEN`, `M`, `B`), irrigation (`IRR`), outputs without a category, and scenarios with no category or an unknown one (for example `ARM_AWAY`) are now neither exposed nor commandable. The log shows one warning starting with `Exposure policy:` that names each hidden device and ends with the lines to copy. To bring one back, add it to **Device Selection → Expose Hidden Devices** in the plugin settings, or to the platform block of `config.json`, and restart:
+
+  ```json
+  "exposeOutputs": [{ "outputId": "12", "exposeAs": "light" }],
+  "exposeScenarios": [{ "scenarioId": "4" }]
+  ```
+
+  An opted-in output returns as a **light** with the same ID, HomeKit identity and MQTT topic as in 2.2.0. Opt in only what is safe to switch from voice assistants, scenes and automations ("turn off all the lights" included). Accessories of hidden devices left in the HomeKit or Matter cache are removed (HomeKit at the first sync, Matter after three syncs); retained MQTT topics they published are not cleared, delete them on the broker if needed. Arming and disarming scenarios stay never exposed; partial arming still needs `exposePartialArmScenarios`.
+- **Thermostats become native Matter Thermostats (Homebridge 2.5).** On Homebridge 2.5 every thermostat had fallen back to a temperature sensor. At the first start of 2.3.0 each one gets one automatic attempt to register as a real Thermostat. Apple Home, Alexa and Google then show a **new accessory** and the sensor disappears: set rooms and automations again. This is deliberate (a controller must not keep scenes that set a temperature on a read-only sensor). Watch the log for `was saved as a TemperatureSensor fallback by an earlier version; trying the native Thermostat once`. Where thermostats were already native, their Matter shape changes (heating-only outputs lose cooling, Auto and Occupancy) and controllers may show them as changed.
+- **A heating output and a cooling output of the same Ksenia program appear on Matter as two thermostats**, heating-only and cooling-only. Each shows Off outside its season and refuses commands there. HomeKit is unchanged.
+- **Settings form in English.** All titles and descriptions are now in English. `telemetry` and `ksaImport.applyExclusionSuggestions` no longer appear; existing values are ignored.
+
+**Behavior and default changes**
+
+- **No telemetry.** The anonymous error reporting (Sentry) is removed; the plugin sends nothing to any third party. A `telemetry` key left in `config.json` is ignored with one log line. Debug files written by earlier versions are world-readable and contain the home position and the account description: delete them, or `chmod 600` them, before sharing or copying them.
+- **Accessories of devices deleted on the panel are removed without restarting Homebridge**, after three complete synchronizations (a reconnection counts). On HomeKit the removal also needs at least half of the known accessories to be listed. The last device of a kind (the only scenario, for example) is never removed automatically: use the matching `exclude*` list. The panel's own temperature probes are never removed.
+- **Commands are refused instead of arriving late.** A command still queued after `commandTimeoutMs` is refused. Pressing a gate or scenario again while its pulse waits for the panel is refused; for lights, dimmers and covers only the newest waiting command is kept. Right after Homebridge starts, before the first synchronization has listed the devices, commands from cached accessories are refused. HomeKit and Matter show these as failed commands.
+- **Thermostat writes send only what changes, and are refused when the target is unclear.** The configuration read at login is no longer written back. A write whose panel thermostat cannot be established (a `manualCommandPairs` entry for an ID the panel does not have, an unreadable configuration, an output no program uses, or on panels without thermostat programs a guess that does not match the live state) fails with an error naming the `manualCommandPairs` line to add. Thermostat writes use `commandTimeoutMs` (8 s) instead of a fixed 2.5 s, and a temperature change is preceded by a read of about 250 ms. An MQTT setpoint outside `temperatureDefaults.min`/`max` is refused.
+- **After 3 failed logins the plugin retries once per hour** instead of stopping until Homebridge is restarted. Fix the PIN and restart Homebridge to reconnect at once.
+- **MQTT.**
+  - New retained topic `<prefix>/status` (availability of the bridge and of the panel, with an MQTT last will). **If your broker has an ACL, allow the plugin's user to write it** (`topic write homebridge/klares4/status`); without it the bridge still connects (it retries without the last will and logs how to fix it) but the availability topic is not written.
+  - New `mqtt.commands` option; set it to `false` to publish state only.
+  - The broker URL must start with a scheme (`mqtt://`, `mqtts://`, `ws://`, `wss://`); a URL without one no longer connects. A password with `/`, `#`, `?` or `@` must be percent-encoded, or put in `mqtt.password`.
+  - With `roomMapping` on, a command through the topic of the wrong room (or of a room for a room-less device) is refused; use the right room or `<prefix>/<type>/<id>/set`.
+  - Devices whose names give the same topic now publish under their device ID (`.../<type>/<device id>/state`) and the shared retained topic is cleared; consumers that read them by name must switch.
+  - Devices you excluded are no longer published (earlier retained topics are not cleared).
+  - Invalid command payloads that used to be ignored silently now produce rate-limited warnings.
+- **The debug file is confidential.** It is written `0600`, masks more (home position and sunrise/sunset times, account, serial numbers, panel identifier), and its log lines no longer invite you to share it. Send it privately.
+- **Values of the wrong type in `config.json` are no longer interpreted.** A boolean written as text (`"true"`), a number as text (`"5000"`), a list as a single string falls back to its default, and the log says so at startup: fix the value in the plugin settings. In particular **`"allowInsecureTls": "false"` used to turn certificate verification off and now keeps it on**: if your panel's certificate is self-signed and `allowInsecureTls` was a string, the connection is now refused until you set it to `true` (the checkbox). Numbers outside the limits of the settings form are moved to the nearest limit (`maxSeconds: 3` becomes 5, `reconnectInterval: 0` becomes 1000); an invalid `port` or `mqtt.port` falls back to the default; `temperatureDefaults.step` must be 0.5 or 1.
+- **The KSA import no longer rewrites your thermostat mappings.** Your `manualPairs` and `manualCommandPairs` win; the backup only adds the thermostats you have not mapped. If you relied on the backup overwriting a pair, delete that pair.
+- **The Matter name list no longer expires 30 days after its last write**; names of devices still on the panel never expire.
+- **Sensors the panel has not reported** (an offline DOMUS, for example) show "No Response" on HomeKit instead of 0 °C, 50 %, 100 lux or "no motion". Out-of-range or unreadable panel values are discarded instead of being moved to the nearest limit.
+- **Files the plugin creates for the first time are private (`0600`);** existing files keep their permissions.
+- **Requirements.** Node.js 22.12 or later (22, 24 and 26 are tested). Homebridge 2.5.x is the verified version, 2.4.x is covered by a CI contract job, and Homebridge 1.x is allowed by the package but **not tested**. The npm package no longer ships source maps.
+
+### Security
+
+- Outputs of an unrecognized category are no longer exposed as lights. Sirens, alarm bridges, indicators, generic relays, irrigation and outputs without a category used to appear in Apple Home, Alexa and on MQTT as lights that "turn off all the lights", scenes and automations could switch, with the stored PIN. They are hidden and cannot be commanded; `exposeOutputs` brings back a specific output.
+- Scenarios are exposed by allowlist: only generic scenarios (`GEN`) run without an opt-in. A scenario with no category, an empty or non-text one, or an unknown one (for example `ARM_AWAY`) is neither exposed nor run with the stored PIN; `exposeScenarios` brings back a specific one. Arming and disarming scenarios are never exposed, and partial arming still needs `exposePartialArmScenarios`.
+- Commands only reach outputs and scenarios the plugin discovered with that kind: a command for an output it does not expose (through an MQTT topic or a stale cached accessory) is refused and nothing is sent to the panel. Running a scenario follows the same policy as exposing it, and the refusal says why.
+- The plugin sends nothing to a third party: the Sentry error reporting, its embedded DSN and the `@sentry/node` dependency are removed, and with them the global hooks it installed on the module loader inside the shared Homebridge process.
+- The debug file is written readable by its owner only, masks the home position (including sunrise and sunset times), the account, serial numbers and the panel identifier together with the PIN, at any depth and in both directions; a frame that cannot be parsed is masked as text. Previously the login answer of the panel carried the GPS coordinates of the house into the file.
+- The PIN is masked in the log whatever it contains and wherever it is: a PIN with quotes or backslashes, a number, a list or an object, a truncated frame, a payload carried as a JSON string. Every credential-like key (`PIN`, `PIN_CODE`, `USER_PIN`, `PASSWORD`, `CODE`, `TOKEN`, ...) is masked the same way. The `LOGIN` frame is no longer written at every reconnection; at debug level it is logged masked.
+- `allowInsecureTls` is on only for the JSON value `true`. `"allowInsecureTls": "false"` (or `"true"`, `1`) used to switch certificate verification off; it now keeps it on and logs which key was ignored. The same strictness applies to `exposePartialArmScenarios` and every other on/off option.
+- A login the panel keeps refusing is no longer retried at the normal pace in more cases (a refusal whose ID does not match, the panel closing the connection during the login, a login left unanswered, an accepted login without a session ID); after 3 in a row the plugin slows down to one attempt per hour.
+- Frames from the panel are checked before use: a frame whose CRC does not match, that is not a JSON object, has no `CMD` or a `PAYLOAD` that is not an object is dropped and logged. Frames larger than 4 MiB close the connection, which is re-established.
+- New `mqtt.commands` option: `false` publishes state only and never subscribes to the `.../set` topics, so nobody who can publish on the broker can operate devices.
+- The MQTT broker password no longer appears in the log (a URL that starts with a space or has no scheme included); only `scheme://host:port` is shown. A broker URL that mqtt.js would read as another host (no scheme, `mqtt:/host`, an unescaped `/` or `#` in the password, an unsupported scheme) is refused with a clear error instead of connecting to `localhost:1883`.
+- With `roomMapping` on, a command on `<prefix>/<room>/<type>/<id>/set` runs only if the device belongs to that room, so a per-room ACL really limits what a client can operate.
+- A device excluded with `excludeZones`, `excludeOutputs`, `excludeSensors` or `excludeScenarios`, or hidden by the exposure policy, cannot be commanded over MQTT, also while its accessory is restored from the HomeKit cache.
+- MQTT setpoints outside `temperatureDefaults.min`/`max` are refused with a warning instead of being written to the panel (any value from 5 to 40 °C was accepted).
+- Files created for the first time (debug capture, KSA cache, Matter stores, device list, room mapping example) are private (`0600`). Temporary files used for atomic writes are created exclusively under an unpredictable name, and leftover ones from a crash (for `config.json` they contained the PIN) are removed at startup once older than five minutes.
+- A `.ksa` backup is treated as untrusted input: IDs derived from it must be plain numbers, names are cut to 64 characters before they can reach `config.json`, and a file over 32 MB is refused.
+- The release pipeline builds and tests in a job without publish rights and publishes the resulting tarball from a second job behind a protected environment; the tagged commit must be on `main`; a stable release requires a published release candidate with the same dependencies; all actions are pinned by commit SHA; Dependabot auto-merges only development dependencies and actions.
+
+### Changed
+
+- All titles and descriptions of the settings form are in English, and the form describes what the code does (see the corrected descriptions of `mqtt.port`, `logLevel`, `debug`, `commandTimeoutMs`, `domusThermostat.sensorFreshnessMs`, `temperatureDefaults`, `generateDebugFile`, `allowInsecureTls` and the KSA import switches).
+- Every on/off option is read the same way: an option whose default is `false` is active only for `true`, and one whose default is `true` is inactive only for `false`. Any other value is ignored, the safe default applies, and one warning at startup names the key and the type it received.
+- Numeric options are held to the limits declared in the settings form: a value that is not a number, not finite, or not an integer where one is required falls back to the default; a value outside the range is moved to the nearest limit, with one warning listing each correction. `matterUnregisterTimeoutMs` is held to its documented 500..30000 range.
+- Configuration problems are reported once at startup, grouped in one warning, without ever printing the PIN, the MQTT password or the panel address. A `pin` that is neither a string nor a number is a clear error and the plugin does not start.
+- The "hides N device(s) from Matter" warning of `matterOverrides` is logged when the first synchronization has finished and counts only devices the panel really reported. The one remaining Italian log message is now in English.
+- An output of category `GATE` with mode `m` (lower case) is now a gate, like `M`.
+- Thermostats: the Matter Thermostat declares only the attributes of what the output can do (a heating-only or cooling-only output has no Auto and no opposite capability, and no Occupancy). A thermostat setpoint or mode change writes only what changes, like the official Ksenia web app; the whole configuration read at login is never written back. Thermostat writes use `commandTimeoutMs`.
+- The KSA import adds the thermostat mappings of the backup that are missing and never replaces yours; when one of your pairs differs from the backup one log line names both values.
+- The device summary and `klares4-room-mapping-example.json` are produced at the first synchronization and again only when the list of devices changes, not at every reconnection; the example file is written atomically and only when its content differs.
+- The reconnection delay restarts from `reconnectInterval` only after a complete synchronization, not after a bare login. A `RESULT` in panel answers is read the same way everywhere (case and spaces ignored: a login answered with `ok` is accepted).
+- Removal of HomeKit and Matter accessories follows the same rules, judged on each synchronization, reconnections included: an accessory counts as missing only if its kind of device answered in that sync, it is removed after three consecutive missed syncs, and a sync that sees fewer than half of the known accessories counts nobody as missing. The log line "Prune skipped for this sync ... (partial discovery)" is gone: a silent family now protects only that family.
+- Debug capture keeps at most 20,000 frames and 8 MiB of traffic in memory; later frames are counted (`captureInfo.droppedMessages`), one warning is logged, and the capture still ends on time.
+- MQTT: the plugin schedules the reconnections itself (backoff from 5 s up to 60 s); `{"on":true,"brightness":40}` runs its two steps one after the other.
+- A panel setpoint outside `temperatureDefaults.min`/`max` is shown on HomeKit at the nearest limit.
+- Compiled for ES2022 (Node 22 and later, as before). The npm package no longer ships source maps (269 files and 254 kB instead of 521 files and 346 kB), and install size drops by about 95 MB of dependencies.
+- CI runs on Node 22, 24 and 26, runs contract tests against the real Homebridge Matter stack on Homebridge 2.4.x and 2.5.x, enforces coverage thresholds and checks the package contents. Tests now run against the real Homebridge Matter stack, and the test device list is fully synthetic.
+
+### Fixed
+
+**Connection and synchronization**
+
+- The initial synchronization is no longer reported complete when the panel refuses the realtime registration or the zones/outputs discovery read: the refusal is logged, and the plugin reconnects with backoff. Previously it stayed connected without ever receiving a status change. A panel that never answers the realtime registration is reconnected after 60 s. The `PRG_THERMOSTATS` answer `CMD_NOT_AVAILABLE` that panels give at every login is not reported.
+- Each login is a synchronization of its own: a reconnect whose discovery read fails can no longer count towards removing accessories. Two syncs completing in quick succession no longer run two overlapping Matter name refreshes and prunes.
+- `reconnectInterval: 0` or a negative value no longer makes the plugin reconnect hundreds of times per second; `heartbeatInterval: 0` no longer drops the connection at every tick.
+- When the panel stops answering pings (half-open connection), "disconnected" is reported at once and pending commands fail immediately, also with a short `reconnectInterval`. `connect()` always completes, and a shutdown during the login or while connecting is no longer logged as an error. A Homebridge shutdown during startup no longer lets the plugin connect afterwards.
+- An error in the connection callbacks no longer leaves the session without heartbeat and without reading the panel data; an error in a raw-message listener no longer crashes the bridge.
+- A malformed entry in a panel frame, or an error while handling one device, no longer drops the other devices of the same frame; the error is logged with the frame type, the device ID and a stack trace.
+- An IPv6 address in `ip` now works. Statuses received for devices that were never discovered are kept for at most 512 IDs.
+- A device deleted or re-categorised on the panel leaves the plugin's live state after the next complete discovery read, so its old twin no longer receives the status of the new device.
+- HomeKit, MQTT and Matter are handled independently for each device: an error on one no longer keeps a device from being registered or published elsewhere.
+- Bridges with more than 149 devices: Homebridge's HomeKit bridge refuses accessories beyond 149. The plugin logs one clear warning, and the devices beyond the limit are still exposed on Matter and published on MQTT instead of being lost together with every device discovered after them. An accessory refused by HomeKit no longer leaves an internal handler behind.
+
+**Commands**
+
+- Commands no longer go out late; pressing a gate or scenario again while the previous pulse waits is refused at once; for lights, dimmers and covers only the latest command is sent, and the number of commands waiting per device is capped.
+- A light, dimmer or cover command is confirmed by the panel's realtime state only when the output actually changes to the requested state after the command. A state the output already had, or the late event of an earlier command, no longer counts; a refusal from the panel always wins. Empty or blank positions are no longer read as 0, and a malformed status entry no longer throws.
+- `NaN`, `Infinity` or a non-number brightness or position, and an on/off that is not a boolean (`"false"`), are refused instead of turning into "close", "off" or "on".
+- A command acknowledged without `RESULT=OK` is a failure for every command that changes something on the panel, and a command sent without any confirmation is reported as an error, never logged as success. A panel answering with a numeric response ID is matched to the right command even with several pending.
+
+**Panel values**
+
+- A sensor value the panel reports as missing or unreadable (`NA`, empty, not a number) no longer turns the discovery placeholder (0 °C, 100 lux) into a real reading on HomeKit, Matter and MQTT; the device stays "not yet observed" until a valid reading arrives.
+- Out-of-range or unreadable values are discarded instead of being moved to the nearest limit: a probe reporting 999 °C, a humidity of 150 %, a cover position of `abc` or 300 no longer become 100 °C, 100 %, "closed" or "open". A cover update without a readable position keeps the last position instead of jumping to 50 %. Lights accept `ON`/`OFF` in any case; a zone update carrying only some fields changes only those fields.
+- Zone tamper: the panel's `T` field is now read and shown as HomeKit `StatusTampered`.
+- The panel's own temperature probes are no longer removed from HomeKit when the panel reports `NA` for them.
+
+**Configuration**
+
+- `excludeZones`, `excludeOutputs`, `excludeSensors` and `excludeScenarios` accept what users write: numbers (`5`), strings with spaces (`" 5"`) and full device IDs (`"gate_5"`, `"light_5"`, `"zone_3"`). A value that is not a list is ignored with a warning instead of matching by substring or throwing; an entry that is not a device ID of that kind is dropped and named.
+- `matterOverrides`, `matterRecoveryRequests` and `customNames` in their legacy map form are validated like the array form: a `null`, a number or a non-string name no longer stops the platform from starting or breaks the MQTT topics, and a device ID such as `constructor` no longer picks up a name from the object prototype. Two `matterOverrides` rows for the same device are merged (a conflict is warned about, the last value wins).
+- After the first synchronization one warning lists the `matterOverrides`, `matterRecoveryRequests` and `customNames` entries that match no device on the panel, with a hint when the ID is only a number or in capitals.
+- `config.json` that is a symbolic link stays a link. When it cannot be replaced atomically (a single-file Docker bind mount, `EBUSY`) the plugin rewrites it in place and warns, instead of failing silently and leaving `generateDebugFile` or the KSA `applyAtStartup` switched on forever. The plugin no longer reports "KSA import applied" or "Debug flag disabled" when the write did not happen. With more than one `Lares4Complete` block the one of the running instance is updated.
+- A damaged cached accessory no longer stops Homebridge from restoring the plugin's other accessories; it is reported with a warning and realigned at the next discovery. Accessories excluded in the config get no handler from the cache. Old Matter prune counters of accessories that no longer exist are cleaned from `klares4-matter-prune.json`.
+
+**HomeKit**
+
+- Sensors the panel has not reported show "No Response". Setting the brightness of a light that is not dimmable is an error instead of a silent success. A cover whose position has not been reported yet always sends the command.
+- A scenario renamed on the panel is updated in its HomeKit handler (the MQTT command by the new name works without a restart). The HomeKit gate auto-off uses `scenarioAutoOffDelay` instead of a fixed 500 ms.
+- Accessories cached by an older version for devices the exposure policy now hides are removed from HomeKit at the first sync, also when the panel has only arming scenarios.
+
+**Thermostats**
+
+- Setting a thermostat temperature or mode no longer writes back the whole configuration read at login. A setpoint from HomeKit, Matter, Alexa or MQTT could switch heating back on after it was turned off on the keypad, drop a weekly program, and undo schedule, comfort-temperature or season changes made since the plugin connected. The plugin now sends only what the command changes: a mode change only the mode (and the season for Heat/Cool), a temperature change re-reads that thermostat right before writing and sends only the active season's block with the new temperature. The plugin also notices configuration changes made on the panel and re-reads before using the configuration again.
+- Automatic thermostat ↔ DOMUS sensor matching by name no longer gives one room's sensor to another room with a similar name.
+- A reconnection no longer replays the thermostat configuration of the previous session over the live state (no more spurious heat → off transitions or AUTO targets jumping to the manual setpoint at every reconnect). In AUTO the target shown is always the program's.
+- A thermostat's current temperature is no longer replaced by the panel's internal board temperature when the room temperature simply stays the same for more than 5 minutes.
+- A temperature or mode changed from HomeKit (or MQTT) now reaches Matter and the MQTT state topic as soon as the panel acknowledges it. HomeKit "Current Heating/Cooling State" in AUTO follows the season. A mode and a temperature sent together become one panel write, applied in the right order; two accessories sharing one panel thermostat no longer overwrite each other. An acknowledged "cool" that the panel never confirmed no longer moves later setpoints to the summer season. A realtime mode the plugin does not know is no longer shown as a frozen mode.
+
+**Matter**
+
+- Thermostats register as real Matter thermostats again on Homebridge 2.5, where every thermostat had fallen back to a temperature sensor after about 30 seconds and `matterRecoveryRequests` could not bring it back. The plugin declares only the attributes of what the thermostat can do and, if a Homebridge version does not accept that, tries once with the payload of 2.2.0 before falling back. Thermostats saved as a fallback get one automatic attempt at the first start.
+- A heating output and a cooling output of the same program no longer act on each other in Matter: the role comes from the program data, not from the device name, so renaming a thermostat no longer changes what it can do. Auto (and Cool) on a heating-only thermostat is refused to the controller instead of being accepted and ignored. Matter thermostats publish whether the heating or cooling output is running.
+- A Matter command sent shortly after another is no longer dropped as "already current" because the panel had not reported the first yet (two quick +1 °C steps now add up to +2 °C). A command that cannot reach the panel is reported as failed and the previous value comes back. A Matter thermostat whose room temperature has not been read shows it as unknown instead of a made-up 20 °C.
+- The Matter fallback store no longer rewrites a file it does not understand; an unreadable file is copied to `klares4-matter-fallback.json.unreadable.bak` before a new store starts.
+- Renaming a Matter accessory (a name changed on the panel, a `matterOverrides` name, a collision resolved at the end of the first sync) no longer removes it from the bridge and adds it back: the name is changed on the live accessory, which keeps its identity, so controllers keep rooms, favourites and automations. A light that turns out to be a dimmer is still replaced once but keeps its identity.
+- A device deleted or renumbered on the panel is removed from Matter after three complete syncs, also across Homebridge restarts (before, an endpoint restored from Homebridge's cache stayed forever, shown as reachable, with commands failing).
+- When the panel is unreachable every Matter accessory is marked "not responding" after 15 seconds, including those restored from Homebridge's cache.
+- Covers commanded from Apple Home, Alexa or Google no longer show as already open/closed the moment the command is sent: they keep the position the panel reports, show the requested target, and report opening or closing until they have moved. A brightness command on a dimmer that is off no longer reaches the panel. A Matter command arriving while the panel is unavailable fails visibly.
+- An out-of-range or non-numeric value restored from an old Homebridge cache no longer makes an accessory fail to register for the whole session.
+- The Matter name list is written atomically, a list written by a newer version is left untouched after a downgrade, and names of devices still on the panel never expire. Matter names with characters outside the Basic Multilingual Plane are shortened the way Homebridge counts them, so two accessories cannot end up with the same truncated name. Very long names no longer block Homebridge for seconds, and the voice-name analysis is much faster on large installations.
+- On Homebridge versions whose Matter registration completes before returning (2.5), an accessory that did not come up is retried after about 2 seconds instead of 30; an endpoint counts as up only when it answers for every cluster the plugin declared.
+
+**MQTT**
+
+- A burst of MQTT commands no longer keeps the panel busy for minutes: for each device one command runs and only the newest waits.
+- After a refused connection (wrong password, broker restarting) the bridge keeps retrying instead of stopping until Homebridge restarts; a broker that is down no longer writes two log lines every 5 seconds.
+- Two devices whose names give the same topic, or a name without letters or digits, no longer overwrite each other's retained state.
+- Invalid MQTT commands are refused with a warning that says what is expected; topic levels and payloads in the log are quoted and cut to 80 characters, so a client cannot inject fake log lines; a QoS 1 retransmission of the same command is not executed twice; a `topicPrefix` containing `+` or `#` is refused at startup.
+- A command refused by validation or the panel queue is logged as a readable warning instead of a generic error.
+
+### Added
+
+- `exposeOutputs` and `exposeScenarios`: per-device opt-in lists for outputs and scenarios of an unrecognized category, with a startup warning that lists every hidden device, its category and the exact entries to add (repeated only if the situation changes).
+- The panel's per-scenario PIN flag is read: exposed scenarios with a flag other than `N` are listed in the startup warning for you to check.
+- `mqtt.commands`.
+- `<prefix>/status`: retained availability of the bridge (`online`/`offline`, with an MQTT last will) and of the panel connection.
+- Matter thermostats publish their running state; a heating-only or cooling-only Thermostat is exposed with only that capability.
+- Documentation: `docs/en` and `docs/it` are the same nine pages, with new MQTT, Matter and privacy pages; the README lists every setting with its default and limits in both languages; `SECURITY.md` is current.
+- Tests: `npm run test:contract` (Matter contract tests against the real Homebridge Matter stack), `npm run test:coverage` (coverage thresholds on `src/`), `npm run check:pack` (tarball contents).
+
+### Removed
+
+- The `telemetry` setting and the anonymous error reporting (Sentry), with the `@sentry/node` dependency (23 packages). A `telemetry` key in an existing `config.json` is ignored.
+- The `ksaImport.applyExclusionSuggestions` setting (it never changed anything). An existing value is ignored.
+- The `release:rc` and `release:beta` npm scripts, which published from a local machine without provenance. Releases are published only by the workflow.
+- The "Prune skipped for this sync (partial discovery)" log line, replaced by per-family protection.
+
 ## [2.2.0] - 2026-11-14
 
 Stable release of the `2.2.0-rc.1` … `2.2.0-rc.4` cycle. It also carries the `2.1.5-rc.1` and `2.1.5-rc.2` fixes, which never reached a stable release, so it is the upgrade from `2.1.4`. `2.2.0-rc.4` was validated on a real Lares4 panel (Homebridge 2.4.0, Node 24, Matter-only child bridge with 109 endpoints paired to Apple Home, Alexa and Google). Per-rc detail is kept below.
@@ -158,8 +328,9 @@ recovery. Default behaviour is unchanged without new configuration.
 ## [2.1.5-rc.2] - 2026-09-12
 
 Command-path correctness and persisted-name integrity. Reconciles the
-reservation and prune-guard work that shipped in `2.1.5-rc.1` but was never
-present on `main`.
+reservation and prune-guard work that shipped in `2.1.5-rc.1` (a pre-release tag
+with no entry of its own: its content is described here) but was never present
+on `main`.
 
 ### Fixed
 
@@ -892,30 +1063,40 @@ Highlights vs `2.0.1`:
 
 ## Version History Summary
 
-- **1.1.1-beta.x**: MQTT integration and room mapping features
-- **1.1.0**: Complete plugin rewrite with full Lares4 integration
-- **1.0.x**: Legacy versions (deprecated)
+- **2.3.x**: fail-closed exposure, no telemetry, reliable commands and connection, native Matter thermostats, MQTT availability and `mqtt.commands`, validated configuration, bilingual documentation.
+- **2.2.x**: security and compliance hardening (PIN masking, login guard, partial-arm scenarios hidden), Matter stability on Homebridge 2.4, Node 22.12 or later.
+- **2.1.x**: Matter name determinism, topology stability, thermostat routing, selective Matter exposure.
+- **2.0.x**: Matter support through Homebridge 2.x, modular architecture, strict TypeScript.
+- **1.1.x**: MQTT bridge, room mapping, complete rewrite for Lares4.
+- **1.0.x and earlier**: legacy versions, no longer supported.
 
 ## Migration Guide
 
+### From 2.2.x to 2.3.0
+
+- Read [Upgrading from 2.2.x](#upgrading-from-22x-read-first) at the top of `[Unreleased]`: hidden outputs and scenarios and how to expose them again, new Thermostat accessories on Matter, the removed `telemetry` setting, the new `<prefix>/status` topic and its ACL line.
+- Values of the wrong type in `config.json` are now ignored with a warning; check the log at the first start.
+- No change to UUIDs, config keys of existing devices or the shape of existing MQTT topics, except devices whose names collide.
+
+### From 2.1.x to 2.2.0
+
+- See [Upgrading from 2.1.x](#upgrading-from-21x-read-first) under `[2.2.0]`: Node 22.12 or later, partial-arm scenarios hidden by default, `customNames` as a list, a KSA import no longer enables `roomMapping`.
+
+### From 2.0.x to 2.2.0
+
+- Update in place and read the entries of 2.1.x and 2.2.0 in between; never reinstall the plugin or regenerate the Matter child bridge.
+
 ### From 1.1.1-beta.5 to 1.1.1-beta.6
 
-- No configuration changes required
-- Codebase refactored for strict TypeScript compliance
-- All functionality remains the same
+- No configuration changes required. The codebase was refactored for strict TypeScript compliance and all functionality remains the same.
 
-### From 1.1.1-beta.0 to 1.1.1-beta.1+
+### From 1.1.1-beta.0 to 1.1.1-beta.1 and later
 
-- Room mapping is optional and disabled by default
-- Existing MQTT configurations continue to work unchanged
-- To use room mapping, enable it in the new "Room Mapping MQTT" section
+- Room mapping is optional and disabled by default. Existing MQTT configurations continue to work unchanged. To use room mapping, enable it in the "Room Mapping MQTT" section.
 
-### From 1.0.x to 1.1.0+
+### From 1.0.x to 1.1.0 and later
 
-- Complete reconfiguration required
-- New device discovery process
-- Enhanced configuration options through Homebridge UI
-- Improved stability and performance
+- Complete reconfiguration required: new device discovery process and enhanced configuration options in the Homebridge UI.
 
 ## Support
 
@@ -923,3 +1104,30 @@ For issues, feature requests, or questions:
 
 - GitHub Issues: https://github.com/paolo-trivi/homebridge-plugin-klares4/issues
 - Documentation: Check README.md for detailed setup instructions
+
+[Unreleased]: https://github.com/paolo-trivi/homebridge-plugin-klares4/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.2.0
+[2.2.0-rc.4]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.2.0-rc.4
+[2.2.0-rc.3]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.2.0-rc.3
+[2.2.0-rc.2]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.2.0-rc.2
+[2.2.0-rc.1]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.2.0-rc.1
+[2.1.5-rc.2]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.1.5-rc.2
+[2.1.4]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.1.4
+[2.1.3]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.1.3
+[2.1.2]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.1.2
+[2.1.1]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.1.1
+[2.1.0]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.1.0
+[2.1.0-rc.12]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.1.0-rc.12
+[2.0.1]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.0.1
+[2.0.0]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.0.0
+[2.0.0-beta.2]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.0.0-beta.2
+[2.0.0-beta.1]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.0.0-beta.1
+[2.0.0-beta.0]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v2.0.0-beta.0
+[1.1.8]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.8
+[1.1.7-beta2]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.7-beta2
+[1.1.6]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.6
+[1.1.5]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.5
+[1.1.1-beta.5]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.1-beta.5
+[1.1.1-beta.1]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.1-beta.1
+[1.1.1-beta.0]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.1-beta.0
+[1.1.0]: https://github.com/paolo-trivi/homebridge-plugin-klares4/releases/tag/v1.1.0
