@@ -189,10 +189,10 @@ test('integration sequence MULTI_TYPES -> STATUS_BUS_HA_SENSORS -> STATUS_SYSTEM
     PAYLOAD_TYPE: 'MULTI_TYPES',
     PAYLOAD: {
       OUTPUTS: [
-        { ID: '18', DES: 'Riscaldamento Sala', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
-        { ID: '34', DES: 'Raffrescamento Sala', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
+        { ID: '18', DES: 'Riscaldamento Veranda', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
+        { ID: '34', DES: 'Raffrescamento Veranda', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
       ],
-      BUS_HAS: [{ ID: '1', DES: 'Term. Sala', TYPE: 'DOMUS', ENABLED: 'YES' }],
+      BUS_HAS: [{ ID: '1', DES: 'Term. Veranda', TYPE: 'DOMUS', ENABLED: 'YES' }],
     },
   });
 
@@ -269,8 +269,8 @@ test('integration normalizes DOMUS ids between BUS_HAS and STATUS_BUS_HA_SENSORS
     CRC_16: '0x0000',
     PAYLOAD_TYPE: 'MULTI_TYPES',
     PAYLOAD: {
-      OUTPUTS: [{ ID: '18', DES: 'Riscaldamento Sala', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' }],
-      BUS_HAS: [{ ID: '01', DES: 'Term. Sala', TYPE: 'DOMUS', ENABLED: 'YES' }],
+      OUTPUTS: [{ ID: '18', DES: 'Riscaldamento Veranda', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' }],
+      BUS_HAS: [{ ID: '01', DES: 'Term. Veranda', TYPE: 'DOMUS', ENABLED: 'YES' }],
     },
   });
 

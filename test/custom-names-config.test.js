@@ -9,26 +9,26 @@ const { DiscoveryService } = require('../dist/platform/discovery-service.js');
 const log = { info() {}, warn() {}, error() {}, debug() {} };
 
 test('F02: the legacy map form is still accepted unchanged', () => {
-    const legacy = { outputs: { 37: 'PC Studio' }, zones: { 3: 'Finestra' } };
+    const legacy = { outputs: { 37: 'PC Solaio' }, zones: { 3: 'Finestra' } };
     assert.deepEqual(normalizeCustomNames(legacy), {
-        zones: { 3: 'Finestra' }, outputs: { 37: 'PC Studio' }, sensors: {}, scenarios: {},
+        zones: { 3: 'Finestra' }, outputs: { 37: 'PC Solaio' }, sensors: {}, scenarios: {},
     });
 });
 
 test('F02: the array form maps every device ID family to its category', () => {
     const normalized = normalizeCustomNames([
-        { deviceId: 'light_37', name: 'PC Studio' },
+        { deviceId: 'light_37', name: 'PC Solaio' },
         { deviceId: 'cover_7', name: ' Tapparella Test ' },
         { deviceId: 'output_12', name: 'Uscita' },
         { deviceId: 'zone_3', name: 'Finestra' },
-        { deviceId: 'sensor_temp_1', name: 'Sala' },
-        { deviceId: 'sensor_2', name: 'Bagno' },
+        { deviceId: 'sensor_temp_1', name: 'Veranda' },
+        { deviceId: 'sensor_2', name: 'Atrio' },
         { deviceId: 'scenario_9', name: 'Notte' },
     ]);
     assert.deepEqual(normalized, {
         zones: { 3: 'Finestra' },
-        outputs: { 37: 'PC Studio', 7: 'Tapparella Test', 12: 'Uscita' },
-        sensors: { 1: 'Sala', 2: 'Bagno' },
+        outputs: { 37: 'PC Solaio', 7: 'Tapparella Test', 12: 'Uscita' },
+        sensors: { 1: 'Veranda', 2: 'Atrio' },
         scenarios: { 9: 'Notte' },
     });
 });
@@ -41,7 +41,7 @@ test('F02: malformed rows are dropped instead of stopping the platform', () => {
 });
 
 test('F02: KSA-derived names are written in the array form and read back identically', () => {
-    const derived = { outputs: { 18: 'Riscaldamento Sala' }, zones: { 1: 'Ingresso' }, sensors: { 1: 'Term. Sala' }, scenarios: { 4: 'Notte' } };
+    const derived = { outputs: { 18: 'Riscaldamento Veranda' }, zones: { 1: 'Ingresso' }, sensors: { 1: 'Term. Veranda' }, scenarios: { 4: 'Notte' } };
     const entries = toCustomNameEntries(derived);
     assert.ok(Array.isArray(entries));
     assert.deepEqual(normalizeCustomNames(entries), derived);
@@ -49,17 +49,17 @@ test('F02: KSA-derived names are written in the array form and read back identic
 
 test('F02: DiscoveryService applies array-form custom names', () => {
     const discovery = new DiscoveryService({ customNames: [
-        { deviceId: 'light_37', name: 'PC Studio' },
-        { deviceId: 'sensor_1', name: 'Sala' },
+        { deviceId: 'light_37', name: 'PC Solaio' },
+        { deviceId: 'sensor_1', name: 'Veranda' },
     ] }, log);
-    assert.equal(discovery.getCustomName({ id: 'light_37', type: 'light', name: 'PC', status: {} }), 'PC Studio');
-    assert.equal(discovery.getCustomName({ id: 'sensor_hum_1', type: 'sensor', name: 'x', status: {} }), 'Sala - Umidita');
+    assert.equal(discovery.getCustomName({ id: 'light_37', type: 'light', name: 'PC', status: {} }), 'PC Solaio');
+    assert.equal(discovery.getCustomName({ id: 'sensor_hum_1', type: 'sensor', name: 'x', status: {} }), 'Veranda - Umidita');
 });
 
 test('the panel temperature sensors can be renamed and are accepted by the UI patterns', () => {
     const rows = [
         { deviceId: 'sensor_system_temp_in', name: 'Temperatura Centrale' },
-        { deviceId: 'sensor_system_temp_out', name: 'Temperatura Esterna Casa' },
+        { deviceId: 'sensor_system_temp_out', name: 'Temperatura Giardino' },
     ];
     const normalized = normalizeCustomNames(rows);
     assert.equal(normalized.sensors.sensor_system_temp_in, 'Temperatura Centrale');
@@ -106,8 +106,8 @@ test('F38: overrides that hide devices from Matter are reported once the devices
     const { reportConfigOverrides } = require('../dist/platform/override-reconciliation.js');
     const warnings = [];
     const runtime = resolveRuntimeConfig({ matterOverrides: [
-        { deviceId: 'zone_18', name: 'Contatto Studio', exposed: false },
-        { deviceId: 'zone_19', name: 'Contatto Cucina', exposed: true },
+        { deviceId: 'zone_18', name: 'Contatto Solaio', exposed: false },
+        { deviceId: 'zone_19', name: 'Contatto Taverna', exposed: true },
     ] }, log);
     reportConfigOverrides(runtime, new Set(['zone_18', 'zone_19']), { ...log, warn: (m) => warnings.push(m) });
     assert.equal(warnings.length, 1);

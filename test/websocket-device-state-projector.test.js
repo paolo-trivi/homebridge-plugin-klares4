@@ -68,7 +68,7 @@ test('parseOutputDevice: device.id prefix stays stable when a later update has i
 
 test('parseOutputDevice: a brand-new output with sufficient data still classifies correctly', () => {
   const device = parseOutputDevice({
-    ID: 'stable-light-1', DES: 'Luce Cucina', TYPE: 'LIGHT', STATUS: '0', ENABLED: 'YES', CAT: 'LIGHT',
+    ID: 'stable-light-1', DES: 'Luce Taverna', TYPE: 'LIGHT', STATUS: '0', ENABLED: 'YES', CAT: 'LIGHT',
   });
   assert.equal(device.id, 'light_stable-light-1');
   assert.equal(device.type, 'light');
@@ -114,22 +114,22 @@ const { normalizeDeviceName } = require('../dist/websocket/device-state-projecto
 const { parseZoneData, parseScenarioData } = require('../dist/websocket-client/device-parsers.js');
 
 test('normalizeDeviceName trims and collapses whitespace', () => {
-  assert.equal(normalizeDeviceName('Balcone Sala '), 'Balcone Sala');
-  assert.equal(normalizeDeviceName('  Finestra   Studio  '), 'Finestra Studio');
-  assert.equal(normalizeDeviceName('Luce\tCucina'), 'Luce Cucina');
+  assert.equal(normalizeDeviceName('Balcone Veranda '), 'Balcone Veranda');
+  assert.equal(normalizeDeviceName('  Finestra   Solaio  '), 'Finestra Solaio');
+  assert.equal(normalizeDeviceName('Luce\tTaverna'), 'Luce Taverna');
   assert.equal(normalizeDeviceName(undefined), '');
   assert.equal(normalizeDeviceName('   '), '');
 });
 
 test('parseOutputDevice: DES with trailing space is born clean (name and description)', () => {
-  const cover = parseOutputDevice({ ID: '3', CAT: 'ROLL', DES: 'Balcone Sala ' });
+  const cover = parseOutputDevice({ ID: '3', CAT: 'ROLL', DES: 'Balcone Veranda ' });
   assert.equal(cover.id, 'cover_3', 'id must NOT change — UUIDs never derive from names');
-  assert.equal(cover.name, 'Balcone Sala');
-  assert.equal(cover.description, 'Balcone Sala');
+  assert.equal(cover.name, 'Balcone Veranda');
+  assert.equal(cover.description, 'Balcone Veranda');
 
-  const light = parseOutputDevice({ ID: '12', CAT: 'LIGHT', DES: '  Studio ' });
+  const light = parseOutputDevice({ ID: '12', CAT: 'LIGHT', DES: '  Solaio ' });
   assert.equal(light.id, 'light_12');
-  assert.equal(light.name, 'Studio');
+  assert.equal(light.name, 'Solaio');
 });
 
 test('parseOutputDevice: empty/whitespace-only DES falls back to the typed placeholder', () => {
@@ -139,11 +139,11 @@ test('parseOutputDevice: empty/whitespace-only DES falls back to the typed place
 });
 
 test('parseZoneData / parseScenarioData: DES normalised at parse', () => {
-  const zone = parseZoneData({ ID: '24', DES: ' Finestra  Matrimoniale ', STATUS: '0' });
+  const zone = parseZoneData({ ID: '24', DES: ' Finestra  Foresteria ', STATUS: '0' });
   assert.equal(zone.id, 'zone_24');
-  assert.equal(zone.name, 'Finestra Matrimoniale');
-  assert.equal(zone.description, 'Finestra Matrimoniale');
+  assert.equal(zone.name, 'Finestra Foresteria');
+  assert.equal(zone.description, 'Finestra Foresteria');
 
-  const scenario = parseScenarioData({ ID: '15', DES: 'Apri Mattina (estate) ' });
-  assert.equal(scenario.name, 'Apri Mattina (estate)', 'parse only trims/collapses — display sanitisation happens per-ecosystem');
+  const scenario = parseScenarioData({ ID: '15', DES: 'Alza Tende (estate) ' });
+  assert.equal(scenario.name, 'Alza Tende (estate)', 'parse only trims/collapses — display sanitisation happens per-ecosystem');
 });

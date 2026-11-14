@@ -1,12 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const { KsaImportService } = require('../dist/platform/ksa-import-service.js');
 const { PlatformConfigFileService } = require('../dist/platform/config-file-service.js');
 const { mergeExclusionList } = require('../dist/platform/ksa-config-merge.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const log = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -33,8 +33,8 @@ function syntheticKsa() {
     return Buffer.concat([Buffer.from('KSFS\x03\x00'), Buffer.from(JSON.stringify(payload))]);
 }
 
-function setup(platformOverrides) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-ksa-apply-'));
+function setup(t, platformOverrides) {
+    const dir = tmpStorage(t, 'klares4-ksa-apply-');
     const ksaPath = path.join(dir, 'panel.ksa');
     fs.writeFileSync(ksaPath, syntheticKsa());
     const platform = {
@@ -51,8 +51,8 @@ function setup(platformOverrides) {
     return { runtime, service, persisted };
 }
 
-test('KSA exclusions: empty suggestions never erase the user lists (runtime and persisted)', async () => {
-    const { runtime, service, persisted } = setup({
+test('KSA exclusions: empty suggestions never erase the user lists (runtime and persisted)', async (t) => {
+    const { runtime, service, persisted } = setup(t, {
         excludeOutputs: ['5'],
         excludeZones: ['7'],
         excludeSensors: ['2'],
@@ -70,14 +70,14 @@ test('KSA exclusions: empty suggestions never erase the user lists (runtime and 
     assert.equal(persisted().ksaImport.applyAtStartup, false);
 });
 
-test('KSA exclusions: suggestions are added to the user list, never replace it', () => {
+test('KSA exclusions: suggestions are added to the user list, never replace it', (t) => {
     assert.equal(mergeExclusionList(['5'], []), undefined);
     assert.deepEqual(mergeExclusionList(['5', '6'], ['6', '7']), ['5', '6', '7']);
     assert.deepEqual(mergeExclusionList(undefined, ['7']), ['7']);
     assert.equal(mergeExclusionList(['5'], ['5']), undefined);
 });
 
-test('KSA custom names: re-applying the same import adds no duplicate rows', () => {
+test('KSA custom names: re-applying the same import adds no duplicate rows', (t) => {
     const { mergeCustomNames } = require('../dist/platform/custom-names-config.js');
     const imported = { outputs: { 1: 'Luce Panel' }, zones: { 3: 'Zona Panel' } };
     const once = mergeCustomNames([{ deviceId: 'light_1', name: 'Mia' }], imported);
@@ -87,8 +87,8 @@ test('KSA custom names: re-applying the same import adds no duplicate rows', () 
 
 const ROOM_NAME_PATTERN = /^[a-z0-9_]+$/;
 
-test('KSA rooms: panel room names become MQTT-safe slugs and room mapping is not switched on', async () => {
-    const { runtime, service } = setup({});
+test('KSA rooms: panel room names become MQTT-safe slugs and room mapping is not switched on', async (t) => {
+    const { runtime, service } = setup(t, {});
     await service.prepare(runtime, 'Lares4Complete');
 
     const rooms = runtime.roomMapping.rooms;
@@ -97,9 +97,9 @@ test('KSA rooms: panel room names become MQTT-safe slugs and room mapping is not
     assert.notEqual(runtime.roomMapping.enabled, true);
 });
 
-test('KSA rooms: user-defined rooms and the enabled flag are never replaced', async () => {
+test('KSA rooms: user-defined rooms and the enabled flag are never replaced', async (t) => {
     const userMapping = { enabled: true, rooms: [{ roomName: 'soggiorno', devices: [{ deviceId: 'light_1' }] }] };
-    const { runtime, service, persisted } = setup({
+    const { runtime, service, persisted } = setup(t, {
         roomMapping: userMapping,
         ksaImport: { applyAtStartup: true },
     });
@@ -109,8 +109,8 @@ test('KSA rooms: user-defined rooms and the enabled flag are never replaced', as
     assert.deepEqual(persisted().roomMapping, userMapping);
 });
 
-test('KSA rooms: with no user rooms the panel rooms are persisted, enabled stays as the user set it', async () => {
-    const { runtime, service, persisted } = setup({
+test('KSA rooms: with no user rooms the panel rooms are persisted, enabled stays as the user set it', async (t) => {
+    const { runtime, service, persisted } = setup(t, {
         roomMapping: { enabled: false, rooms: [{}] },
         ksaImport: { applyAtStartup: true },
     });
@@ -128,8 +128,8 @@ function namesById(config) {
     return Object.fromEntries(config.customNames.map((row) => [row.deviceId, row.name]));
 }
 
-test('KSA custom names: merged per device, the user name wins (runtime and persisted, array form)', async () => {
-    const { runtime, service, persisted } = setup({
+test('KSA custom names: merged per device, the user name wins (runtime and persisted, array form)', async (t) => {
+    const { runtime, service, persisted } = setup(t, {
         customNames: [{ deviceId: 'light_1', name: 'Luce Sala Mia' }],
         ksaImport: { applyAtStartup: true, applyCustomNames: true },
     });
@@ -144,8 +144,8 @@ test('KSA custom names: merged per device, the user name wins (runtime and persi
     }
 });
 
-test('KSA custom names: a legacy map is kept and converted, the user name still wins', async () => {
-    const { runtime, service, persisted } = setup({
+test('KSA custom names: a legacy map is kept and converted, the user name still wins', async (t) => {
+    const { runtime, service, persisted } = setup(t, {
         customNames: { outputs: { 2: 'Cucina Mia' } },
         ksaImport: { applyAtStartup: true, applyCustomNames: true },
     });

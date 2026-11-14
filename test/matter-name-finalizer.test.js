@@ -1,15 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const { finalizeMatterNameMap } = require('../dist/platform/matter-name-finalizer.js');
 const { MatterNameService } = require('../dist/platform/matter-name-service.js');
-
-function tmpStorage() {
-    return fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-finalizer-'));
-}
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
@@ -21,23 +17,23 @@ function silentLog() {
  * second must still be renamed: aborting the batch on the first error left
  * every later override unapplied (observed in 2.2.0-rc.1).
  */
-test('a failing rename does not abort the rest of the batch', async () => {
-    const storage = tmpStorage();
+test('a failing rename does not abort the rest of the batch', async (t) => {
+    const storage = tmpStorage(t, 'klares4-finalizer-');
     const log = silentLog();
     const devices = [
-        { id: 'zone_18', type: 'zone', name: 'Contatto Studio' },
-        { id: 'zone_27', type: 'zone', name: 'Sensore Tapparella Studio' },
+        { id: 'zone_18', type: 'zone', name: 'Contatto Solaio' },
+        { id: 'zone_27', type: 'zone', name: 'Sensore Tapparella Solaio' },
     ];
 
     const registrations = new Map([
         ['zone_18', {
             status: 'registered',
-            registeredDisplayName: 'Finestra Studio - Sens.',
+            registeredDisplayName: 'Finestra Solaio - Sens.',
             matterAccessory: { UUID: 'zone_18', clusters: { booleanState: {} } },
         }],
         ['zone_27', {
             status: 'registered',
-            registeredDisplayName: 'Tapparella Studio',
+            registeredDisplayName: 'Tapparella Solaio',
             matterAccessory: { UUID: 'zone_27', clusters: { booleanState: {} } },
         }],
     ]);
@@ -65,14 +61,14 @@ test('a failing rename does not abort the rest of the batch', async () => {
     assert.equal(registrations.has('zone_18'), true);
 });
 
-test('an unobservable unregister skips that device without throwing', async () => {
-    const storage = tmpStorage();
+test('an unobservable unregister skips that device without throwing', async (t) => {
+    const storage = tmpStorage(t, 'klares4-finalizer-');
     const log = silentLog();
-    const devices = [{ id: 'zone_18', type: 'zone', name: 'Contatto Studio' }];
+    const devices = [{ id: 'zone_18', type: 'zone', name: 'Contatto Solaio' }];
     const registrations = new Map([
         ['zone_18', {
             status: 'registered',
-            registeredDisplayName: 'Finestra Studio - Sens.',
+            registeredDisplayName: 'Finestra Solaio - Sens.',
             matterAccessory: { UUID: 'zone_18', clusters: { booleanState: {} } },
         }],
     ]);

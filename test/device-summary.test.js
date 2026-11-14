@@ -1,18 +1,18 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const { DeviceListService } = require('../dist/platform/device-list-service.js');
 const { DiscoveryService } = require('../dist/platform/discovery-service.js');
 const { PlatformLifecycleService } = require('../dist/platform/platform-lifecycle-service.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const DEVICES = [
     { id: 'light_37', type: 'light', name: 'Luce Test', status: {} },
     { id: 'thermostat_18', type: 'thermostat', name: 'Termostato Test', status: {} },
     { id: 'zone_4', type: 'zone', name: 'Zona Test', status: {} },
-    { id: 'sensor_temp_5', type: 'sensor', name: 'Sala - Temperatura', status: {} },
+    { id: 'sensor_temp_5', type: 'sensor', name: 'Veranda - Temperatura', status: {} },
     { id: 'sensor_system_temp_in', type: 'sensor', name: 'Temperatura Interna', status: {} },
     { id: 'scenario_9', type: 'scenario', name: 'Scenario Test', status: {} },
 ];
@@ -21,13 +21,13 @@ const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config.sch
 
 const EXCLUDE_KEY = { light: 'excludeOutputs', thermostat: 'excludeOutputs', zone: 'excludeZones', sensor: 'excludeSensors', scenario: 'excludeScenarios' };
 
-test('device summary prints the ID each exclusion list actually accepts', () => {
+test('device summary prints the ID each exclusion list actually accepts', (t) => {
     const lines = [];
     const log = { info: (m) => lines.push(m), warn() {}, error() {}, debug() {} };
     const config = {};
     const service = new DeviceListService({
         log,
-        storagePath: fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-summary-')),
+        storagePath: tmpStorage(t, 'klares4-summary-'),
         config,
         discoveryService: new DiscoveryService(config, log),
         lifecycleService: new PlatformLifecycleService(log),

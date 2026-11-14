@@ -78,11 +78,11 @@ test('getThermostatPresetWorkaroundAttributes: ships exactly one valid preset sl
 });
 
 test('thermostatSupportsCooling: detects Italian + English naming', () => {
-    assert.equal(thermostatSupportsCooling({ name: 'Raffrescamento Sala' }), true);
+    assert.equal(thermostatSupportsCooling({ name: 'Raffrescamento Veranda' }), true);
     assert.equal(thermostatSupportsCooling({ name: 'Raffreddamento Camera' }), true);
     assert.equal(thermostatSupportsCooling({ name: 'Climatizzazione Ufficio' }), true);
     assert.equal(thermostatSupportsCooling({ name: 'Cooling Living' }), true);
-    assert.equal(thermostatSupportsCooling({ name: 'Riscaldamento Bagno' }), false);
+    assert.equal(thermostatSupportsCooling({ name: 'Riscaldamento Atrio' }), false);
     assert.equal(thermostatSupportsCooling({ name: 'Heating Office' }), false);
     assert.equal(thermostatSupportsCooling({ name: undefined }), false);
 });
@@ -90,7 +90,7 @@ test('thermostatSupportsCooling: detects Italian + English naming', () => {
 test('buildThermostatMatterState: heating-only thermostat', () => {
     const device = {
         id: 'thermostat_18',
-        name: 'Riscaldamento Sala',
+        name: 'Riscaldamento Veranda',
         type: 'thermostat',
         currentTemperature: 21.2,
         targetTemperature: 20,
@@ -113,7 +113,7 @@ test('buildThermostatMatterState: heating-only thermostat', () => {
 test('buildThermostatMatterState: cooling-capable thermostat exposes both setpoints', () => {
     const device = {
         id: 'thermostat_34',
-        name: 'Raffrescamento Sala',
+        name: 'Raffrescamento Veranda',
         type: 'thermostat',
         currentTemperature: 24,
         targetTemperature: 23,
@@ -131,7 +131,7 @@ test('buildThermostatMatterState: cooling-capable thermostat exposes both setpoi
 test('buildThermostatMatterState: heating-only coerces stale cool/auto mode to heat', () => {
     const device = {
         id: 'thermostat_x',
-        name: 'Riscaldamento Studio',
+        name: 'Riscaldamento Solaio',
         type: 'thermostat',
         currentTemperature: 19,
         targetTemperature: 20,
@@ -146,7 +146,7 @@ test('buildThermostatMatterState: heating-only coerces stale cool/auto mode to h
 test('buildThermostatMatterState: NaN / null current temp falls back to default', () => {
     const device = {
         id: 'thermostat_y',
-        name: 'Riscaldamento Bagno',
+        name: 'Riscaldamento Atrio',
         type: 'thermostat',
         currentTemperature: null,
         targetTemperature: NaN,

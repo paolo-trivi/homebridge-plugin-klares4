@@ -1,11 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const { KsaCacheService } = require('../dist/ksa/cache-service.js');
 const { createInitialWebSocketClientState } = require('../dist/websocket-client/state.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 function makeLog() {
     const warnings = [];
@@ -28,29 +28,29 @@ function validCache() {
     };
 }
 
-function storageWith(content) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-ksa-cache-'));
+function storageWith(t, content) {
+    const dir = tmpStorage(t, 'klares4-ksa-cache-');
     if (content !== undefined) {
         fs.writeFileSync(path.join(dir, 'klares4-ksa-cache.json'), typeof content === 'string' ? content : JSON.stringify(content));
     }
     return dir;
 }
 
-test('F19: a valid cache is loaded', async () => {
+test('F19: a valid cache is loaded', async (t) => {
     const { log } = makeLog();
-    const loaded = await new KsaCacheService(storageWith(validCache()), log).load();
+    const loaded = await new KsaCacheService(storageWith(t, validCache()), log).load();
     assert.deepEqual(loaded, validCache());
 });
 
-test('F19: a parsable but incomplete cache is discarded with a warning', async () => {
+test('F19: a parsable but incomplete cache is discarded with a warning', async (t) => {
     const { log, warnings } = makeLog();
-    const loaded = await new KsaCacheService(storageWith({ thermostatPrograms: [] }), log).load();
+    const loaded = await new KsaCacheService(storageWith(t, { thermostatPrograms: [] }), log).load();
     assert.equal(loaded, undefined);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /KSA cache/);
 });
 
-test('F19: maps of the wrong shape are rejected', async () => {
+test('F19: maps of the wrong shape are rejected', async (t) => {
     const variants = [
         { thermostatProgramIdByOutputId: [] },
         { domusSensorIdByThermostatProgramId: null },
@@ -61,27 +61,27 @@ test('F19: maps of the wrong shape are rejected', async () => {
     ];
     for (const patch of variants) {
         const { log } = makeLog();
-        const loaded = await new KsaCacheService(storageWith({ ...validCache(), ...patch }), log).load();
+        const loaded = await new KsaCacheService(storageWith(t, { ...validCache(), ...patch }), log).load();
         assert.equal(loaded, undefined, JSON.stringify(patch));
     }
     const { log } = makeLog();
-    assert.equal(await new KsaCacheService(storageWith('null'), log).load(), undefined);
+    assert.equal(await new KsaCacheService(storageWith(t, 'null'), log).load(), undefined);
 });
 
-test('F19: a missing cache file stays silent', async () => {
+test('F19: a missing cache file stays silent', async (t) => {
     const { log, warnings } = makeLog();
-    assert.equal(await new KsaCacheService(storageWith(undefined), log).load(), undefined);
+    assert.equal(await new KsaCacheService(storageWith(t, undefined), log).load(), undefined);
     assert.deepEqual(warnings, []);
 });
 
-test('F19: the websocket client state tolerates a cache without maps', () => {
+test('F19: the websocket client state tolerates a cache without maps', (t) => {
     const state = createInitialWebSocketClientState(undefined, { thermostatPrograms: [null, { id: '3' }] });
     assert.equal(state.thermostatProgramIdByOutputId.size, 0);
     assert.equal(state.thermostatProgramById.get('3').ID, '3');
 });
 
-test('F19/F32: the cache is saved atomically', async () => {
-    const dir = storageWith(undefined);
+test('F19/F32: the cache is saved atomically', async (t) => {
+    const dir = storageWith(t, undefined);
     const { log } = makeLog();
     const renames = [];
     const originalRename = fs.promises.rename;

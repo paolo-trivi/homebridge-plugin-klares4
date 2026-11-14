@@ -36,11 +36,11 @@ function shuffled(arr, seed) {
 // ---------------------------------------------------------------------------
 
 const collisionSet = [
-    { id: 'zone_18', type: 'zone', name: 'Finestra Studio' },
-    { id: 'zone_19', type: 'zone', name: 'Finestra Cucina' },
-    { id: 'cover_4', type: 'cover', name: 'Finestra Studio' },
-    { id: 'cover_1', type: 'cover', name: 'Finestra Cucina' },
-    { id: 'light_12', type: 'light', name: 'Studio' },
+    { id: 'zone_18', type: 'zone', name: 'Finestra Solaio' },
+    { id: 'zone_19', type: 'zone', name: 'Finestra Taverna' },
+    { id: 'cover_4', type: 'cover', name: 'Finestra Solaio' },
+    { id: 'cover_1', type: 'cover', name: 'Finestra Taverna' },
+    { id: 'light_12', type: 'light', name: 'Solaio' },
 ];
 
 test('computeMatterNameMap: zones-first and covers-first orders produce the identical map', () => {
@@ -48,11 +48,11 @@ test('computeMatterNameMap: zones-first and covers-first orders produce the iden
     const coversFirst = computeMatterNameMap([...collisionSet].reverse());
     assert.deepEqual(names(zonesFirst), names(coversFirst));
     // The controllable device always owns the clean voice name.
-    assert.equal(zonesFirst.get('cover_4').name, 'Finestra Studio');
-    assert.equal(zonesFirst.get('zone_18').name, 'Finestra Studio - Sens.');
-    assert.equal(zonesFirst.get('cover_1').name, 'Finestra Cucina');
-    assert.equal(zonesFirst.get('zone_19').name, 'Finestra Cucina - Sens.');
-    assert.equal(zonesFirst.get('light_12').name, 'Studio');
+    assert.equal(zonesFirst.get('cover_4').name, 'Finestra Solaio');
+    assert.equal(zonesFirst.get('zone_18').name, 'Finestra Solaio - Sens.');
+    assert.equal(zonesFirst.get('cover_1').name, 'Finestra Taverna');
+    assert.equal(zonesFirst.get('zone_19').name, 'Finestra Taverna - Sens.');
+    assert.equal(zonesFirst.get('light_12').name, 'Solaio');
 });
 
 test('computeMatterNameMap: any permutation converges to the same uuid -> name mapping', () => {
@@ -65,40 +65,40 @@ test('computeMatterNameMap: any permutation converges to the same uuid -> name m
 
 test('computeMatterNameMap: same-priority ties go to the lexicographically smaller uuid', () => {
     const twins = [
-        { id: 'cover_9', type: 'cover', name: 'Finestra Bagno' },
-        { id: 'cover_5', type: 'cover', name: 'Finestra Bagno' },
+        { id: 'cover_9', type: 'cover', name: 'Finestra Atrio' },
+        { id: 'cover_5', type: 'cover', name: 'Finestra Atrio' },
     ];
     for (const order of [twins, [...twins].reverse()]) {
         const map = computeMatterNameMap(order);
-        assert.equal(map.get('cover_5').name, 'Finestra Bagno');
-        assert.equal(map.get('cover_9').name, 'Finestra Bagno - Tapp.');
+        assert.equal(map.get('cover_5').name, 'Finestra Atrio');
+        assert.equal(map.get('cover_9').name, 'Finestra Atrio - Tapp.');
     }
 });
 
 test('computeMatterNameMap: names are unique case-insensitively', () => {
     const map = computeMatterNameMap([
-        { id: 'zone_1', type: 'zone', name: 'finestra studio' },
-        { id: 'cover_1', type: 'cover', name: 'Finestra Studio' },
+        { id: 'zone_1', type: 'zone', name: 'finestra solaio' },
+        { id: 'cover_1', type: 'cover', name: 'Finestra Solaio' },
     ]);
-    assert.equal(map.get('cover_1').name, 'Finestra Studio');
-    assert.notEqual(map.get('zone_1').name.toLowerCase(), 'finestra studio');
+    assert.equal(map.get('cover_1').name, 'Finestra Solaio');
+    assert.notEqual(map.get('zone_1').name.toLowerCase(), 'finestra solaio');
     assert.equal(findDuplicateDisplayNames(map.values()).length, 0);
 });
 
 test('computeMatterNameMap: absent devices retain reserved name slots', () => {
     const first = computeMatterNameMap([
-        { id: 'cover_1', type: 'cover', name: 'Finestra Studio' },
-        { id: 'zone_1', type: 'zone', name: 'Finestra Studio' },
+        { id: 'cover_1', type: 'cover', name: 'Finestra Solaio' },
+        { id: 'zone_1', type: 'zone', name: 'Finestra Solaio' },
     ], [], 1000);
     const second = computeMatterNameMap(
-        [{ id: 'zone_1', type: 'zone', name: 'Finestra Studio' }],
+        [{ id: 'zone_1', type: 'zone', name: 'Finestra Solaio' }],
         first.values(),
         2000,
     );
 
-    assert.equal(second.get('cover_1').name, 'Finestra Studio');
+    assert.equal(second.get('cover_1').name, 'Finestra Solaio');
     assert.equal(second.get('cover_1').reserved, true);
-    assert.equal(second.get('zone_1').name, 'Finestra Studio - Sens.');
+    assert.equal(second.get('zone_1').name, 'Finestra Solaio - Sens.');
 });
 
 test('computeMatterNameMap: uuid fallback tag is lengthened until unique', () => {
@@ -116,8 +116,8 @@ test('computeMatterNameMap: uuid fallback tag is lengthened until unique', () =>
 
 test('findDuplicateDisplayNames: flags case-insensitive duplicates', () => {
     const dups = findDuplicateDisplayNames([
-        { uuid: 'a', name: 'Finestra Bagno', base: 'Finestra Bagno' },
-        { uuid: 'b', name: 'finestra bagno', base: 'finestra bagno' },
+        { uuid: 'a', name: 'Finestra Atrio', base: 'Finestra Atrio' },
+        { uuid: 'b', name: 'finestra atrio', base: 'finestra atrio' },
         { uuid: 'c', name: 'Altro', base: 'Altro' },
     ]);
     assert.equal(dups.length, 1);
@@ -125,7 +125,7 @@ test('findDuplicateDisplayNames: flags case-insensitive duplicates', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Real production dataset — 109 endpoints (fixture from klares4-devices.json)
+// Synthetic 109-endpoint dataset (fixtures/klares4-devices.json), shaped like a real installation
 // ---------------------------------------------------------------------------
 
 const fixture = JSON.parse(
@@ -136,7 +136,7 @@ test('fixture sanity: 109 devices with the 6 documented cover/zone collisions', 
     assert.equal(fixture.devices.length, 109);
 });
 
-test('real 109-device dataset: no duplicate final names (case-insensitive)', () => {
+test('109-device dataset: no duplicate final names (case-insensitive)', () => {
     const map = computeMatterNameMap(fixture.devices);
     assert.equal(map.size, 109);
     assert.deepEqual(findDuplicateDisplayNames(map.values()), []);
@@ -144,23 +144,23 @@ test('real 109-device dataset: no duplicate final names (case-insensitive)', () 
     assert.equal(new Set(lower).size, lower.length);
 });
 
-test('real 109-device dataset: voice-critical devices own their exact clean names', () => {
+test('109-device dataset: voice-critical devices own their exact clean names', () => {
     const map = computeMatterNameMap(fixture.devices);
     // The three commands from the acceptance spec:
-    assert.equal(map.get('light_12').name, 'Studio', '"accendi lo studio"');
-    assert.equal(map.get('light_11').name, 'Lavanderia', '"accendi la lavanderia"');
-    assert.equal(map.get('cover_6').name, 'Finestra Matrimoniale', '"chiudi finestra matrimoniale"');
+    assert.equal(map.get('light_12').name, 'Solaio', '"accendi il solaio"');
+    assert.equal(map.get('light_11').name, 'Guardaroba', '"accendi il guardaroba"');
+    assert.equal(map.get('cover_6').name, 'Finestra Foresteria', '"chiudi finestra foresteria"');
 });
 
-test('real 109-device dataset: the 6 homonym zones take the " - Sens." suffix, covers stay clean', () => {
+test('109-device dataset: the 6 homonym zones take the " - Sens." suffix, covers stay clean', () => {
     const map = computeMatterNameMap(fixture.devices);
     const pairs = [
-        ['cover_4', 'zone_18', 'Finestra Studio'],
-        ['cover_1', 'zone_19', 'Finestra Cucina'],
-        ['cover_5', 'zone_22', 'Finestra Bagno'],
-        ['cover_6', 'zone_24', 'Finestra Matrimoniale'],
-        ['cover_7', 'zone_25', 'Finestra Bagno Matrimoniale'],
-        ['cover_8', 'zone_26', 'Finestra Cameretta'],
+        ['cover_4', 'zone_18', 'Finestra Solaio'],
+        ['cover_1', 'zone_19', 'Finestra Taverna'],
+        ['cover_5', 'zone_22', 'Finestra Atrio'],
+        ['cover_6', 'zone_24', 'Finestra Foresteria'],
+        ['cover_7', 'zone_25', 'Finestra Atrio Foresteria'],
+        ['cover_8', 'zone_26', 'Finestra Mansarda'],
     ];
     for (const [coverId, zoneId, cleanName] of pairs) {
         assert.equal(map.get(coverId).name, cleanName, `${coverId} must own "${cleanName}"`);
@@ -170,14 +170,14 @@ test('real 109-device dataset: the 6 homonym zones take the " - Sens." suffix, c
     }
 });
 
-test('real 109-device dataset: dirty panel labels are sanitised in the map', () => {
+test('109-device dataset: dirty panel labels are sanitised in the map', () => {
     const map = computeMatterNameMap(fixture.devices);
-    assert.equal(map.get('cover_3').name, 'Balcone Sala', 'trailing space must be gone');
-    assert.equal(map.get('scenario_15').name, 'Apri Mattina estate', 'parentheses stripped');
+    assert.equal(map.get('cover_3').name, 'Balcone Veranda', 'trailing space must be gone');
+    assert.equal(map.get('scenario_15').name, 'Alza Tende estate', 'parentheses stripped');
     assert.ok(!map.get('scenario_4').name.includes('+'), '"+" must be expanded');
 });
 
-test('real 109-device dataset: map is stable across 10 random discovery orders', () => {
+test('109-device dataset: map is stable across 10 random discovery orders', () => {
     const reference = names(computeMatterNameMap(fixture.devices));
     for (let seed = 100; seed < 110; seed++) {
         const permuted = names(computeMatterNameMap(shuffled(fixture.devices, seed)));

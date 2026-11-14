@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const { maskSensitiveData } = require('../dist/log-levels.js');
 const { captureRawMessage } = require('../dist/debug-capture/raw-message-capture.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 // Synthetic PIN, never a real one.
 const LOGIN_NUMERIC = '{"SENDER":"hb","CMD":"LOGIN","ID":"1","PAYLOAD_TYPE":"UNKNOWN","PAYLOAD":{"PIN":987654},"CRC_16":"0x0000"}';
@@ -24,12 +25,13 @@ test('F22: a numeric PIN is masked in the debug capture', () => {
     assert.ok(!JSON.stringify(captured.parsed).includes('987654'));
 });
 
-test('F22: the platform hands a numeric config PIN to every consumer as a string', () => {
+test('F22: the platform hands a numeric config PIN to every consumer as a string', (t) => {
     const { Lares4Platform } = require('../dist/platform/index.js');
+    const storagePath = tmpStorage(t, 'klares4-pin-');
     const api = {
         hap: { uuid: { generate: (s) => s }, Service: {}, Characteristic: {} },
         on: () => undefined,
-        user: { storagePath: () => require('node:os').tmpdir() },
+        user: { storagePath: () => storagePath },
         platformAccessory: function () {},
     };
     const log = { info() {}, warn() {}, error() {}, debug() {}, success() {} };

@@ -52,7 +52,7 @@ test('mapScenario exposes deviceType OnOffOutlet (not OnOffSwitch)', () => {
     const { api } = makeApi();
     const { client } = makeWsClient();
     const acc = deviceToMatterAccessory(
-        { id: 'scenario_1', name: 'Mood Cena', type: 'scenario' },
+        { id: 'scenario_1', name: 'Mood Aperitivo', type: 'scenario' },
         { api, log: silentLog(), getWsClient: () => client },
     );
     assert.ok(acc, 'mapper must return an accessory');

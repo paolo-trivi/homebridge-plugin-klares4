@@ -15,7 +15,7 @@ function clientWithScenarios(options = {}) {
         CMD: 'READ_RES', ID: '1', PAYLOAD_TYPE: 'MULTI_TYPES',
         PAYLOAD: { SCENARIOS: [
             { ID: '3', DES: 'Inserisci Tapparelle', CAT: 'PARTIAL', PIN: 'P' },
-            { ID: '5', DES: 'Chiudi Zona Giorno', CAT: 'GEN', PIN: 'N' },
+            { ID: '5', DES: 'Chiudi Ala Est', CAT: 'GEN', PIN: 'N' },
             { ID: '2', DES: 'Inserisci Totale', CAT: 'ARM', PIN: 'N' },
         ] },
     });

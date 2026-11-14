@@ -1,15 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const { PlatformConfigFileService } = require('../dist/platform/config-file-service.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const log = { info() {}, warn() {}, error() {}, debug() {} };
 
-function makeStorage(config) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-config-'));
+function makeStorage(t, config) {
+    const dir = tmpStorage(t, 'klares4-config-');
     const file = path.join(dir, 'config.json');
     fs.writeFileSync(file, `${JSON.stringify(config, null, 4)}\n`, 'utf8');
     return { dir, file };
@@ -26,8 +26,8 @@ function sampleConfig(platform) {
     };
 }
 
-test('F17: a rewrite keeps Homebridge formatting (4-space indent, trailing newline)', async () => {
-    const { file, dir } = makeStorage(sampleConfig('Lares4Complete'));
+test('F17: a rewrite keeps Homebridge formatting (4-space indent, trailing newline)', async (t) => {
+    const { file, dir } = makeStorage(t, sampleConfig('Lares4Complete'));
     await new PlatformConfigFileService(log, dir).disableDebugFlag('Lares4Complete');
 
     const expected = sampleConfig('Lares4Complete');
@@ -35,8 +35,8 @@ test('F17: a rewrite keeps Homebridge formatting (4-space indent, trailing newli
     assert.equal(fs.readFileSync(file, 'utf8'), `${JSON.stringify(expected, null, 4)}\n`);
 });
 
-test('F17: the fully qualified platform name is matched too', async () => {
-    const { file, dir } = makeStorage(sampleConfig('homebridge-plugin-klares4.Lares4Complete'));
+test('F17: the fully qualified platform name is matched too', async (t) => {
+    const { file, dir } = makeStorage(t, sampleConfig('homebridge-plugin-klares4.Lares4Complete'));
     await new PlatformConfigFileService(log, dir).disableDebugFlag('Lares4Complete');
 
     const written = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -44,8 +44,8 @@ test('F17: the fully qualified platform name is matched too', async () => {
     assert.equal(written.platforms[1].platform, 'homebridge-plugin-klares4.Lares4Complete');
 });
 
-test('F17: config.json is replaced by rename, keeps its mode and leaves no temp file', async () => {
-    const { file, dir } = makeStorage(sampleConfig('Lares4Complete'));
+test('F17: config.json is replaced by rename, keeps its mode and leaves no temp file', async (t) => {
+    const { file, dir } = makeStorage(t, sampleConfig('Lares4Complete'));
     fs.chmodSync(file, 0o600);
     const renames = [];
     const originalRename = fs.promises.rename;
@@ -66,8 +66,8 @@ test('F17: config.json is replaced by rename, keeps its mode and leaves no temp 
     assert.deepEqual(fs.readdirSync(dir), ['config.json']);
 });
 
-test('F17: a failing serialization leaves config.json untouched', async () => {
-    const { file, dir } = makeStorage(sampleConfig('Lares4Complete'));
+test('F17: a failing serialization leaves config.json untouched', async (t) => {
+    const { file, dir } = makeStorage(t, sampleConfig('Lares4Complete'));
     const before = fs.readFileSync(file, 'utf8');
     const errors = [];
     const service = new PlatformConfigFileService({ ...log, error: (...args) => errors.push(args.join(' ')) }, dir);
@@ -81,8 +81,8 @@ test('F17: a failing serialization leaves config.json untouched', async () => {
     assert.equal(errors.length, 1);
 });
 
-test('F17: concurrent updates are serialized and none is lost', async () => {
-    const { file, dir } = makeStorage(sampleConfig('Lares4Complete'));
+test('F17: concurrent updates are serialized and none is lost', async (t) => {
+    const { file, dir } = makeStorage(t, sampleConfig('Lares4Complete'));
     const service = new PlatformConfigFileService(log, dir);
     await Promise.all([
         service.updatePlatformConfig('Lares4Complete', (c) => { c.first = true; return true; }),

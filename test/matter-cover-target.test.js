@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { deviceToMatterAccessory } = require('../dist/platform/matter-device-mapper.js');
 const { buildStateUpdates } = require('../dist/platform/matter-state-updates.js');
-const { deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { deviceTypes } = require('./fixtures/hb-matter-api.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {} });
 const deps = () => ({ api: { matter: { deviceTypes } }, log: silentLog(), getWsClient: () => undefined });

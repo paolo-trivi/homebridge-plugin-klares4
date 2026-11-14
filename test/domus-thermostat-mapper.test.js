@@ -9,22 +9,22 @@ const {
 
 function createThermostats() {
   return new Map([
-    ['18', { id: '18', name: 'Riscaldamento Sala' }],
-    ['34', { id: '34', name: 'Raffrescamento Sala' }],
-    ['19', { id: '19', name: 'Riscaldamento Studio' }],
-    ['20', { id: '20', name: 'Riscaldamento Bagno' }],
-    ['21', { id: '21', name: 'Riscaldamento Matrimoniale' }],
-    ['22', { id: '22', name: 'Riscaldamento Cameretta' }],
+    ['18', { id: '18', name: 'Riscaldamento Veranda' }],
+    ['34', { id: '34', name: 'Raffrescamento Veranda' }],
+    ['19', { id: '19', name: 'Riscaldamento Solaio' }],
+    ['20', { id: '20', name: 'Riscaldamento Atrio' }],
+    ['21', { id: '21', name: 'Riscaldamento Foresteria' }],
+    ['22', { id: '22', name: 'Riscaldamento Mansarda' }],
   ]);
 }
 
 function createDomusSensors() {
   return new Map([
-    ['1', { id: '1', name: 'Term. Sala' }],
-    ['2', { id: '2', name: 'Term. Cameretta' }],
-    ['3', { id: '3', name: 'Term. Bagno Grande' }],
-    ['4', { id: '4', name: 'Term. Matrimoniale' }],
-    ['5', { id: '5', name: 'Term. Studio' }],
+    ['1', { id: '1', name: 'Term. Veranda' }],
+    ['2', { id: '2', name: 'Term. Mansarda' }],
+    ['3', { id: '3', name: 'Term. Atrio Grande' }],
+    ['4', { id: '4', name: 'Term. Foresteria' }],
+    ['5', { id: '5', name: 'Term. Solaio' }],
   ]);
 }
 

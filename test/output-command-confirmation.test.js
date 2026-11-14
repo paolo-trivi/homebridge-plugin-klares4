@@ -9,13 +9,26 @@ test('confirms only a matching output state', async () => {
   const tracker = new OutputCommandConfirmationTracker();
   const handle = tracker.register('12', 500, (status) => status.STA === 'ON');
 
+  let settled = false;
+  handle.promise.then(() => { settled = true; }, () => { settled = true; });
+
   tracker.observe({ ID: '11', STA: 'ON' });
   tracker.observe({ ID: '12', STA: 'OFF' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'another output or a non-matching state must not confirm');
+
   tracker.observe({ ID: '12', STA: 'ON' });
 
   const result = await handle.promise;
   assert.equal(result.status, 'state-confirmed');
   assert.ok(result.latencyMs >= 0);
+});
+
+test('a non-matching state never confirms an output command', async () => {
+  const tracker = new OutputCommandConfirmationTracker();
+  const handle = tracker.register('12', 40, (status) => status.STA === 'ON');
+  tracker.observe({ ID: '12', STA: 'OFF' });
+  await assert.rejects(handle.promise, /timed out/);
 });
 
 test('times out when no matching state arrives', async () => {

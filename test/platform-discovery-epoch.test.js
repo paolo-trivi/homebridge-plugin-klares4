@@ -17,7 +17,7 @@ const hap = require('@homebridge/hap-nodejs');
 
 const { startMockPanel } = require('./fixtures/lares4-mock-panel.js');
 const { createPlatform, PlatformAccessory } = require('./fixtures/platform-session-harness.js');
-const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
 const SCENARIOS = [
@@ -33,7 +33,7 @@ const matterPasses = (log) => count(log, /\[Matter\] (cycle #\d+|Prune skipped f
 async function session(t, { failReads = [], matter = true, cached = [] } = {}) {
     const panel = await startMockPanel({ data: { SCENARIOS }, failReads });
     t.after(() => panel.close());
-    const hb = matter ? makeHb24MatterApi() : undefined;
+    const hb = matter ? makeHbMatterApi() : undefined;
     const { platform, api, log } = createPlatform(t, { port: panel.port, matter: hb?.api.matter });
     for (const device of cached) {
         const accessory = new PlatformAccessory(device.name, hap.uuid.generate(device.id));
