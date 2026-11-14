@@ -42,23 +42,30 @@ None added, renamed or removed. Changed meaning, no schema change needed beyond 
 - Troubleshooting: the new error messages "cfg id X (from …) could not be read from the panel; write refused", "is not the heating or cooling output of any PRG_THERMOSTATS program", "does not match what this thermostat reports in realtime", and the warning "Thermostat realtime mode ACT_MODEL=… is not known to the plugin".
 - ARCHITECTURE: thermostat command path = `thermostat-command-service.ts` (validation, routing) → `thermostat-write-batcher.ts` (serialization per cfg id, merging) → `thermostat-write-executor.ts` (re-read, partial payload, ACK propagation); `thermostat-cfg-freshness.ts` (PRG_CHECK counter).
 
-## Contract for task E (Matter thermostats), additive
-`ThermostatStatus` (device `status`) gained, all optional:
-- `season?: 'WIN' | 'SUM'`: active season (realtime `ACT_SEA`, else the cfg read). Updated through `updateThermostatStatus`, a change emits a status event.
-- `outputRole?: 'heating' | 'cooling'`: from `PRG_THERMOSTATS` / KSA `HEATING_OUT` / `COOLING_OUT`. Absent when the panel has no programs (then fall back to the name).
-- `observedAt?: number`: last STATUS_TEMPERATURES for this thermostat (epoch ms).
-- `acknowledged?: { mode?, targetTemperature?, at }`: what the last acknowledged write of its cfg contained. Use it, when `at > observedAt`, as the base for idempotence and raise/lower (TH-08). Set on every thermostat sharing the cfg.
-- After an ACK, when the client is given `emitDeviceStatusUpdate` (see requests), `mode`/`season` and, only when it is the live one (MAN in the season written), `targetTemperature` are updated and one status event is emitted: Matter receives it like a realtime change.
-- `setThermostatMode` / `setThermostatTemperature` now reject (TypeError) invalid modes and non-finite setpoints, and reject `ThermostatRoutingError` when the routing is not certain; the promise settles with the outcome of the merged write.
+## Contract with task E (Matter thermostats), after integration
+`ThermostatStatus` (one declaration per field, reconciled with E):
+- `season?: 'WIN' | 'SUM'`: realtime `ACT_SEA` (else the cfg read), filled by `thermostat-status-updater.ts` / `thermostat-config-sync.ts`.
+- `outputRole?: ThermostatOutputRole` (`'heating' | 'cooling' | 'heating-cooling'`): filled by `ThermostatReadHandler.applyOutputRole` with `deriveThermostatOutputRole(outputId, program, panelOutputName)`, now in the domain module `src/thermostat-role.ts` (moved from `platform/matter-thermostat-role.ts`, which re-exports it and keeps only the Matter-side fallback on the device name). Set before a thermostat is announced (discovery, when the programs are known: `.ksa` cache or re-login) and again after `PRG_THERMOSTATS` (a change emits a status event). Without a program naming the output, the panel's own output name (`DES`) decides, never a custom/Matter name.
+- `observedAt?`, `acknowledged? { mode?, targetTemperature?, at }`: as before.
+- Known gap (E/F1, not D): on a first login without `.ksa`, Matter registers the thermostat at MULTI_TYPES, before `PRG_THERMOSTATS` arrives; the role then comes from the panel name and a later change of `outputRole` does not re-shape an endpoint already registered. With the `.ksa` cache (production) or from the second login on, the role is known at registration.
 
-## Hooks requested from other tasks (not done: files not mine)
-1. **C — `message-service.ts`**, `handleMessage` (or the router's `onUnhandled` in `index.ts`): route the panel's change notification, one line, e.g. in `handleMessage` before routing:
+## Integration with B (done in this branch)
+- `thermostat-command-service.ts` queues each merged write with `commandDispatcher.enqueueDeviceCommand('thermostat-cfg:<cfgId>', task, { policy: 'serial', maxWaitMs: commandTimeoutMs })`. B's `serial` policy is exactly what is needed (merging happens before queueing: at most one running and one waiting job per cfg), so `device-command-queue.ts` is unchanged. A write still queued after `commandTimeoutMs` is refused (`CommandQueueRejectedError`, `expired`) and every command merged into it gets that error.
+- `command-service.ts`: optional `emitDeviceStatusUpdate` in `CommandServiceDeps`, passed to `ThermostatCommandService` together with `commandTimeoutMs`.
+
+## For task C
+- `src/thermostat-mode.ts`: `parseKseniaMode(value): ThermostatMode | undefined` (unknown → `undefined`); `kseniaModeToDomain` now delegates to it and keeps its legacy `off`. C's `status-updater.ts` legacy `MODE` branch should use `parseKseniaMode` and skip the mode when `undefined`.
+- `parseFloatInRange` returning `undefined` for out-of-range values: the thermostat status updater, the cfg sync and the system temperature updater already skip `undefined` (test "unreadable realtime values ... leave the thermostat state as it was").
+
+## Hooks that remain for task C (exact lines)
+1. `src/websocket-client/index.ts`, in `new CommandService({ ... })`: add
+   `emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),`
+   (without it the ACK is confirmed by the realtime ~2 s later instead of at once).
+2. `src/websocket-client/message-service.ts`, `handleMessage`, after the object check and before routing:
    `if (message.CMD === 'NOT_MASK_UNSOLICITED') runIsolated(this.deps.log, 'NM_CHANGES', () => this.thermostats.handleChangeNotification(message.PAYLOAD));`
-   (NM_CHANGES arrives with `ID: "0"`, `PAYLOAD: { PRG_CHECK: { PRG, CFG } }`.) Until then only the fixed re-read before setpoints protects against keypad changes; mode writes do not need the cache contents.
-2. **C — `message-service.ts`** `handleReadResponse`: pass the counter, `this.thermostats.handleCfgThermostats(cfg, payload.PRG_CHECK)` (every READ_RES carries it). Without it the first NM_CHANGES after login always clears the cache (harmless: one extra read).
-3. **B — `command-service.ts`** + **C — `index.ts`**: give the thermostat service the status channel: in `CommandServiceDeps` add `emitDeviceStatusUpdate?: (device: KseniaDevice) => void`, pass it to `new ThermostatCommandService({ …, emitDeviceStatusUpdate: deps.emitDeviceStatusUpdate })`; in `index.ts` pass `emitDeviceStatusUpdate: (device) => this.emitStatus(device)` to `new CommandService`. Without it the ACK is not propagated at once (the realtime ~2 s later still is, since the HAP accessory no longer mutates the shared state).
-4. **B — queue primitive**: my `ThermostatWriteBatcher` takes `enqueue(key, task)`; today it is the dispatcher's `enqueueDeviceCommand(key, task)` with key `thermostat-cfg:<id>`. After B is integrated, the switch is local to `thermostat-command-service.ts`: `enqueue: (key, task) => deps.commandDispatcher.enqueueDeviceCommand(key, task, { policy: 'serial', maxWaitMs: <commandTimeoutMs> })`. Use `serial`, not `latest-wins`: merging happens before enqueueing (at most one running and one waiting job per cfg), and the waiting job is the merged one, so nothing must be dropped as superseded. B's primitive alone cannot merge two writes into one (it replaces or rejects whole tasks), hence the batcher on top.
-5. **C** (`state.ts`): optionally initialise `thermostatCfgFreshness` there; today it is created lazily by `thermostat-cfg-freshness.ts`.
+3. `src/websocket-client/message-service.ts`, `handleReadResponse`: replace the CFG_THERMOSTATS section call with
+   `section('CFG_THERMOSTATS', () => this.thermostats.handleCfgThermostats(cfg, payload.PRG_CHECK));`
+4. `.ksa` path (`state.ts`): nothing needed for `outputRole`: the programs loaded from the cache are used by `applyOutputRole` at discovery. Optionally initialise `thermostatCfgFreshness: { ownWritesSinceCounter: 0, readAt: new Map() }` there (today created lazily).
 
 ## To verify on the field (rc, the user only; no agent sends commands)
 Run with `generateDebugFile: true` (capture) and debug log. For each step note the HomeKit action, then in the capture look at the `WRITE_CFG` sent, the `WRITE_CFG_RES`, the following `READ_RES CFG_THERMOSTATS` (if any) and the realtime `STATUS_TEMPERATURES`.
