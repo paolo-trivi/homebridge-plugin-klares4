@@ -41,11 +41,13 @@ const lift = (stack, uuid) => {
     const state = stack.read(uuid, 'windowCovering');
     return { current: state.currentPositionLiftPercent100ths, target: state.targetPositionLiftPercent100ths };
 };
+// WindowCovering MovementStatus: 0 stopped, 1 opening, 2 closing.
+const movement = (stack, uuid) => stack.read(uuid, 'windowCovering').operationalStatus.lift;
 
-for (const [command, args, panelTarget, matterTarget] of [
-    ['upOrOpen', undefined, 100, 0],
-    ['downOrClose', undefined, 0, 10000],
-    ['goToLiftPercentage', { liftPercent100thsValue: 2500 }, 75, 2500],
+for (const [command, args, panelTarget, matterTarget, moving] of [
+    ['upOrOpen', undefined, 100, 0, 1],
+    ['downOrClose', undefined, 0, 10000, 2],
+    ['goToLiftPercentage', { liftPercent100thsValue: 2500 }, 75, 2500, 1],
 ]) {
     test(`MAT-05: after ${command} the cover keeps its reported position and shows the requested target`, { timeout: 30000 }, async (t) => {
         const stack = await realMatterStackSession(t).start();
@@ -61,6 +63,7 @@ for (const [command, args, panelTarget, matterTarget] of [
         // plugin puts the reported position back once the command has committed.
         await waitFor(() => lift(stack, 'cover_1').current === 5000);
         assert.deepEqual(lift(stack, 'cover_1'), { current: 5000, target: matterTarget });
+        assert.equal(movement(stack, 'cover_1'), moving, 'controllers see the cover moving');
         await stack.settle();
         assert.deepEqual(lift(stack, 'cover_1'), { current: 5000, target: matterTarget });
     });
@@ -82,6 +85,16 @@ test('MAT-05: the panel statuses that follow the command drive the position', { 
     }
     await waitFor(() => lift(stack, 'cover_2').current === 9000);
     assert.deepEqual(lift(stack, 'cover_2'), { current: 9000, target: 0 });
+    assert.equal(movement(stack, 'cover_2'), 1);
+
+    // Arrival: the movement status goes back to stopped.
+    cover.status = { position: 100, targetPosition: 100, state: 'stopped' };
+    for (const update of buildStateUpdates(cover)) {
+        await stack.api.matter.updateAccessoryState('cover_2', update.clusterName, update.attributes);
+    }
+    await waitFor(() => lift(stack, 'cover_2').current === 0);
+    assert.deepEqual(lift(stack, 'cover_2'), { current: 0, target: 0 });
+    assert.equal(movement(stack, 'cover_2'), 0);
 });
 
 test('MAT-08: moveToLevel on a dimmer that is off sends nothing to the panel', { timeout: 30000 }, async (t) => {

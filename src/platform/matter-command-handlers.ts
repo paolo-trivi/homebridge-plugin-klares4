@@ -115,6 +115,11 @@ export function buildLightHandlers(device: KseniaLight, dimmable: boolean, ctx: 
     return handlers;
 }
 
+// WindowCovering MovementStatus (Matter spec §5.3.5.3).
+const MOVEMENT_STOPPED = 0;
+const MOVEMENT_OPENING = 1;
+const MOVEMENT_CLOSING = 2;
+
 /** Matter lift percent (0 = open, 10000 = closed) for a panel position (0 = closed, 100 = open). */
 function liftPercent100ths(panelPosition: number): number {
     return Math.round((100 - Math.max(0, Math.min(100, panelPosition))) * 100);
@@ -126,14 +131,23 @@ function liftPercent100ths(panelPosition: number): number {
  * `current` straight to the target: controllers would show the cover as
  * arrived while it has not moved yet. Once that command has committed, the
  * endpoint gets back the last position the panel reported, with the requested
- * target, so controllers see a movement in progress. Matter state only: the
- * device snapshot is not touched.
+ * target, so controllers see a movement in progress. matter.js derives the
+ * movement status only when the target changes (WindowCoveringServer.js:144-151),
+ * and here it already has, so the status goes with the positions; it returns
+ * to stopped when `current` reaches the target (:162-169). Matter state only:
+ * the device snapshot is not touched.
  */
 function keepReportedPosition(device: KseniaCover, requested: number, ctx: CommandContext<KseniaCover>): void {
     setTimeout(() => {
         const position = ctx.latest().status?.position;
-        const attributes: Record<string, number> = { targetPositionLiftPercent100ths: liftPercent100ths(requested) };
-        if (Number.isFinite(position)) attributes.currentPositionLiftPercent100ths = liftPercent100ths(position);
+        const target = liftPercent100ths(requested);
+        const attributes: Record<string, unknown> = { targetPositionLiftPercent100ths: target };
+        if (Number.isFinite(position)) {
+            const current = liftPercent100ths(position);
+            const movement = current === target ? MOVEMENT_STOPPED : current < target ? MOVEMENT_CLOSING : MOVEMENT_OPENING;
+            attributes.currentPositionLiftPercent100ths = current;
+            attributes.operationalStatus = { global: movement, lift: movement, tilt: MOVEMENT_STOPPED };
+        }
         ctx.api.matter?.updateAccessoryState(device.id, 'windowCovering', attributes)
             .catch((err: unknown) => {
                 ctx.log?.debug(`[Matter] cover position refresh failed for ${device.id}: ${err instanceof Error ? err.message : String(err)}`);
