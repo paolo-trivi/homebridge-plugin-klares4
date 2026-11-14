@@ -4,6 +4,7 @@ import type { Lares4Platform } from '../platform';
 import type { KseniaScenario } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
+import { communicationFailure } from './communication-failure';
 
 /**
  * Scenario Accessory Handler
@@ -75,9 +76,7 @@ export class ScenarioAccessory {
                     `Scenario execution error ${this.device.name}:`,
                     error instanceof Error ? error.message : String(error),
                 );
-                throw new this.platform.api.hap.HapStatusError(
-                    this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-                );
+                throw communicationFailure(this.platform.api, error);
             }
         }
         // Do nothing for "off" - scenarios are momentary
