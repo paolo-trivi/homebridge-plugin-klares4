@@ -4,7 +4,7 @@
 // WS-02 / PLAT-01): a cached accessory of a device the exposure policy now
 // hides is handled like an excluded one, on HomeKit and on Matter. The `todo`
 // tests describe the end-to-end behaviour that needs the client facade (task
-// C) and the command guard (task B) to be wired on top of this branch.
+// C) to be wired on top of this branch.
 
 process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS = '0';
 process.env.KLARES4_MATTER_REGISTER_TIMEOUT_MS = '500';
@@ -90,8 +90,8 @@ test('A→C (todo): with exposeOutputs the GEN output is exposed again as light_
     assert.deepEqual(sent.map((m) => m.PAYLOAD.OUTPUT), [{ ID: '12', STA: 'ON' }]);
 });
 
-test('A→C / A→B (todo): with exposeScenarios a scenario of unknown category is exposed and runs', {
-    todo: 'A→C: forward exposeScenarios to discovery and isScenarioSuppressed; A→B: assertScenarioAllowed passes the opt-in',
+test('A→C (todo): with exposeScenarios a scenario of unknown category is exposed and runs', {
+    todo: 'A→C: forward exposeScenarios to discovery and isScenarioSuppressed (the command guard of task B already honours the opt-in)',
 }, async (t) => {
     const { api, panel, platform } = await boot(t, { config: { exposeScenarios: [{ scenarioId: '3' }] } });
     await waitFor(() => api.registered.includes('scenario_3'));
@@ -101,9 +101,7 @@ test('A→C / A→B (todo): with exposeScenarios a scenario of unknown category 
     assert.deepEqual(sent.map((m) => m.PAYLOAD.SCENARIO.ID), ['3']);
 });
 
-test('A→B (todo): a command to a hidden output is refused and nothing is sent to the panel', {
-    todo: 'A→B: command-service refuses outputs that are not a discovered device of that type',
-}, async (t) => {
+test('WS-01: a command to a hidden output is refused and nothing is sent to the panel', async (t) => {
     const { panel, platform } = await boot(t);
     await assert.rejects(() => platform.wsClient.switchLight('light_12', true));
     await assert.rejects(() => platform.wsClient.toggleGate('gate_12'));

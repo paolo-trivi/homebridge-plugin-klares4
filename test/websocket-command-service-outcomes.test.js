@@ -6,6 +6,7 @@ const { createInitialWebSocketClientState } = require('../dist/websocket-client/
 const { CommandDispatcher } = require('../dist/websocket/command-dispatcher.js');
 const { OutputCommandConfirmationTracker } = require('../dist/websocket/output-command-confirmation.js');
 const { PanelCommandRejectedError, RetryableKlaresError } = require('../dist/errors.js');
+const { seedStateDevices } = require('./fixtures/command-client.js');
 
 function createService(onSend, timeoutMs = 40) {
   const state = createInitialWebSocketClientState();
@@ -13,6 +14,9 @@ function createService(onSend, timeoutMs = 40) {
   state.ws = { readyState: 1 };
   // Scenario 14 was listed by MULTI_TYPES as an ordinary (non-arming) scenario.
   state.scenarioCategoryById.set('14', 'GEN');
+  // Commands only reach discovered outputs (WS-01 defense in depth).
+  seedStateDevices(state, ['light_7', 'gate_29']);
+  state.devices.set('scenario_14', { id: 'scenario_14', type: 'scenario', name: 'S', description: '', status: { active: false } });
   const dispatcher = new CommandDispatcher();
   const outputConfirmation = new OutputCommandConfirmationTracker();
   const logs = [];
@@ -76,12 +80,14 @@ test('negative panel result rejects the public mutation promise', async () => {
   assert.equal(harness.logs.some(([, message]) => message.includes('executed')), false);
 });
 
-test('observable output mutation may resolve from a matching realtime update', async () => {
+test('observable output mutation may resolve from a realtime transition to the target', async () => {
   let commandId;
   const harness = createService((message, _dispatcher, outputConfirmation) => {
     commandId = message.ID;
     setImmediate(() => outputConfirmation.observe({ ID: '7', STA: 'ON' }));
   });
+  // The output was OFF before the command: ON afterwards is a transition (WS-06).
+  harness.outputConfirmation.observe({ ID: '7', STA: 'OFF' });
 
   await harness.service.switchLight('light_7', true);
 

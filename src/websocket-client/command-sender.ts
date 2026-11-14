@@ -11,6 +11,10 @@ import type { WsTransport } from '../websocket/ws-transport';
 import type { KseniaMessage, KseniaMessagePayload, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
+import { PanelCommandRejectedError } from '../errors';
+
+/** Commands that change something on the panel: only an explicit RESULT=OK acknowledges them. */
+const MUTATING_COMMANDS: ReadonlySet<string> = new Set(['CMD_USR', 'WRITE_CFG']);
 
 export interface CommandSenderDeps {
     state: WebSocketClientState;
@@ -37,8 +41,11 @@ export class CommandSender {
         cmd: string,
         payloadType: string,
         payload: KseniaCommandPayload,
-        options: SendCommandOptions = {},
+        requestedOptions: SendCommandOptions = {},
     ): Promise<CommandAcknowledgement | StateConfirmation | undefined> {
+        const options: SendCommandOptions = MUTATING_COMMANDS.has(cmd)
+            ? { ...requestedOptions, awaitResponse: true, requirePositiveResult: true }
+            : requestedOptions;
         if (!this.deps.state.ws || this.deps.state.ws.readyState !== WebSocket.OPEN) {
             throw new Error('WebSocket not connected');
         }
@@ -62,6 +69,7 @@ export class CommandSender {
         }
         let pendingResponsePromise: Promise<CommandAcknowledgement> | undefined;
         let stateConfirmation: OutputConfirmationHandle | undefined;
+        let written = false;
         // Both registrations sit inside the try so the finally always clears
         // them, and each promise gets a no-op handler at creation: it can be
         // rejected (timeout, disconnect) before or without being awaited, and
@@ -92,12 +100,18 @@ export class CommandSender {
                 stateConfirmation.promise.catch((): void => undefined);
             }
             await this.sendRaw(jsonMessage);
-            if (pendingResponsePromise && stateConfirmation) {
-                return await Promise.race([pendingResponsePromise, stateConfirmation.promise]);
-            }
-            if (pendingResponsePromise) return await pendingResponsePromise;
-            if (stateConfirmation) return await stateConfirmation.promise;
-            return undefined;
+            written = true;
+            const outcome = pendingResponsePromise && stateConfirmation
+                ? await Promise.race([pendingResponsePromise, stateConfirmation.promise])
+                : await (pendingResponsePromise ?? stateConfirmation?.promise);
+            if (outcome?.status === 'acknowledged') stateConfirmation?.expectLateState();
+            return outcome;
+        } catch (error) {
+            // A refused command changes nothing; any other failure (timeout) may
+            // still have been executed, and its realtime event may follow.
+            if (!written || error instanceof PanelCommandRejectedError) stateConfirmation?.cancel();
+            else stateConfirmation?.expectLateState();
+            throw error;
         } finally {
             this.deps.commandDispatcher.clearPendingCommand(id);
             stateConfirmation?.cancel();
