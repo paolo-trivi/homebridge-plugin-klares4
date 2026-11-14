@@ -7,54 +7,19 @@
  * what it shows and which commands it forwards, so it comes from the program
  * data and never from a display name (invariant 3). The name is only the
  * fallback while no program data is available, and then it must be the
- * panel's own name, not a Matter or custom name.
+ * panel's own name, not a Matter or custom name. The derivation from the
+ * program data lives in `src/thermostat-role.ts`.
  *
  * Pure functions only.
  */
 
 import type { KseniaThermostat, ThermostatOutputRole } from '../types';
+import { nameSuggestsCooling } from '../thermostat-role';
+
+// The derivation from the program data is domain code, shared with the WebSocket client.
+export { deriveThermostatOutputRole, nameSuggestsCooling, type ThermostatProgramOutputs } from '../thermostat-role';
 
 export type ThermostatSeason = 'winter' | 'summer';
-
-/** The two output IDs of a program, as `PRG_THERMOSTATS` and the `.ksa` cache carry them. */
-export interface ThermostatProgramOutputs {
-    HEATING_OUT?: string;
-    COOLING_OUT?: string;
-}
-
-const COOLING_NAME_HINTS = ['raffrescamento', 'raffreddamento', 'climatizzazione', 'cooling', 'cool'];
-
-/** Legacy name heuristic, kept only as the fallback when the program data is missing. */
-export function nameSuggestsCooling(name: string | undefined): boolean {
-    const lower = name?.toLowerCase() ?? '';
-    return COOLING_NAME_HINTS.some((hint) => lower.includes(hint));
-}
-
-function sameOutput(programOutput: string | undefined, outputId: string): boolean {
-    if (typeof programOutput !== 'string') return false;
-    const id = programOutput.trim();
-    return id !== '' && id !== 'NU' && id === outputId.trim();
-}
-
-/**
- * Role of `outputId` in its program. Without a program that names the output,
- * the panel's own name (`sourceName`, before any custom or Matter name) decides
- * between heating-cooling and heating; `undefined` when neither is given.
- * Meant for the layer that holds the program data (WebSocket client / discovery).
- */
-export function deriveThermostatOutputRole(
-    outputId: string,
-    program: ThermostatProgramOutputs | undefined,
-    sourceName?: string,
-): ThermostatOutputRole | undefined {
-    const heating = sameOutput(program?.HEATING_OUT, outputId);
-    const cooling = sameOutput(program?.COOLING_OUT, outputId);
-    if (heating && cooling) return 'heating-cooling';
-    if (heating) return 'heating';
-    if (cooling) return 'cooling';
-    if (sourceName === undefined) return undefined;
-    return nameSuggestsCooling(sourceName) ? 'heating-cooling' : 'heating';
-}
 
 /**
  * The role the Matter endpoint uses. `status.outputRole` is authoritative; without it

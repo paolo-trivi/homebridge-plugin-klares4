@@ -7,6 +7,8 @@ import type {
     KseniaProgramThermostatRaw,
 } from '../types';
 import { determineOutputType, outputCategory } from '../websocket/output-classifier';
+import { stripDevicePrefix } from '../device-id';
+import { deriveThermostatOutputRole } from '../thermostat-role';
 import { normalizeDomusSensorId } from './domus-thermostat-mapper';
 import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
 import { handleCfgChangeNotification, recordCfgRead } from './thermostat-cfg-freshness';
@@ -153,16 +155,28 @@ export class ThermostatReadHandler {
         }
     }
 
-    /** `status.outputRole` from the programs: which output heats and which cools. */
+    /**
+     * `status.outputRole` of a thermostat from the program that names its
+     * output (`HEATING_OUT` / `COOLING_OUT`), else from the panel's own output
+     * name. Called before a thermostat is announced, so Matter registers it
+     * with its role when the programs are already known (`.ksa` cache, re-login).
+     * Returns whether the role changed.
+     */
+    public applyOutputRole(device: KseniaDevice): boolean {
+        if (device.type !== 'thermostat') return false;
+        const outputId = stripDevicePrefix(device.id);
+        const state = this.deps.state;
+        const programId = state.thermostatProgramIdByOutputId.get(outputId);
+        const program = programId === undefined ? undefined : state.thermostatProgramById.get(programId);
+        const role = deriveThermostatOutputRole(outputId, program, state.thermostatOutputs.get(outputId)?.DES);
+        if (role === undefined || role === device.status.outputRole) return false;
+        device.status.outputRole = role;
+        return true;
+    }
+
     private applyOutputRoles(): void {
-        const roles = new Map<string, 'heating' | 'cooling'>();
-        for (const program of this.deps.state.thermostatProgramById.values()) {
-            if (program.HEATING_OUT && program.HEATING_OUT !== 'NU') roles.set(String(program.HEATING_OUT), 'heating');
-            if (program.COOLING_OUT && program.COOLING_OUT !== 'NU') roles.set(String(program.COOLING_OUT), 'cooling');
-        }
-        for (const [outputId, role] of roles) {
-            const device = this.deps.state.devices.get(`thermostat_${outputId}`);
-            if (device?.type === 'thermostat') device.status.outputRole = role;
+        for (const device of this.deps.state.devices.values()) {
+            if (this.applyOutputRole(device)) this.deps.emitDeviceStatusUpdate(device);
         }
     }
 }
