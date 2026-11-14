@@ -15,7 +15,7 @@ import type { KseniaWebSocketClient } from '../websocket-client';
 import type { DebugCaptureManager } from '../debug-capture';
 import { AccessoryRegistry } from './accessory-registry';
 import { AccessoryHandlerService } from './accessory-handler-service';
-import { createWebSocketClient, hasConnectionConfig } from './client-options';
+import { clientExposurePolicy, createWebSocketClient, hasConnectionConfig } from './client-options';
 import { startRequestedDebugCapture } from './debug-capture-start';
 import { MatterAccessoryRegistry } from './matter-accessory-registry';
 import { PlatformConfigFileService, type PlatformBlockSelector } from './config-file-service';
@@ -172,6 +172,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             const { ip, pin } = this.runtime;
             if (!ip || !pin) return;
             this.wsClient = createWebSocketClient({ ...this.runtime, ip, pin }, this.log, ksaCache);
+            // A cached accessory of a device the exposure policy now hides is treated as excluded.
+            this.discoveryService.attachExposurePolicy(clientExposurePolicy(this.wsClient));
 
             this.syncLifecycle.attach(this.wsClient, this.deviceEvents);
             // MQTT and debug capture must not depend on the first connect: if the
