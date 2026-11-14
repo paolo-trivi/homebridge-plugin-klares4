@@ -179,7 +179,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             }
 
             if (this.runtime.generateDebugFile) {
-                this.debugCapture = startRequestedDebugCapture(this.config, this.log, this.api.user.storagePath(), this.wsClient);
+                this.debugCapture = startRequestedDebugCapture(this.runtime.debugCaptureDurationMs, this.log, this.api.user.storagePath(), this.wsClient);
                 void this.configFileService.disableDebugFlag(PLATFORM_NAME);
             }
 
