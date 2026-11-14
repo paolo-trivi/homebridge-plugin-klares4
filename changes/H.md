@@ -1,6 +1,6 @@
 # H — MQTT bridge
 
-Files: `src/mqtt-bridge/**`, `src/mqtt/**`, `src/types/mqtt.types.ts`, `src/types/guards/**`; additive in `src/platform/runtime-config.ts` (`mqtt.commands`).
+Files: `src/mqtt-bridge/**`, `src/mqtt/**`, `src/types/mqtt.types.ts`, `src/types/guards/**`; additive in `src/platform/runtime-config.ts` (`mqtt.commands`). Integration with wave 1 (after I, G, A, F1): `platform/sync-lifecycle.ts`, `platform/index.ts`, `accessories/{light,cover,gate,scenario}-accessory.ts` and the new `accessories/communication-failure.ts`.
 
 ## Config keys
 
@@ -21,7 +21,7 @@ No numeric key was added, so `runtime-config-limits.ts` is untouched. No existin
 ### New topic: `<topicPrefix>/status` (not a config key; document it)
 - Retained, QoS = `mqtt.qos`, always retained (independent of `mqtt.retain`, which applies to state topics).
 - Payload while connected: `{"state":"online","panel":"connected"|"disconnected"|"unknown","timestamp":"<ISO>"}`. Payload when the bridge is gone: `{"state":"offline"}` — published at a clean shutdown and registered as the MQTT **last will**, so the broker publishes it also after a crash or a network loss (after the keepalive, 60 s).
-- `panel` is `unknown` until the platform reports the panel connection (see "Requests" below: the wiring is in files of tasks F1/I).
+- `panel` follows the panel connection as the platform sees it (`SyncLifecycle`: the same events that drive Matter reachability). A panel offline from boot is `disconnected` from the first publish; `unknown` appears only if the bridge is used without the platform.
 - Home Assistant: `availability_topic: <prefix>/status`, `availability_template: "{{ value_json.state }}"` (`payload_available: online`).
 - **ACL**: a restrictive ACL must let the bridge's MQTT user **write** `<prefix>/status`. Example for mosquitto: `topic write homebridge/klares4/status`. Mosquitto 2 may refuse a CONNECT whose will topic the user cannot write ("Not authorized"); the bridge then retries without the will, connects, and logs one warning that explains the ACL line to add (state publishing keeps working, only the crash detection is lost).
 - The `+/+/state` and `+/+/+/state` filters used by state consumers do not match `<prefix>/status`.
@@ -33,7 +33,7 @@ No numeric key was added, so `runtime-config-limits.ts` is untouched. No existin
 - The MQTT broker password no longer appears in the log when the broker URL starts with a space or has no scheme. The log now shows only `scheme://host:port`, without user or password. (SP-14)
 - A broker URL that mqtt.js would read as a different host (no `mqtt://`, a single slash as in `mqtt:/host`, an unescaped `/` or `#` in the password, an unsupported scheme) is refused with a clear error instead of connecting to `localhost:1883` or to a host named after the port. (SP-14, SP-23)
 - With `roomMapping` enabled, a command on `<prefix>/<room>/<type>/<id>/set` is executed only if the device belongs to that room, so a per-room ACL on the broker really limits what a client can operate. Commands on `<prefix>/<type>/<id>/set` (no room) work as before. The room also tells apart two devices with the same name in different rooms. (SP-06)
-- A device excluded with `excludeZones`/`excludeOutputs`/`excludeSensors`/`excludeScenarios` cannot be commanded over MQTT, also while its accessory is still restored from the HomeKit cache. (SP-09)
+- A device excluded with `excludeZones`/`excludeOutputs`/`excludeSensors`/`excludeScenarios`, or hidden by the exposure policy, cannot be commanded over MQTT, also while its accessory is still restored from the HomeKit cache. The bridge asks the platform's own exclusion decision. (SP-09)
 
 ### Fixed
 - A burst of MQTT commands (an automation in a loop, a misbehaving client) no longer keeps the panel busy for minutes: for each device one command runs and only the newest waits; older waiting commands are dropped, with one warning per burst. (SP-05)
@@ -44,7 +44,7 @@ No numeric key was added, so `runtime-config-limits.ts` is untouched. No existin
 - Topic levels and payloads written in the log are quoted and cut to 80 characters: a client can no longer inject fake log lines or 60 kB lines. (SP-15)
 - A QoS 1 retransmission of the same command (DUP flag, same packet ID) is not executed twice. (SP-23)
 - A `topicPrefix` containing `+` or `#` is refused at startup with an error instead of publishing on invalid topics. (SP-23)
-- A command refused by the panel queue or by validation (device not discovered yet, value out of range, arming scenario) is logged as a readable warning instead of a generic error.
+- A command refused by the panel queue or by validation (device not discovered yet, value out of range, arming scenario) is logged as a readable warning instead of a generic error. HomeKit handlers keep the original error as `cause` of the HAP error they throw (HomeKit still sees "communication failure", unchanged), so the MQTT bridge can say why.
 
 ### Added
 - `<topicPrefix>/status`: retained availability of the bridge (`online`/`offline`, with an MQTT last will) and of the panel connection. (SP-11)
@@ -70,7 +70,7 @@ No numeric key was added, so `runtime-config-limits.ts` is untouched. No existin
 - Command payloads accepted per type: light `{"on":bool,"brightness":0-100}`, cover `{"position":0-100}`, thermostat `{"mode":"off|heat|cool|auto","targetTemperature":5-40}`, scenario `{"active":true}`; max 4 KB; unknown extra keys are ignored (debug line); while a command runs only the newest one waits.
 - Name collisions → ID topics (see migration notes). Gate devices publish `{"active":false}` with the generic shape (unchanged, pinned by test; not a real state).
 - `SECURITY.md`: mention MQTT (unauthenticated commands, `mqtt.commands`, ACL).
-- ARCHITECTURE: `mqtt-bridge/` is now split: `index.ts` (facade `MqttBridge`, accepts an optional 4th argument `MqttBridgeDeps` with an injectable `connect`), `broker-session.ts` (connection, backoff, last will), `state-publisher.ts` + `state-topic-registry.ts` (state topics, collisions), `command-intake.ts` (retained/DUP/size filter), `command-executor.ts` (validation, one running + one waiting per device), `accessory-index-service.ts` (ID/slug/room lookup, exclusions), `room-resolver.ts`, `command-failure.ts`, `throttled-log.ts`. New public method `MqttBridge.setPanelConnected(connected)`.
+- ARCHITECTURE: `mqtt-bridge/` is now split: `index.ts` (facade `MqttBridge`, accepts an optional 4th argument `MqttBridgeDeps` with an injectable `connect`), `broker-session.ts` (connection, backoff, last will), `state-publisher.ts` + `state-topic-registry.ts` (state topics, collisions), `command-intake.ts` (retained/DUP/size filter), `command-executor.ts` (validation, one running + one waiting per device), `accessory-index-service.ts` (ID/slug/room lookup, exclusions), `room-resolver.ts`, `command-failure.ts`, `throttled-log.ts`. New public method `MqttBridge.setPanelConnected(connected)`, called through `SyncLifecycleDeps.onPanelConnection`. The platform passes `discoveryService.isDeviceExcluded` as `MqttBridgeDeps.isDeviceExcluded` (single source for exclusions and exposure policy); without it (bridge used standalone) no exclusion check is done beyond the handlers present. `accessories/communication-failure.ts` builds the `HapStatusError` with `cause`. `Lares4Platform.isMatterEligible` now reads only `resolveMatterPolicy` (the arming-scenario check is part of the exposure policy; equivalence pinned by `test/matter-eligibility-single-source.test.js`). In `initializeLares4` the MQTT bridge is now created before `SyncLifecycle.attach`, so the initial "panel not connected" reaches it.
 
 ## Points to verify on the field
 - With the production broker: that mosquitto accepts the CONNECT with the will on `homebridge/klares4/status` once the ACL allows it, and what it does with the current ACL (refused CONNECT → retry without will + warning, or accepted CONNECT with the will dropped silently).
