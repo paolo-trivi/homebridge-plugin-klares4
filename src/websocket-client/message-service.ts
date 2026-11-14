@@ -1,4 +1,3 @@
-import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 import { LogLevel } from '../log-levels';
 import type { KseniaMessage } from '../types';
@@ -9,7 +8,12 @@ import type { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
 import { runIsolated } from '../isolation';
-import { recordLoginRejection, resetLoginRejections } from './login-rejection-guard';
+import { frameResult, resultDetail } from '../websocket/protocol-result';
+import { abandonDiscoveryRound, closeDiscoveryRound, openDiscoveryRound } from './discovered-device';
+import { readInboundFrame } from './inbound-frame';
+import { LoginResponseHandler } from './login-response-handler';
+import { resetLoginRejections } from './login-rejection-guard';
+import { DISCOVERY_FAMILIES, type DiscoverySection, readRefusalImpact } from './sync-read-policy';
 import type {
     CallbackRegistry,
     RealtimeStatusData,
@@ -31,11 +35,21 @@ interface MessageServiceDeps {
     routeMessage: (message: KseniaMessage) => void;
     emitRawMessage: (direction: 'in', rawMessage: string) => void;
     onLoginCompleted: () => void;
+    /** A failed login: counted, socket closed, reconnection backoff. */
+    failLogin?: (error: Error) => void;
+    /** The current session cannot complete its sync: closed and retried with backoff. */
+    abortSession?: (reason: string) => void;
+    /** The sync of the current session completed (REALTIME registration accepted). */
+    onSyncCompleted?: () => void;
 }
 
 export class MessageService {
     private readonly thermostats: ThermostatReadHandler;
     private readonly discovery: DiscoveryReadHandler;
+    private readonly login: LoginResponseHandler;
+    /** Dropped frames per kind of rejection, for the rate-limited log. */
+    private readonly rejectedFrames = new Map<string, number>();
+    private missingCrcReported = false;
 
     constructor(private readonly deps: MessageServiceDeps) {
         this.thermostats = new ThermostatReadHandler({
@@ -54,21 +68,25 @@ export class MessageService {
             thermostats: this.thermostats,
             emitDeviceDiscovered: (device): void => this.deps.callbacks.onDeviceDiscovered?.(device),
         });
+        this.login = new LoginResponseHandler({
+            state: deps.state,
+            log: deps.log,
+            onLoginAccepted: (): void => this.onLoginAccepted(),
+            failLogin: (error): void => this.deps.failLogin?.(error),
+        });
     }
 
     public handleMessage(rawData: string): void {
         runIsolated(this.deps.log, 'Raw message listener', () => this.deps.emitRawMessage('in', rawData));
-        let message: KseniaMessage;
-        try {
-            message = JSON.parse(rawData) as KseniaMessage;
-        } catch {
-            // The parser's message quotes the frame: only its size is logged.
-            this.deps.log.error(`Invalid JSON frame from the panel (${rawData.length} bytes)`);
+        const frame = readInboundFrame(rawData);
+        if (frame.kind === 'rejected') {
+            this.reportRejectedFrame(frame.reason);
             return;
         }
-        if (message === null || typeof message !== 'object' || Array.isArray(message)) {
-            this.deps.log.warn('Ignoring a panel frame that is not a JSON object');
-            return;
+        const message = frame.message;
+        if (frame.crc === 'missing' && !this.missingCrcReported) {
+            this.missingCrcReported = true;
+            this.deps.log.warn(`The panel sent a ${frameLabel(message)} frame without CRC_16; frames without CRC are accepted`);
         }
 
         if (this.deps.logLevel >= LogLevel.DEBUG) {
@@ -83,35 +101,21 @@ export class MessageService {
     }
 
     public handleLoginResponse(message: KseniaMessage): void {
-        const pendingLogin = this.deps.state.pendingLogin;
-        if (!pendingLogin || pendingLogin.messageId === undefined || pendingLogin.messageId !== String(message.ID)) {
-            this.deps.log.warn('Ignoring LOGIN_RES that does not answer the LOGIN in progress');
-            return;
-        }
-        if (message.PAYLOAD?.RESULT === 'OK') {
-            this.deps.state.idLogin = String(message.PAYLOAD.ID_LOGIN ?? '1');
-            resetLoginRejections(this.deps.state);
-            this.deps.log.info(`Login completed, ID_LOGIN: ${this.deps.state.idLogin}`);
-            this.deps.state.pendingLogin?.resolve();
-            this.deps.onLoginCompleted();
-            // Every login re-reads the whole configuration: a new discovery sync starts here.
-            this.deps.callbacks.onSyncStarted?.();
-            this.deps.commandService.requestSystemData().catch((error: unknown): void => {
-                this.deps.log.error(
-                    'Error requesting system data:',
-                    error instanceof Error ? error.message : String(error),
-                );
-            });
-        } else {
-            const reason = String(message.PAYLOAD?.RESULT_DETAIL ?? 'Unknown error');
-            this.deps.log.error('Login failed:', reason);
-            // Before the close below, whose handler schedules the reconnect.
-            recordLoginRejection(this.deps.state, this.deps.log, reason);
-            this.deps.state.pendingLogin?.reject(new Error(`Login failed: ${reason}`));
-            if (this.deps.state.ws && this.deps.state.ws.readyState === WebSocket.OPEN) {
-                this.deps.state.ws.close(1000, 'Login failed');
-            }
-        }
+        this.login.handle(message);
+    }
+
+    private onLoginAccepted(): void {
+        resetLoginRejections(this.deps.state);
+        this.deps.state.pendingLogin?.resolve();
+        this.deps.onLoginCompleted();
+        // Every login re-reads the whole configuration: a new discovery sync starts here.
+        this.deps.callbacks.onSyncStarted?.();
+        this.deps.commandService.requestSystemData().catch((error: unknown): void => {
+            this.deps.log.error(
+                'Error requesting system data:',
+                error instanceof Error ? error.message : String(error),
+            );
+        });
     }
 
     public handleReadResponse(message: KseniaMessage): void {
@@ -119,18 +123,23 @@ export class MessageService {
         const frame = frameLabel(message);
         const section = (name: string, fn: () => void): void => runIsolated(this.deps.log, `${frame} ${name}`, fn);
 
+        const result = frameResult(message);
+        if (result !== undefined && result !== 'OK') {
+            this.handleRefusedRead(message, result);
+            return;
+        }
         this.deps.log.info(`Response received: ${message.PAYLOAD_TYPE}`);
 
-        if (message.PAYLOAD_TYPE === 'ZONES' && payload.ZONES) {
+        if (message.PAYLOAD_TYPE === 'ZONES') {
             const zones = payload.ZONES;
-            section('ZONES', () => this.discovery.handleZones(zones));
+            this.discoverySection('ZONES', zones, () => this.discovery.handleZones(zones ?? []));
         }
 
         if (message.PAYLOAD_TYPE === 'MULTI_TYPES') {
             const { OUTPUTS: outputs, SCENARIOS: scenarios, BUS_HAS: sensors } = payload;
-            if (outputs) section('OUTPUTS', () => this.discovery.handleOutputs(outputs));
-            if (scenarios) section('SCENARIOS', () => this.discovery.handleScenarios(scenarios));
-            if (sensors) section('BUS_HAS', () => this.discovery.handleBusSensors(sensors));
+            this.discoverySection('OUTPUTS', outputs, () => this.discovery.handleOutputs(outputs ?? []));
+            this.discoverySection('SCENARIOS', scenarios, () => this.discovery.handleScenarios(scenarios ?? []));
+            this.discoverySection('BUS_HAS', sensors, () => this.discovery.handleBusSensors(sensors ?? []));
             section('thermostat mapping', () => this.thermostats.afterMultiTypes());
         }
 
@@ -165,10 +174,20 @@ export class MessageService {
     }
 
     public handleRealtimeResponse(message: KseniaMessage): void {
+        const result = frameResult(message);
+        if (result !== undefined && result !== 'OK') {
+            // Without the registration no status change will ever arrive.
+            this.abortSession(
+                `The panel refused the realtime registration (${resultDetail(message) ?? result}): `
+                + 'the synchronization is not complete, reconnecting',
+            );
+            return;
+        }
         this.applyStatusGroups(frameLabel(message), realtimeStatusOf(message.PAYLOAD));
 
         if (!this.deps.state.hasCompletedInitialSync) {
             this.deps.state.hasCompletedInitialSync = true;
+            this.deps.onSyncCompleted?.();
             this.deps.callbacks.onInitialSyncComplete?.();
         }
     }
@@ -179,6 +198,65 @@ export class MessageService {
             if (data && typeof data === 'object') {
                 this.applyStatusGroups(frame, data as RealtimeStatusData);
             }
+        }
+    }
+
+    private abortSession(reason: string): void {
+        if (this.deps.abortSession) this.deps.abortSession(reason);
+        else this.deps.log.warn(reason);
+    }
+
+    private handleRefusedRead(message: KseniaMessage, result: string): void {
+        const detail = resultDetail(message);
+        const what = `The panel refused the ${String(message.PAYLOAD_TYPE)} read (${detail ?? result})`;
+        switch (readRefusalImpact(message.PAYLOAD_TYPE, detail)) {
+            case 'expected':
+                this.deps.log.debug(`${what}: not available on this panel`);
+                return;
+            case 'fatal':
+                this.abortSession(`${what}: the synchronization is not complete, reconnecting`);
+                return;
+            default:
+                this.deps.log.warn(`${what}; the synchronization continues without it`);
+        }
+    }
+
+    /**
+     * One discovery section of a configuration read. When it is a list and
+     * its handler completes, the devices of its family that it no longer
+     * lists leave the session state (deleted or re-categorised on the panel).
+     */
+    private discoverySection(name: DiscoverySection, items: unknown, handle: () => void): void {
+        if (items === undefined) return;
+        if (!Array.isArray(items)) {
+            this.deps.log.warn(`Ignoring the ${name} section of a discovery read: it is not a list`);
+            return;
+        }
+        const devices = this.deps.state.devices;
+        let completed = false;
+        openDiscoveryRound(devices);
+        runIsolated(this.deps.log, `READ_RES ${name}`, () => {
+            handle();
+            completed = true;
+        });
+        if (!completed) {
+            abandonDiscoveryRound(devices);
+            return;
+        }
+        for (const id of closeDiscoveryRound(devices, DISCOVERY_FAMILIES[name])) {
+            this.deps.log.info(`Device ${id} is no longer listed by the panel: it no longer receives status updates`);
+        }
+    }
+
+    /** Rejected frames are dropped; per kind, the log grows by powers of ten, not by frame. */
+    private reportRejectedFrame(reason: string): void {
+        const kind = reason.replace(/ \(\d+ bytes\)/, '');
+        const count = (this.rejectedFrames.get(kind) ?? 0) + 1;
+        this.rejectedFrames.set(kind, count);
+        if (/^10*$/.test(String(count))) {
+            this.deps.log.error(`${reason}: dropped (${count} frame(s) dropped in this session so far)`);
+        } else {
+            this.deps.log.debug(`${reason}: dropped`);
         }
     }
 

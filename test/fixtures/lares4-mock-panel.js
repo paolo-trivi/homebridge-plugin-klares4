@@ -5,11 +5,12 @@
 // REGISTER and CMD_USR. All names are synthetic.
 
 const { WebSocketServer } = require('ws');
+const { signFrame } = require('./panel-frame.js');
 
 function frame(cmd, id, payloadType, payload) {
-    return JSON.stringify({
+    return signFrame({
         SENDER: 'panel', RECEIVER: '', CMD: cmd, ID: id, PAYLOAD_TYPE: payloadType, PAYLOAD: payload,
-        TIMESTAMP: '0', CRC_16: '0x0000',
+        TIMESTAMP: '0',
     });
 }
 

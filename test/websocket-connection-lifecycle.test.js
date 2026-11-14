@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { WebSocketServer } = require('ws');
+const { signFrame } = require('./fixtures/panel-frame.js');
 
 const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
 
@@ -14,7 +15,7 @@ function startPanel() {
         socket.on('message', (raw) => {
             const message = JSON.parse(raw.toString());
             if (message.CMD === 'LOGIN') {
-                socket.send(JSON.stringify({
+                socket.send(signFrame({
                     SENDER: 'panel', RECEIVER: '', CMD: 'LOGIN_RES', ID: message.ID,
                     PAYLOAD_TYPE: 'USER', PAYLOAD: { RESULT: 'OK', ID_LOGIN: String(sockets.length) },
                     TIMESTAMP: '0', CRC_16: '0x0000',

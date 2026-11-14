@@ -14,6 +14,8 @@ import type {
 export interface WebSocketConnectionOptions {
     rejectUnauthorized: boolean;
     agent?: import('https').Agent;
+    /** Largest inbound frame in bytes; a bigger one closes the socket (1009). */
+    maxPayload?: number;
 }
 
 export interface PendingLoginRequest {
@@ -96,9 +98,9 @@ export interface WebSocketClientState {
     heartbeatPending: boolean;
     lastPongReceived: number;
     reconnectAttempts: number;
-    /** Explicit LOGIN_RES rejections since the last successful login. */
+    /** Failed logins (refused, unanswered or invalid) since the last successful login. */
     loginRejections: number;
-    /** Set after too many rejected logins: no automatic reconnection until restart. */
+    /** Set after too many failed logins: reconnection slows to `suspendedLoginRetryMs`. */
     reconnectSuspended: boolean;
     isManualClose: boolean;
     pendingLogin?: PendingLoginRequest;

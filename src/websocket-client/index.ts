@@ -121,6 +121,7 @@ export class KseniaWebSocketClient {
 
         let routeMessage = (_message: KseniaMessage): void => undefined;
         let onLoginCompleted = (): void => undefined;
+        let connection: ConnectionService | undefined;
 
         this.messageService = new MessageService({
             state: this.state,
@@ -143,6 +144,9 @@ export class KseniaWebSocketClient {
                 this.emitRawMessage('in', rawMessage);
             },
             onLoginCompleted: (): void => onLoginCompleted(),
+            failLogin: (error: Error): void => connection?.failLogin(error),
+            abortSession: (reason: string): void => connection?.abortSession(reason),
+            onSyncCompleted: (): void => connection?.syncCompleted(),
         });
 
         this.protocolRouter = new ProtocolRouter({
@@ -196,6 +200,7 @@ export class KseniaWebSocketClient {
             },
             executeLogin: (): Promise<void> => this.commandService.sendLoginCommand(),
         });
+        connection = this.connectionService;
 
         onLoginCompleted = (): void => {
             this.connectionService.startHeartbeat();

@@ -49,10 +49,11 @@ export class WsTransport {
         if (!ws) {
             return;
         }
+        // Unref'd: a socket still closing must not keep the process alive at shutdown.
         setTimeout((): void => {
             if (ws.readyState !== WebSocket.CLOSED) {
                 ws.terminate();
             }
-        }, delayMs);
+        }, delayMs).unref();
     }
 }

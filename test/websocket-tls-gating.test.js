@@ -8,6 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const https = require('node:https');
 const { WebSocketServer } = require('ws');
+const { signFrame } = require('./fixtures/panel-frame.js');
 
 const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
 const { createSelfSignedCertificate } = require('./fixtures/self-signed-cert.js');
@@ -23,7 +24,7 @@ function startTlsPanel(t) {
         const m = JSON.parse(raw.toString());
         frames.push(m);
         if (m.CMD === 'LOGIN') {
-            socket.send(JSON.stringify({ SENDER: 'p', RECEIVER: '', CMD: 'LOGIN_RES', ID: m.ID, PAYLOAD_TYPE: 'USER', PAYLOAD: { RESULT: 'OK', RESULT_DETAIL: 'LOGIN_OK', ID_LOGIN: '1' }, TIMESTAMP: '0', CRC_16: '0x0000' }));
+            socket.send(signFrame({ SENDER: 'p', RECEIVER: '', CMD: 'LOGIN_RES', ID: m.ID, PAYLOAD_TYPE: 'USER', PAYLOAD: { RESULT: 'OK', RESULT_DETAIL: 'LOGIN_OK', ID_LOGIN: '1' }, TIMESTAMP: '0', CRC_16: '0x0000' }));
         }
     }));
     t.after(() => new Promise((resolve) => { for (const c of wss.clients) c.terminate(); wss.close(() => server.close(resolve)); }));

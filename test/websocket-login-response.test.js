@@ -47,7 +47,9 @@ test('a LOGIN_RES without a pending login is ignored', () => {
     }
 });
 
-test('a LOGIN_RES for another LOGIN ID does not settle the pending login', async () => {
+// A refusal with another ID is a rejection of the login in progress (WS-10):
+// see websocket-login-guard.test.js.
+test('an accepting LOGIN_RES for another LOGIN ID does not settle the pending login', async () => {
     const { client, sent } = createClient();
     try {
         const outcome = pendLogin(client);
@@ -55,7 +57,6 @@ test('a LOGIN_RES for another LOGIN ID does not settle the pending login', async
         const loginId = sent[0].ID;
 
         client['messageService'].handleLoginResponse(loginRes(String(Number(loginId) + 1)));
-        client['messageService'].handleLoginResponse(loginRes(String(Number(loginId) + 2), 'FAIL'));
         assert.deepEqual(outcome, { resolved: 0, rejected: 0 });
         assert.equal(client['state'].idLogin, undefined);
 
