@@ -1,3 +1,4 @@
+import type { Logger } from 'homebridge';
 import { stripDevicePrefix } from '../device-id';
 import type { ThermostatMode } from '../thermostat-mode';
 import { updateThermostatStatus } from '../thermostat-state';
@@ -6,23 +7,26 @@ import type {
     KseniaTemperatureStatusRaw,
 } from '../types';
 import { parseFloatInRange } from '../websocket/device-state-projector';
+import { forEachIsolated } from '../isolation';
 import type { WebSocketClientState } from './types';
 
 interface ThermostatStatusUpdaterDeps {
     state: WebSocketClientState;
     emitDeviceStatusUpdate: (device: KseniaDevice) => void;
+    /** When set, a failing entry is logged and skipped instead of aborting the batch. */
+    log?: Logger;
 }
 
 export class ThermostatStatusUpdater {
     constructor(private readonly deps: ThermostatStatusUpdaterDeps) {}
 
     public updateTemperatureStatuses(entries: KseniaTemperatureStatusRaw[]): void {
-        for (const entry of entries) {
+        forEachIsolated(this.deps.log, 'STATUS_TEMPERATURES entry', entries, (entry: KseniaTemperatureStatusRaw): void => {
             this.recordRealtimeSnapshot(entry);
             const thermostatOutputIds = this.resolveThermostatOutputIds(entry.ID);
             if (thermostatOutputIds.length === 0) {
                 this.deps.state.pendingTemperatureStatuses.set(entry.ID, entry);
-                continue;
+                return;
             }
 
             this.deps.state.pendingTemperatureStatuses.delete(entry.ID);
@@ -48,7 +52,7 @@ export class ThermostatStatusUpdater {
                     this.deps.emitDeviceStatusUpdate(thermostatDevice);
                 }
             }
-        }
+        });
     }
 
     public applyPendingTemperatureStatuses(): void {

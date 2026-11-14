@@ -1,30 +1,22 @@
 import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 import { LogLevel } from '../log-levels';
-import type {
-    KseniaBusHaData,
-    KseniaMessage,
-    KseniaOutputStatusRaw,
-    KseniaProgramThermostatRaw,
-    KseniaZoneData,
-} from '../types';
+import type { KseniaMessage } from '../types';
 import type { CommandService } from './command-service';
-import { determineOutputType, parseOutputData, parseZoneData } from './device-parsers';
-import { discoverScenarios } from './scenario-discovery';
-import { normalizeDeviceName } from '../websocket/device-state-projector';
-import { normalizeDomusSensorId } from './domus-thermostat-mapper';
-import { refreshDomusThermostatMapping } from './domus-thermostat-mapping-runtime';
-import { ThermostatStatusUpdater } from './thermostat-status-updater';
-import { applyThermostatConfigSnapshot } from './thermostat-config-sync';
+import { DiscoveryReadHandler } from './discovery-read-handler';
+import { ThermostatReadHandler } from './thermostat-read-handler';
+import type { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
-import { adoptDiscoveredDevice } from './discovered-device';
+import { runIsolated } from '../isolation';
 import { recordLoginRejection, resetLoginRejections } from './login-rejection-guard';
 import type {
     CallbackRegistry,
     RealtimeStatusData,
+    SystemTemperatureData,
     WebSocketClientState,
 } from './types';
+
 interface MessageServiceDeps {
     state: WebSocketClientState;
     callbacks: CallbackRegistry;
@@ -42,27 +34,52 @@ interface MessageServiceDeps {
 }
 
 export class MessageService {
-    constructor(private readonly deps: MessageServiceDeps) {}
+    private readonly thermostats: ThermostatReadHandler;
+    private readonly discovery: DiscoveryReadHandler;
+
+    constructor(private readonly deps: MessageServiceDeps) {
+        this.thermostats = new ThermostatReadHandler({
+            state: deps.state,
+            log: deps.log,
+            logLevel: deps.logLevel,
+            debugEnabled: deps.debugEnabled,
+            thermostatStatusUpdater: deps.thermostatStatusUpdater,
+            emitDeviceStatusUpdate: (device): void => this.deps.callbacks.onDeviceStatusUpdate?.(device),
+        });
+        this.discovery = new DiscoveryReadHandler({
+            state: deps.state,
+            log: deps.log,
+            exposePartialArmScenarios: deps.exposePartialArmScenarios,
+            statusUpdater: deps.statusUpdater,
+            thermostats: this.thermostats,
+            emitDeviceDiscovered: (device): void => this.deps.callbacks.onDeviceDiscovered?.(device),
+        });
+    }
 
     public handleMessage(rawData: string): void {
-        this.deps.emitRawMessage('in', rawData);
+        runIsolated(this.deps.log, 'Raw message listener', () => this.deps.emitRawMessage('in', rawData));
+        let message: KseniaMessage;
         try {
-            const message = JSON.parse(rawData) as KseniaMessage;
-
-            if (this.deps.logLevel >= LogLevel.DEBUG) {
-                const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
-                if (!isHeartbeat) {
-                    this.deps.log.debug(`Message: ${message.CMD} / ${message.PAYLOAD_TYPE}`);
-                }
-            }
-
-            this.deps.routeMessage(message);
-        } catch (error: unknown) {
-            this.deps.log.error(
-                'Message parsing error:',
-                error instanceof Error ? error.message : String(error),
-            );
+            message = JSON.parse(rawData) as KseniaMessage;
+        } catch {
+            // The parser's message quotes the frame: only its size is logged.
+            this.deps.log.error(`Invalid JSON frame from the panel (${rawData.length} bytes)`);
+            return;
         }
+        if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+            this.deps.log.warn('Ignoring a panel frame that is not a JSON object');
+            return;
+        }
+
+        if (this.deps.logLevel >= LogLevel.DEBUG) {
+            const isHeartbeat = message.CMD === 'PING' || message.PAYLOAD_TYPE === 'HEARTBEAT';
+            if (!isHeartbeat) {
+                this.deps.log.debug(`Message: ${message.CMD} / ${message.PAYLOAD_TYPE}`);
+            }
+        }
+
+        // Only an error that escapes every per-section and per-element guard lands here.
+        runIsolated(this.deps.log, `Handling ${frameLabel(message)} frame`, () => this.deps.routeMessage(message));
     }
 
     public handleLoginResponse(message: KseniaMessage): void {
@@ -77,6 +94,8 @@ export class MessageService {
             this.deps.log.info(`Login completed, ID_LOGIN: ${this.deps.state.idLogin}`);
             this.deps.state.pendingLogin?.resolve();
             this.deps.onLoginCompleted();
+            // Every login re-reads the whole configuration: a new discovery sync starts here.
+            this.deps.callbacks.onSyncStarted?.();
             this.deps.commandService.requestSystemData().catch((error: unknown): void => {
                 this.deps.log.error(
                     'Error requesting system data:',
@@ -97,170 +116,56 @@ export class MessageService {
 
     public handleReadResponse(message: KseniaMessage): void {
         const payload = message.PAYLOAD;
+        const frame = frameLabel(message);
+        const section = (name: string, fn: () => void): void => runIsolated(this.deps.log, `${frame} ${name}`, fn);
 
         this.deps.log.info(`Response received: ${message.PAYLOAD_TYPE}`);
 
         if (message.PAYLOAD_TYPE === 'ZONES' && payload.ZONES) {
-            this.deps.log.info(`Found ${payload.ZONES.length} zones`);
-            payload.ZONES.forEach((zone: KseniaZoneData): void => {
-                const device = adoptDiscoveredDevice(this.deps.state.devices, parseZoneData(zone));
-                this.deps.callbacks.onDeviceDiscovered?.(device);
-                this.deps.statusUpdater.applyPendingZoneStatus(zone.ID);
-            });
+            const zones = payload.ZONES;
+            section('ZONES', () => this.discovery.handleZones(zones));
         }
 
         if (message.PAYLOAD_TYPE === 'MULTI_TYPES') {
-            if (payload.OUTPUTS) {
-                this.deps.log.info(`Found ${payload.OUTPUTS.length} outputs`);
-                payload.OUTPUTS.forEach((output): void => {
-                    const category = output.CAT ?? output.TYPE ?? '';
-                    const type = determineOutputType(category, output.MOD);
-                    if (type === 'thermostat') {
-                        this.deps.state.thermostatOutputs.set(output.ID, output);
-                    }
-
-                    if (type === 'thermostat' && this.deps.debugEnabled) {
-                        this.deps.log.debug(
-                            `Thermostat found - ID: ${output.ID}, DES: ${output.DES}, TYPE: ${output.TYPE}, CAT: ${output.CAT}`,
-                        );
-                    }
-
-                    const parsed = parseOutputData(output);
-                    if (parsed) {
-                        const device = adoptDiscoveredDevice(this.deps.state.devices, parsed);
-                        this.deps.callbacks.onDeviceDiscovered?.(device);
-                        this.deps.statusUpdater.applyPendingOutputStatus(output.ID);
-                    }
-                });
-            }
-
-            if (payload.SCENARIOS) {
-                discoverScenarios(payload.SCENARIOS, {
-                    state: this.deps.state,
-                    log: this.deps.log,
-                    exposePartialArmScenarios: this.deps.exposePartialArmScenarios,
-                    onDeviceDiscovered: (device): void => this.deps.callbacks.onDeviceDiscovered?.(device),
-                });
-            }
-
-            if (payload.BUS_HAS) {
-                this.deps.log.info(`Found ${payload.BUS_HAS.length} sensors`);
-                payload.BUS_HAS.forEach((sensor: KseniaBusHaData): void => {
-                    const normalizedSensorId = normalizeDomusSensorId(sensor.ID);
-                    this.deps.state.domusSensors.set(normalizedSensorId, { ...sensor, ID: normalizedSensorId });
-                    const baseName = normalizeDeviceName(sensor.DES) || `Sensor ${normalizedSensorId}`;
-
-                    const tempDevice = adoptDiscoveredDevice(this.deps.state.devices, {
-                        id: `sensor_temp_${normalizedSensorId}`,
-                        type: 'sensor',
-                        name: `${baseName} - Temperatura`,
-                        description: `${baseName} - Temperatura`,
-                        status: { sensorType: 'temperature', value: 0, unit: 'C' },
-                    } as const);
-                    this.deps.callbacks.onDeviceDiscovered?.(tempDevice);
-
-                    const humDevice = adoptDiscoveredDevice(this.deps.state.devices, {
-                        id: `sensor_hum_${normalizedSensorId}`,
-                        type: 'sensor',
-                        name: `${baseName} - Umidita`,
-                        description: `${baseName} - Umidita`,
-                        status: { sensorType: 'humidity', value: 50, unit: '%' },
-                    } as const);
-                    this.deps.callbacks.onDeviceDiscovered?.(humDevice);
-
-                    const lightDevice = adoptDiscoveredDevice(this.deps.state.devices, {
-                        id: `sensor_light_${normalizedSensorId}`,
-                        type: 'sensor',
-                        name: `${baseName} - Luminosita`,
-                        description: `${baseName} - Luminosita`,
-                        status: { sensorType: 'light', value: 100, unit: 'lux' },
-                    } as const);
-                    this.deps.callbacks.onDeviceDiscovered?.(lightDevice);
-                    this.deps.statusUpdater.applyPendingSensorStatus(normalizedSensorId);
-                });
-            }
-
-            this.refreshDomusThermostatMapping();
-            this.applyThermostatConfigSnapshot();
-            this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
+            const { OUTPUTS: outputs, SCENARIOS: scenarios, BUS_HAS: sensors } = payload;
+            if (outputs) section('OUTPUTS', () => this.discovery.handleOutputs(outputs));
+            if (scenarios) section('SCENARIOS', () => this.discovery.handleScenarios(scenarios));
+            if (sensors) section('BUS_HAS', () => this.discovery.handleBusSensors(sensors));
+            section('thermostat mapping', () => this.thermostats.afterMultiTypes());
         }
 
-        if (message.PAYLOAD_TYPE === 'CFG_THERMOSTATS' && Array.isArray(payload.CFG_THERMOSTATS)) {
-            for (const entry of payload.CFG_THERMOSTATS) {
-                if (!entry || typeof entry !== 'object') {
-                    continue;
-                }
-                const thermostatId = String((entry as Record<string, unknown>).ID ?? '');
-                if (!thermostatId) {
-                    continue;
-                }
-                this.deps.state.thermostatCfgById.set(thermostatId, entry as Record<string, unknown>);
-            }
-            if (this.deps.logLevel >= LogLevel.DEBUG) {
-                this.deps.log.debug(
-                    `Cached thermostat configs: ${this.deps.state.thermostatCfgById.size}`,
-                );
-            }
-            this.applyThermostatConfigSnapshot();
-            this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
+        const cfg = payload.CFG_THERMOSTATS;
+        if (message.PAYLOAD_TYPE === 'CFG_THERMOSTATS' && Array.isArray(cfg)) {
+            section('CFG_THERMOSTATS', () => this.thermostats.handleCfgThermostats(cfg));
         }
 
-        if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS' && Array.isArray(payload.PRG_THERMOSTATS)) {
-            this.cacheProgramThermostats(payload.PRG_THERMOSTATS);
-            this.refreshDomusThermostatMapping();
-            this.applyThermostatConfigSnapshot();
-            this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
+        const programs = payload.PRG_THERMOSTATS;
+        if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS' && Array.isArray(programs)) {
+            section('PRG_THERMOSTATS', () => this.thermostats.handlePrgThermostats(programs));
         }
 
+        const initialStatus: RealtimeStatusData = {};
         if (message.PAYLOAD_TYPE === 'STATUS_OUTPUTS' && payload.STATUS_OUTPUTS) {
             this.deps.log.info(`Initial states for ${payload.STATUS_OUTPUTS.length} outputs`);
-            if (this.deps.debugEnabled) {
-                payload.STATUS_OUTPUTS.forEach((output: KseniaOutputStatusRaw): void => {
-                    const thermostatDevice = this.deps.state.devices.get(`thermostat_${output.ID}`);
-                    if (thermostatDevice) {
-                        this.deps.log.debug(`Initial thermostat state ${output.ID}: ${JSON.stringify(output)}`);
-                    }
-                });
-            }
-            this.deps.statusUpdater.updateOutputStatuses(payload.STATUS_OUTPUTS);
+            this.thermostats.logInitialThermostatStates(payload.STATUS_OUTPUTS);
+            initialStatus.STATUS_OUTPUTS = payload.STATUS_OUTPUTS;
         }
-
         if (message.PAYLOAD_TYPE === 'STATUS_BUS_HA_SENSORS' && payload.STATUS_BUS_HA_SENSORS) {
             this.deps.log.info(`Initial states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
-            this.deps.statusUpdater.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
+            initialStatus.STATUS_BUS_HA_SENSORS = payload.STATUS_BUS_HA_SENSORS;
         }
-
         if (message.PAYLOAD_TYPE === 'STATUS_TEMPERATURES' && payload.STATUS_TEMPERATURES) {
-            this.deps.thermostatStatusUpdater.updateTemperatureStatuses(payload.STATUS_TEMPERATURES);
+            initialStatus.STATUS_TEMPERATURES = payload.STATUS_TEMPERATURES;
         }
-
         if (message.PAYLOAD_TYPE === 'STATUS_SYSTEM' && payload.STATUS_SYSTEM) {
             this.deps.log.info('Initial system temperatures');
-            this.deps.systemTemperatureUpdater.updateSystemTemperatures(
-                payload.STATUS_SYSTEM as unknown as import('./types').SystemTemperatureData[],
-            );
+            initialStatus.STATUS_SYSTEM = realtimeStatusOf(payload).STATUS_SYSTEM;
         }
+        this.applyStatusGroups(frame, initialStatus);
     }
 
     public handleRealtimeResponse(message: KseniaMessage): void {
-        const payload = message.PAYLOAD;
-        if (payload.STATUS_OUTPUTS) {
-            this.deps.statusUpdater.updateOutputStatuses(payload.STATUS_OUTPUTS);
-        }
-        if (payload.STATUS_BUS_HA_SENSORS) {
-            this.deps.statusUpdater.updateSensorStatuses(payload.STATUS_BUS_HA_SENSORS);
-        }
-        if (payload.STATUS_TEMPERATURES) {
-            this.deps.thermostatStatusUpdater.updateTemperatureStatuses(payload.STATUS_TEMPERATURES);
-        }
-        if (payload.STATUS_ZONES) {
-            this.deps.statusUpdater.updateZoneStatuses(payload.STATUS_ZONES);
-        }
-        if (payload.STATUS_SYSTEM) {
-            this.deps.systemTemperatureUpdater.updateSystemTemperatures(
-                payload.STATUS_SYSTEM as unknown as import('./types').SystemTemperatureData[],
-            );
-        }
+        this.applyStatusGroups(frameLabel(message), realtimeStatusOf(message.PAYLOAD));
 
         if (!this.deps.state.hasCompletedInitialSync) {
             this.deps.state.hasCompletedInitialSync = true;
@@ -269,72 +174,40 @@ export class MessageService {
     }
 
     public handleStatusUpdate(message: KseniaMessage): void {
-        const payload = message.PAYLOAD;
-        for (const [, data] of Object.entries(payload)) {
+        const frame = frameLabel(message);
+        for (const [, data] of Object.entries(message.PAYLOAD)) {
             if (data && typeof data === 'object') {
-                const statusData = data as RealtimeStatusData;
-
-                if (statusData.STATUS_OUTPUTS) {
-                    this.deps.statusUpdater.updateOutputStatuses(statusData.STATUS_OUTPUTS);
-                }
-                if (statusData.STATUS_BUS_HA_SENSORS) {
-                    this.deps.statusUpdater.updateSensorStatuses(statusData.STATUS_BUS_HA_SENSORS);
-                }
-                if (statusData.STATUS_TEMPERATURES) {
-                    this.deps.thermostatStatusUpdater.updateTemperatureStatuses(statusData.STATUS_TEMPERATURES);
-                }
-                if (statusData.STATUS_ZONES) {
-                    this.deps.statusUpdater.updateZoneStatuses(statusData.STATUS_ZONES);
-                }
-                if (statusData.STATUS_SYSTEM) {
-                    this.deps.systemTemperatureUpdater.updateSystemTemperatures(statusData.STATUS_SYSTEM);
-                }
+                this.applyStatusGroups(frame, data as RealtimeStatusData);
             }
         }
     }
 
-    private refreshDomusThermostatMapping(): void {
-        refreshDomusThermostatMapping(this.deps.state, this.deps.log);
-    }
-
-    private cacheProgramThermostats(entries: KseniaProgramThermostatRaw[]): void {
-        this.deps.state.thermostatProgramById.clear();
-        this.deps.state.thermostatProgramIdByOutputId.clear();
-        this.deps.state.domusSensorIdByThermostatProgramId.clear();
-
-        for (const entry of entries) {
-            const thermostatProgramId = String(entry.ID ?? '');
-            if (!thermostatProgramId) {
-                continue;
-            }
-
-            this.deps.state.thermostatProgramById.set(thermostatProgramId, entry);
-            const rawSensorId = entry.PERIPH?.PID;
-            const sensorId = rawSensorId ? normalizeDomusSensorId(rawSensorId) : undefined;
-            if (sensorId) {
-                this.deps.state.domusSensorIdByThermostatProgramId.set(thermostatProgramId, sensorId);
-            }
-
-            for (const outputId of [entry.HEATING_OUT, entry.COOLING_OUT]) {
-                if (!outputId || outputId === 'NU') {
-                    continue;
-                }
-                this.deps.state.thermostatProgramIdByOutputId.set(String(outputId), thermostatProgramId);
-            }
+    /** Each status group of a frame is applied on its own: one failing group never drops the others. */
+    private applyStatusGroups(frame: string, data: RealtimeStatusData): void {
+        const section = (name: string, fn: () => void): void => runIsolated(this.deps.log, `${frame} ${name}`, fn);
+        const { STATUS_OUTPUTS: outputs, STATUS_BUS_HA_SENSORS: sensors, STATUS_TEMPERATURES: temperatures } = data;
+        const { STATUS_ZONES: zones, STATUS_SYSTEM: system } = data;
+        if (outputs) section('STATUS_OUTPUTS', () => this.deps.statusUpdater.updateOutputStatuses(outputs));
+        if (sensors) section('STATUS_BUS_HA_SENSORS', () => this.deps.statusUpdater.updateSensorStatuses(sensors));
+        if (temperatures) {
+            section('STATUS_TEMPERATURES', () => this.deps.thermostatStatusUpdater.updateTemperatureStatuses(temperatures));
         }
-
-        if (this.deps.logLevel >= LogLevel.DEBUG) {
-            for (const [outputId, thermostatProgramId] of this.deps.state.thermostatProgramIdByOutputId.entries()) {
-                const sensorId = this.deps.state.domusSensorIdByThermostatProgramId.get(thermostatProgramId) ?? 'NA';
-                this.deps.log.debug(`thermostat_${outputId} => cfg:${thermostatProgramId} domus:${sensorId} source:prg_thermostats`);
-            }
-        }
+        if (zones) section('STATUS_ZONES', () => this.deps.statusUpdater.updateZoneStatuses(zones));
+        if (system) section('STATUS_SYSTEM', () => this.deps.systemTemperatureUpdater.updateSystemTemperatures(system));
     }
+}
 
-    private applyThermostatConfigSnapshot(): void {
-        applyThermostatConfigSnapshot({
-            state: this.deps.state,
-            emitDeviceStatusUpdate: (device): void => this.deps.callbacks.onDeviceStatusUpdate?.(device),
-        });
-    }
+function frameLabel(message: KseniaMessage): string {
+    return `${String(message.CMD)}/${String(message.PAYLOAD_TYPE)}`;
+}
+
+/** The status groups of a READ_RES or REALTIME_RES payload. */
+function realtimeStatusOf(payload: KseniaMessage['PAYLOAD']): RealtimeStatusData {
+    return {
+        STATUS_OUTPUTS: payload.STATUS_OUTPUTS,
+        STATUS_BUS_HA_SENSORS: payload.STATUS_BUS_HA_SENSORS,
+        STATUS_TEMPERATURES: payload.STATUS_TEMPERATURES,
+        STATUS_ZONES: payload.STATUS_ZONES,
+        STATUS_SYSTEM: payload.STATUS_SYSTEM as unknown as SystemTemperatureData[],
+    };
 }
