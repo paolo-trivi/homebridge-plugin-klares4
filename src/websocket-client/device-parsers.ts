@@ -6,11 +6,8 @@ import type {
     KseniaZone,
     KseniaZoneData,
 } from '../types';
-import {
-    determineOutputType as determineProjectedOutputType,
-    normalizeDeviceName,
-    parseOutputDevice,
-} from '../websocket/device-state-projector';
+import { normalizeDeviceName, parseOutputDevice } from '../websocket/device-state-projector';
+import { determineOutputType as determineProjectedOutputType } from '../websocket/output-classifier';
 
 export function parseZoneData(zoneData: KseniaZoneData): KseniaZone {
     const label = normalizeDeviceName(zoneData.DES);

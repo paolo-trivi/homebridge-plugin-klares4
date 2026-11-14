@@ -8,24 +8,27 @@ import type {
     Service,
 } from 'homebridge';
 
-import { getEffectiveLogLevel } from '../log-levels';
 import { MqttBridge } from '../mqtt-bridge';
 import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { PLATFORM_NAME, PLUGIN_NAME } from '../settings';
 import { initTelemetry, captureError, closeTelemetry } from '../telemetry';
 import { tlsConfigurationHint } from '../websocket-client/tls-error-hint';
 import type { KseniaDevice } from '../types';
-import { KseniaWebSocketClient } from '../websocket-client';
-import { DebugCaptureManager } from '../debug-capture';
+import type { KseniaWebSocketClient } from '../websocket-client';
+import type { DebugCaptureManager } from '../debug-capture';
 import { AccessoryRegistry } from './accessory-registry';
 import { AccessoryHandlerService } from './accessory-handler-service';
+import { createWebSocketClient, hasConnectionConfig } from './client-options';
+import { startRequestedDebugCapture } from './debug-capture-start';
 import { MatterAccessoryRegistry } from './matter-accessory-registry';
 import { PlatformConfigFileService } from './config-file-service';
 import { DeviceListService } from './device-list-service';
+import { DeviceEventRouter } from './device-event-router';
 import { DiscoveryService } from './discovery-service';
 import { KsaImportService } from './ksa-import-service';
 import { normalizeMatterRecoveryRequests } from './matter-override-config';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
+import { SyncLifecycle } from './sync-lifecycle';
 import type { AccessoryHandler, Lares4Config } from './types';
 
 export type { AccessoryHandler, Lares4Config, MatterExposureConfig, DeviceListItem, DevicesList } from './types';
@@ -39,8 +42,6 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     public wsClient?: KseniaWebSocketClient;
     public mqttBridge?: MqttBridge;
 
-    private readonly discoveredDevices: Map<string, KseniaDevice> = new Map();
-    private readonly matterDevices: Map<string, KseniaDevice> = new Map();
     private readonly activeDiscoveredUUIDs: Set<string> = new Set();
     private readonly accessoryRegistry: AccessoryRegistry;
     private readonly matterRegistry: MatterAccessoryRegistry;
@@ -50,6 +51,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly handlerService: AccessoryHandlerService;
     private readonly configFileService: PlatformConfigFileService;
     private readonly ksaImportService: KsaImportService;
+    private readonly deviceEvents: DeviceEventRouter;
+    private readonly syncLifecycle: SyncLifecycle;
     private debugCapture?: DebugCaptureManager;
 
     constructor(
@@ -95,19 +98,23 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             recoveryRequests: normalizeMatterRecoveryRequests(this.config.matterRecoveryRequests),
             unregisterTimeoutMs: this.config.matterUnregisterTimeoutMs,
         });
+        this.deviceEvents = new DeviceEventRouter({
+            log: this.log,
+            discoveryService: this.discoveryService,
+            deviceListService: this.deviceListService,
+            accessoryRegistry: this.accessoryRegistry,
+            matterRegistry: this.matterRegistry,
+            getMqttBridge: () => this.mqttBridge,
+        });
+        this.syncLifecycle = new SyncLifecycle({
+            log: this.log,
+            accessoryRegistry: this.accessoryRegistry,
+            matterRegistry: this.matterRegistry,
+            eligibleMatterDevices: (): KseniaDevice[] => [...this.deviceEvents.matterSnapshots]
+                .filter((device: KseniaDevice): boolean => this.isMatterEligible(device)),
+        });
 
-        if (!config) {
-            this.log.error('No configuration found');
-            return;
-        }
-        if (!config.ip) {
-            this.log.error('IP address missing in configuration');
-            return;
-        }
-        if (!config.pin) {
-            this.log.error('PIN missing in configuration');
-            return;
-        }
+        if (!hasConnectionConfig(config, this.log)) return;
         // A PIN typed as a number in the JSON editor would escape every string-based mask and scrub.
         this.config.pin = String(config.pin);
 
@@ -141,55 +148,19 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private async initializeLares4(): Promise<void> {
         try {
             this.log.info('Initializing Ksenia Lares4 connection...');
-            this.accessoryRegistry.startDiscoveryCycle();
-            this.matterRegistry.startDiscoveryCycle();
+            this.syncLifecycle.startDiscoveryCycle();
 
-            const useHttps = this.config.https !== false;
-            const port = this.config.port ?? (useHttps ? 443 : 80);
             if (!this.config.ip || !this.config.pin) {
                 this.log.error('Configurazione mancante: IP e PIN sono obbligatori');
                 return;
             }
+            const { ip, pin } = this.config;
 
             const ksaCache = await this.ksaImportService.prepare(this.config, PLATFORM_NAME);
 
-            this.wsClient = new KseniaWebSocketClient(
-                this.config.ip,
-                port,
-                useHttps,
-                this.config.sender ?? 'homebridge',
-                this.config.pin,
-                this.log,
-                {
-                    debug: this.config.debug ?? false,
-                    logLevel: getEffectiveLogLevel(this.config.logLevel, this.config.debug),
-                    reconnectInterval: this.config.reconnectInterval ?? 5000,
-                    heartbeatInterval: this.config.heartbeatInterval ?? 30000,
-                    commandTimeoutMs: this.config.commandTimeoutMs ?? 8000,
-                    allowInsecureTls: this.config.allowInsecureTls ?? false,
-                    exposePartialArmScenarios: this.config.exposePartialArmScenarios === true,
-                    domusThermostat: this.config.domusThermostat,
-                    ksaCache,
-                },
-            );
+            this.wsClient = createWebSocketClient({ ...this.config, ip, pin }, this.log, ksaCache);
 
-            if (this.config.allowInsecureTls) {
-                this.log.warn(
-                    'TLS certificate verification is disabled (allowInsecureTls=true). Use only on trusted local networks.',
-                );
-            }
-
-            this.wsClient.onDeviceDiscovered = (device: KseniaDevice): void => {
-                this.handleDeviceDiscovered(device);
-            };
-            this.wsClient.onDeviceStatusUpdate = (device: KseniaDevice): void => {
-                this.handleDeviceStatusUpdate(device);
-            };
-            this.wsClient.onInitialSyncComplete = (): void => {
-                this.handleInitialSyncComplete();
-            };
-            this.wsClient.onConnected = (): void => this.matterRegistry.setPanelReachable(true);
-            this.wsClient.onDisconnected = (): void => this.matterRegistry.setPanelReachable(false);
+            this.syncLifecycle.attach(this.wsClient, this.deviceEvents);
             // MQTT and debug capture must not depend on the first connect: if the
             // panel is offline at boot, connect() rejects while the client keeps
             // reconnecting in the background.
@@ -199,19 +170,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             }
 
             if (this.config.generateDebugFile) {
-                // After a child-bridge restart, Apple Home / Matter mesh can need several
-                // minutes to become responsive again. The default 60s window often closes
-                // before the user can trigger the failing scenario from HomeKit, so we make
-                // it configurable via `debugCaptureDurationMs`. Allowed range is 10s..30min.
-                const requested = this.config.debugCaptureDurationMs;
-                const durationMs = Math.max(
-                    10_000,
-                    Math.min(1_800_000, typeof requested === 'number' && Number.isFinite(requested) ? requested : 60_000),
-                );
-                const durationSeconds = Math.round(durationMs / 1000);
-                this.log.warn(`[DEBUG] Debug capture requested - starting ${durationSeconds}-second capture...`);
-                this.debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
-                this.debugCapture.startCapture(this.wsClient, durationMs);
+                this.debugCapture = startRequestedDebugCapture(this.config, this.log, this.api.user.storagePath(), this.wsClient);
                 void this.configFileService.disableDebugFlag(PLATFORM_NAME);
             }
 
@@ -244,24 +203,6 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         return this.discoveryService.resolveMatterPolicy(device).exposed;
     }
 
-    private handleInitialSyncComplete(): void {
-        this.log.info('Initial synchronization completed, finalizing Matter name-map and pruning stale accessories...');
-        this.accessoryRegistry.pruneStaleAccessories();
-        // Two-phase naming, phase 2: with the full device set known, batch-compute
-        // the authoritative name-map, persist it and refresh outliers — then prune.
-        const eligibleDevices = [...this.matterDevices.values()]
-            .filter((device: KseniaDevice): boolean => this.isMatterEligible(device));
-        this.matterRegistry
-            .finalizeNameMap(eligibleDevices)
-            .catch((err: unknown) => {
-                this.log.warn('[Matter] Name-map finalize error:', err instanceof Error ? err.message : String(err));
-            })
-            .then(() => this.matterRegistry.pruneStaleAccessories())
-            .catch((err: unknown) => {
-                this.log.warn('[Matter] Prune error:', err instanceof Error ? err.message : String(err));
-            });
-    }
-
     private cleanupConnections(): void {
         this.lifecycleService.cleanupConnections((): void => {
             // Flush before disconnecting: both write synchronously, Homebridge exits right after.
@@ -271,38 +212,6 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.mqttBridge?.disconnect();
         });
         closeTelemetry();
-    }
-
-    private handleDeviceDiscovered(device: KseniaDevice): void {
-        this.discoveredDevices.set(device.id, device);
-        this.deviceListService.saveDevicesList(this.discoveredDevices.values());
-
-        if (this.discoveryService.shouldExcludeDevice(device)) {
-            this.log.info(`Device excluded: ${device.type} - ${device.name}`);
-            return;
-        }
-
-        const sharedDevice = this.discoveryService.applyCustomName(device);
-        const matterDevice = this.discoveryService.applyMatterName(device);
-        this.matterDevices.set(device.id, matterDevice);
-        this.log.info(`Device discovered: ${sharedDevice.type} - ${sharedDevice.name}`);
-        this.addAccessory(sharedDevice);
-        this.matterRegistry.addOrUpdateAccessory(matterDevice).catch((err: unknown) => {
-            this.log.warn(`[Matter] Registration error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
-        });
-    }
-
-    private handleDeviceStatusUpdate(device: KseniaDevice): void {
-        const sharedDevice = this.discoveryService.applyCustomName(device);
-        const matterDevice = this.discoveryService.applyMatterName(device);
-        this.discoveredDevices.set(device.id, device);
-        this.matterDevices.set(device.id, matterDevice);
-        this.log.debug(`Device status update: ${sharedDevice.name}`);
-        this.updateAccessory(sharedDevice);
-        this.mqttBridge?.publishDeviceState(sharedDevice);
-        this.matterRegistry.updateAccessoryState(matterDevice).catch((err: unknown) => {
-            this.log.debug(`[Matter] State update error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
-        });
     }
 
     public configureAccessory(accessory: PlatformAccessory): void {

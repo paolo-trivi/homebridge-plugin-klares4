@@ -1,22 +1,22 @@
-import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 import { LogLevel, maskSensitiveData } from '../log-levels';
 import { stripDevicePrefix } from '../device-id';
 import type { ThermostatMode } from '../thermostat-mode';
-import { CommandDispatcher, type CommandAcknowledgement } from '../websocket/command-dispatcher';
-import {
+import type { CommandAcknowledgement, CommandDispatcher } from '../websocket/command-dispatcher';
+import type {
     OutputCommandConfirmationTracker,
-    type OutputConfirmationHandle,
-    type StateConfirmation,
+    StateConfirmation,
 } from '../websocket/output-command-confirmation';
 import { clampValue } from '../websocket/device-state-projector';
-import { WsTransport } from '../websocket/ws-transport';
+import type { WsTransport } from '../websocket/ws-transport';
 import { ThermostatCommandService } from './thermostat-command-service';
-import type { KseniaMessage, KseniaMessagePayload, KseniaWebSocketOptions } from '../types';
+import type { KseniaMessage, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
+import { CommandSender } from './command-sender';
 import { isIgnoredScenarioCategory } from './device-parsers';
 import { logMutationOutcome, mutationOptions } from './command-outcome';
+
 interface CommandServiceDeps {
     state: WebSocketClientState;
     sender: string;
@@ -28,9 +28,14 @@ interface CommandServiceDeps {
     outputConfirmation?: OutputCommandConfirmationTracker;
     wsTransport: WsTransport;
     emitRawMessage: (direction: RawMessageDirection, rawMessage: string) => void;
-} export class CommandService {
+}
+
+export class CommandService {
     private readonly thermostatCommands: ThermostatCommandService;
+    private readonly commandSender: CommandSender;
+
     constructor(private readonly deps: CommandServiceDeps) {
+        this.commandSender = new CommandSender(deps);
         // Late-bound so a replaced sendKseniaCommand (tests) is still the one used.
         this.thermostatCommands = new ThermostatCommandService({
             state: deps.state,
@@ -40,6 +45,7 @@ interface CommandServiceDeps {
             send: (cmd, payloadType, payload, options) => this.sendKseniaCommand(cmd, payloadType, payload, options),
         });
     }
+
     public async sendLoginCommand(): Promise<void> {
         const loginMessage: KseniaMessage = {
             SENDER: this.deps.sender,
@@ -59,8 +65,9 @@ interface CommandServiceDeps {
         this.deps.log.info('Executing login...');
         const messageStr = JSON.stringify(loginMessage);
         this.deps.log.info(`Sending: ${maskSensitiveData(messageStr)}`);
-        await this.sendRawMessage(messageStr);
+        await this.commandSender.sendRaw(messageStr);
     }
+
     public async requestSystemData(): Promise<void> {
         if (!this.deps.state.idLogin) {
             this.deps.log.error('ID_LOGIN not available');
@@ -85,6 +92,7 @@ interface CommandServiceDeps {
             ],
         });
     }
+
     public async switchLight(lightId: string, on: boolean): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemOutputId = stripDevicePrefix(lightId);
@@ -101,6 +109,7 @@ interface CommandServiceDeps {
             logMutationOutcome(this.deps.log, 'Light', systemOutputId, on ? 'ON' : 'OFF', outcome);
         });
     }
+
     public async dimLight(lightId: string, brightness: number): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const safeBrightness = clampValue(Math.round(brightness), 0, 100);
@@ -121,6 +130,7 @@ interface CommandServiceDeps {
             logMutationOutcome(this.deps.log, 'Dimmer', systemOutputId, `${safeBrightness}%`, outcome);
         });
     }
+
     public async moveCover(coverId: string, position: number): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemOutputId = stripDevicePrefix(coverId);
@@ -144,6 +154,7 @@ interface CommandServiceDeps {
             logMutationOutcome(this.deps.log, 'Cover', systemOutputId, command, outcome);
         });
     }
+
     public async toggleGate(gateId: string): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemOutputId = stripDevicePrefix(gateId);
@@ -159,12 +170,15 @@ interface CommandServiceDeps {
             logMutationOutcome(this.deps.log, 'Gate', systemOutputId, 'ON (momentary)', outcome);
         });
     }
+
     public async setThermostatMode(thermostatId: string, mode: ThermostatMode): Promise<void> {
         await this.thermostatCommands.setThermostatMode(thermostatId, mode);
     }
+
     public async setThermostatTemperature(thermostatId: string, temperature: number): Promise<void> {
         await this.thermostatCommands.setThermostatTemperature(thermostatId, temperature);
     }
+
     public async triggerScenario(scenarioId: string): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
         const systemScenarioId = stripDevicePrefix(scenarioId);
@@ -180,6 +194,7 @@ interface CommandServiceDeps {
             logMutationOutcome(this.deps.log, 'Scenario', systemScenarioId, 'trigger', outcome);
         });
     }
+
     /** Defense in depth: never run an arming scenario with the stored PIN, even if an accessory exists. */
     private assertScenarioAllowed(systemScenarioId: string): void {
         const category = this.deps.state.scenarioCategoryById?.get(systemScenarioId);
@@ -190,86 +205,13 @@ interface CommandServiceDeps {
             throw new Error(`Scenario ${systemScenarioId} refused: category ${category} arms or disarms the alarm`);
         }
     }
+
     private async sendKseniaCommand(
         cmd: string,
         payloadType: string,
         payload: KseniaCommandPayload,
         options: SendCommandOptions = {},
     ): Promise<CommandAcknowledgement | StateConfirmation | undefined> {
-        if (!this.deps.state.ws || this.deps.state.ws.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket not connected');
-        }
-        const processedPayload = this.buildPayload(payload);
-        const id = this.createCommandId();
-        const message: KseniaMessage = {
-            SENDER: this.deps.sender,
-            RECEIVER: '', CMD: cmd, ID: id, PAYLOAD_TYPE: payloadType,
-            PAYLOAD: processedPayload as KseniaMessagePayload, TIMESTAMP: Math.floor(Date.now() / 1000).toString(), CRC_16: '0x0000',
-        };
-        message.CRC_16 = calculateCRC16(JSON.stringify(message));
-        const jsonMessage = JSON.stringify(message);
-        const isPing = cmd === 'PING' || payloadType === 'HEARTBEAT';
-        if (!isPing && this.deps.logLevel >= LogLevel.DEBUG) {
-            this.deps.log.debug(`Sending: ${maskSensitiveData(jsonMessage)}`);
-        }
-        let pendingResponsePromise: Promise<CommandAcknowledgement> | undefined;
-        let stateConfirmation: OutputConfirmationHandle | undefined;
-        // Both registrations sit inside the try so the finally always clears
-        // them, and each promise gets a no-op handler at creation: it can be
-        // rejected (timeout, disconnect) before or without being awaited, and
-        // Homebridge turns an unhandled rejection into a bridge restart.
-        try {
-            if (options.awaitResponse) {
-                pendingResponsePromise = this.deps.commandDispatcher.registerPendingCommand(
-                    id,
-                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                    options.responseCmds,
-                    options.requirePositiveResult,
-                    options.allowGenericErrorFallback,
-                    options.responsePayloadTypes,
-                );
-                pendingResponsePromise.catch((): void => undefined);
-            } else {
-                this.deps.commandDispatcher.noteFireAndForget(id);
-            }
-            if (options.stateConfirmation) {
-                if (!this.deps.outputConfirmation) {
-                    throw new Error('Output confirmation tracker not initialized');
-                }
-                stateConfirmation = this.deps.outputConfirmation.register(
-                    options.stateConfirmation.outputId,
-                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                    options.stateConfirmation.matches,
-                );
-                stateConfirmation.promise.catch((): void => undefined);
-            }
-            await this.sendRawMessage(jsonMessage);
-            if (pendingResponsePromise && stateConfirmation) {
-                return await Promise.race([pendingResponsePromise, stateConfirmation.promise]);
-            }
-            if (pendingResponsePromise) return await pendingResponsePromise;
-            if (stateConfirmation) return await stateConfirmation.promise;
-            return undefined;
-        } finally {
-            this.deps.commandDispatcher.clearPendingCommand(id);
-            stateConfirmation?.cancel();
-        }
+        return this.commandSender.send(cmd, payloadType, payload, options);
     }
-    private createCommandId(): string {
-        // 16-bit IDs: the panel echoes the ID modulo 65536 (86152 comes back as
-        // 20616), so a larger ID could never be correlated exactly.
-        for (let attempt = 0; attempt < 1000; attempt += 1) {
-            const candidate = (1 + Math.floor(Math.random() * 65535)).toString();
-            if (!this.deps.commandDispatcher.isKnownCommandId(candidate)) return candidate;
-        }
-        throw new Error('Unable to allocate a unique command ID');
-    }
-    private buildPayload(payload: KseniaCommandPayload): KseniaCommandPayload {
-        return {
-            ...payload,
-            ...(payload?.ID_LOGIN === 'true' && { ID_LOGIN: this.deps.state.idLogin }),
-            ...(payload?.PIN === 'true' && { PIN: this.deps.pin }),
-        };
-    }
-    private async sendRawMessage(rawMessage: string): Promise<void> { this.deps.emitRawMessage('out', rawMessage); await this.deps.wsTransport.send(this.deps.state.ws, rawMessage); }
 }
