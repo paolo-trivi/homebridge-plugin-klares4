@@ -219,9 +219,11 @@ async function captureToFile(t, { devices = [], frames = [], sync = false, manag
     manager.startCapture(client, 600_000);
     for (const [direction, text] of frames) client.emit(direction, text);
     if (sync) manager.shutdown(); else manager.stopCapture(client);
-    await waitFor(() => generatedFiles(dir).length === 1);
+    // The file is renamed into place first and the report is logged once it is on disk:
+    // wait for that report, the condition the callers check, not for an earlier effect.
+    await waitFor(() => log.lines.some((line) => /^\[warn\] \[PRIVACY\][^\n]*0600/.test(line)));
+    assert.equal(generatedFiles(dir).length, 1);
     const file = path.join(dir, generatedFiles(dir)[0]);
-    await waitFor(() => { try { JSON.parse(fs.readFileSync(file, 'utf8')); return true; } catch { return false; } });
     return { dir, file, log, text: fs.readFileSync(file, 'utf8'), data: JSON.parse(fs.readFileSync(file, 'utf8')) };
 }
 
