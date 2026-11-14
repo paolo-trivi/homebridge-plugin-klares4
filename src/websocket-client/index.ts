@@ -58,17 +58,21 @@ export class KseniaWebSocketClient {
         private readonly log: Logger,
         private readonly options: KseniaWebSocketOptions = {},
     ) {
+        // `??` per key, not a spread of the defaults under `options`: an explicit
+        // `undefined` must fall back to the default, not erase it (an undefined
+        // reconnect interval is a timer that fires at once, forever).
         this.options = {
-            debug: false,
-            logLevel: LogLevel.NORMAL,
-            reconnectInterval: 5000,
-            heartbeatInterval: 30000,
-            commandTimeoutMs: 8000,
-            allowInsecureTls: false,
-            loginTimeoutMs: 10000,
-            connectTimeoutMs: 10000,
-            exposePartialArmScenarios: false,
             ...options,
+            debug: options.debug ?? false,
+            logLevel: options.logLevel ?? LogLevel.NORMAL,
+            reconnectInterval: options.reconnectInterval ?? 5000,
+            heartbeatInterval: options.heartbeatInterval ?? 30000,
+            commandTimeoutMs: options.commandTimeoutMs ?? 8000,
+            // Security switches are opt-in with a real `true` only, whoever builds the client.
+            allowInsecureTls: options.allowInsecureTls === true,
+            loginTimeoutMs: options.loginTimeoutMs ?? 10000,
+            connectTimeoutMs: options.connectTimeoutMs ?? 10000,
+            exposePartialArmScenarios: options.exposePartialArmScenarios === true,
         };
         this.state = createInitialWebSocketClientState(this.options.domusThermostat, this.options.ksaCache);
         this.logLevel = getEffectiveLogLevel(this.options.logLevel, this.options.debug);
