@@ -24,12 +24,6 @@ export interface KseniaCover extends KseniaDeviceBase {
     status: CoverStatus;
 }
 
-/**
- * What the output does inside its thermostat program: it is the program's
- * `HEATING_OUT`, its `COOLING_OUT`, or both.
- */
-export type ThermostatOutputRole = 'heating' | 'cooling' | 'heating-cooling';
-
 export interface KseniaThermostat extends KseniaDeviceBase {
     type: 'thermostat';
     status: ThermostatStatus;
@@ -37,11 +31,6 @@ export interface KseniaThermostat extends KseniaDeviceBase {
     targetTemperature: number;
     mode: 'off' | 'heat' | 'cool' | 'auto';
     humidity?: number;
-    /**
-     * Role of this output, set from the program data (`PRG_THERMOSTATS` or the
-     * `.ksa` cache, see `deriveThermostatOutputRole`). Absent when unknown.
-     */
-    outputRole?: ThermostatOutputRole;
 }
 
 export interface KseniaSensor extends KseniaDeviceBase {

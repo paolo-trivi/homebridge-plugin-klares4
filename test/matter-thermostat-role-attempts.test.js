@@ -32,13 +32,13 @@ const FALLBACK_FILE = 'klares4-matter-fallback.json';
 
 function thermostat(n, { mode = 'heat', target = 21, role, season, active, name } = {}) {
     const status = { currentTemperature: 20.5, targetTemperature: target, mode };
-    if (season) status.season = season;
+    if (season) status.season = season === 'summer' ? 'SUM' : 'WIN';
     if (active !== undefined) status.hvacOutputActive = active;
     const device = {
         id: `thermostat_${n}`, type: 'thermostat', name: name ?? `Termostato prova ${n}`, description: '',
         currentTemperature: 20.5, targetTemperature: target, mode, status,
     };
-    if (role) device.outputRole = role;
+    if (role) status.outputRole = role;
     markStatusObserved(device);
     return device;
 }
@@ -61,7 +61,7 @@ test('deriveThermostatOutputRole: the program decides; the panel name only witho
     assert.equal(deriveThermostatOutputRole('5', { HEATING_OUT: '6' }), undefined);
 });
 
-test('invariant 3: with outputRole set, a Matter or custom name does not change the endpoint', () => {
+test('invariant 3: with status.outputRole set, a Matter or custom name does not change the endpoint', () => {
     const plain = thermostat(1, { role: 'heating' });
     const renamed = { ...plain, name: 'Cooling prova' };
     assert.equal(thermostatRole(renamed), 'heating');
@@ -142,21 +142,44 @@ test('TH-01: the second attempt is the 2.2.0 payload, its updates keep that shap
     assert.equal(nextThermostatAttempt({ UUID: 'light_1', context: { device: { id: 'light_1', type: 'light' } }, clusters: {} }), undefined);
 });
 
-test('TH-01: on a runtime that only accepts the preset payload, the attempt chain ends native', async (t) => {
-    // The hook F1 adds to the recovery path, driven by hand: register, observe, next attempt.
-    const hb = makeHbMatterApi({ failRegistration: (a) => a.clusters?.thermostat && !a.clusters.thermostat.presetTypes });
+test('TH-01: on a runtime that only accepts the preset payload, the registry ends on a native Thermostat', async (t) => {
+    const refusesConformant = (a) => a.clusters?.thermostat !== undefined && !a.clusters.thermostat.presetTypes;
+    const hb = makeHbMatterApi({ failRegistration: refusesConformant });
     const device = thermostat(42, { role: 'heating' });
     t.after(() => resetThermostatAttempts(device.id));
-    let accessory = deviceToMatterAccessory(device, { api: hb.api, log: recordingLog().log, getWsClient: () => undefined });
+    const { registry, lines, storagePath } = await registryWith(t, device, { hb });
+    await waitFor(() => hb.endpoints.get('thermostat_42')?.clusters?.thermostat !== undefined, 5000);
+    await waitFor(() => registry.getStatus('thermostat_42') === 'registered', 5000);
+    const endpoint = hb.endpoints.get('thermostat_42');
+    assert.equal(endpoint.deviceType.name, 'Thermostat');
+    assert.ok(endpoint.clusters.thermostat.presetTypes, 'the second (2.2.0) payload is the one live');
+    assert.ok(lines.some((l) => /trying the payload of earlier versions/.test(l)));
+    assert.equal(lines.some((l) => /falling back to TemperatureSensor before/.test(l)), false);
+    assert.equal(fs.existsSync(path.join(storagePath, FALLBACK_FILE)), false, 'no fallback persisted');
+    // State updates keep the attribute set of the live payload.
+    const next = { ...device, status: { ...device.status, targetTemperature: 22 } };
+    markStatusObserved(next);
+    await registry.updateAccessoryState(next);
+    await waitFor(() => hb.updates.some((u) => u.uuid === 'thermostat_42' && u.attributes.occupiedHeatingSetpoint === 2200));
+    const pushed = hb.updates.filter((u) => u.uuid === 'thermostat_42' && u.cluster === 'thermostat').at(-1);
+    assert.ok('unoccupiedHeatingSetpoint' in pushed.attributes);
+    assert.equal(hb.rejectedUpdates.length, 0);
+});
+
+test('TH-01: when neither payload is accepted, the TemperatureSensor fallback comes back and the attempts restart from the first', async (t) => {
+    const hb = makeHbMatterApi({ failRegistration: (a) => a.clusters?.thermostat !== undefined });
     const attempts = [];
-    while (accessory) {
-        await hb.api.matter.registerPlatformAccessories('homebridge-plugin-klares4', 'Lares4Complete', [accessory]);
-        const live = await hb.api.matter.getAccessoryState(device.id, 'thermostat');
-        attempts.push(live !== undefined);
-        if (live !== undefined) break;
-        accessory = nextThermostatAttempt(accessory);
-    }
-    assert.deepEqual(attempts, [false, true]);
+    const register = hb.api.matter.registerPlatformAccessories;
+    hb.api.matter.registerPlatformAccessories = async (plugin, platform, list) => {
+        for (const a of list) attempts.push(a.clusters.thermostat ? (a.clusters.thermostat.presetTypes ? 'legacy' : 'conformant') : 'sensor');
+        return register(plugin, platform, list);
+    };
+    const device = thermostat(46, { role: 'heating' });
+    const { registry } = await registryWith(t, device, { hb });
+    await waitFor(() => hb.endpoints.get('thermostat_46')?.deviceType.name === 'TemperatureSensor', 5000);
+    await waitFor(() => registry.getStatus('thermostat_46') === 'registered', 5000);
+    assert.deepEqual(attempts, ['conformant', 'legacy', 'sensor']);
+    assert.equal('presetTypes' in buildThermostatMatterState(device).schemaInvariants, false, 'shape reset after the fallback');
 });
 
 test('TH-08: an acknowledged value stands until the realtime reports it, or its TTL ends', () => {

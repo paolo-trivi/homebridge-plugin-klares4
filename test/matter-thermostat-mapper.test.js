@@ -154,7 +154,7 @@ test('buildThermostatMatterState: NaN / null current temp falls back to default'
         status: {},
     };
     const { base } = buildThermostatMatterState(device);
-    assert.equal(typeof base.localTemperature, 'number');
+    assert.equal(base.localTemperature, null, 'LocalTemperature is nullable: an unknown reading is not a number');
     assert.equal(base.occupiedHeatingSetpoint, DEFAULT_HEATING_SETPOINT_C * 100);
 });
 

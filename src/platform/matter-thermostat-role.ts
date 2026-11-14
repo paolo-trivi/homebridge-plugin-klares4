@@ -57,12 +57,12 @@ export function deriveThermostatOutputRole(
 }
 
 /**
- * The role the Matter endpoint uses. `outputRole` is authoritative; without it
+ * The role the Matter endpoint uses. `status.outputRole` is authoritative; without it
  * the 2.2.0 name heuristic applies (on the name the mapper receives) until the
  * discovery layer fills the field in.
  */
 export function thermostatRole(device: KseniaThermostat): ThermostatOutputRole {
-    return device.outputRole ?? (nameSuggestsCooling(device.name) ? 'heating-cooling' : 'heating');
+    return device.status?.outputRole ?? (nameSuggestsCooling(device.name) ? 'heating-cooling' : 'heating');
 }
 
 const modeOf = (d: KseniaThermostat): KseniaThermostat['mode'] | undefined => d.status?.mode ?? d.mode;
@@ -70,7 +70,8 @@ const modeOf = (d: KseniaThermostat): KseniaThermostat['mode'] | undefined => d.
 /** Active season of the program: the realtime season, else what MAN implies (heat = winter, cool = summer). */
 export function activeSeason(device: KseniaThermostat): ThermostatSeason | undefined {
     const season = device.status?.season;
-    if (season === 'winter' || season === 'summer') return season;
+    if (season === 'WIN') return 'winter';
+    if (season === 'SUM') return 'summer';
     const mode = modeOf(device);
     if (mode === 'heat') return 'winter';
     if (mode === 'cool') return 'summer';

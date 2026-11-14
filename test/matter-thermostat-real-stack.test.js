@@ -18,7 +18,7 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
 
 const { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } = require('../dist/platform/matter-device-mapper.js');
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-const { markStatusObserved } = require('../dist/device-observation.js');
+const { markStatusObserved, markStatusPlaceholder } = require('../dist/device-observation.js');
 const { updateThermostatStatus } = require('../dist/thermostat-state.js');
 const { realMatterStackSession } = require('./fixtures/real-matter-stack.js');
 const { waitFor } = require('./fixtures/wait-for.js');
@@ -46,13 +46,13 @@ function panel() {
 
 function thermostat(n, { mode = 'heat', target = 21, current = 20.5, role, season, active } = {}) {
     const status = { currentTemperature: current, targetTemperature: target, mode };
-    if (season) status.season = season;
+    if (season) status.season = season === 'summer' ? 'SUM' : 'WIN';
     if (active !== undefined) status.hvacOutputActive = active;
     const device = {
         id: `thermostat_${n}`, type: 'thermostat', name: `Termostato prova ${n}`, description: '',
         currentTemperature: current, targetTemperature: target, mode, status,
     };
-    if (role) device.outputRole = role;
+    if (role) status.outputRole = role;
     markStatusObserved(device);
     return device;
 }
@@ -90,6 +90,20 @@ test('TH-01: the registry registers a thermostat as a native Thermostat and pers
     assert.equal(lines.some((l) => /falling back|TemperatureSensor/.test(l)), false, lines.join('\n'));
 });
 
+test('a temperature never read is unknown (null) on the native Thermostat, not 0 °C; the first reading fills it', { timeout: 30000 }, async (t) => {
+    const { stack, registry } = await bootWithRegistry(t);
+    const device = thermostat(13, { role: 'heating' });
+    markStatusPlaceholder(device);
+    await registry.addOrUpdateAccessory(device);
+    await waitFor(() => registry.getStatus(device.id) === 'registered', 10000);
+    assert.equal(stack.deviceTypeName(device.id), 'Thermostat', 'the strict probe accepts a heating-only Thermostat');
+    assert.equal(thermo(stack, device.id).localTemperature, null);
+
+    const read = thermostat(13, { role: 'heating', current: 19.5 });
+    await registry.updateAccessoryState(read);
+    await waitFor(() => thermo(stack, device.id).localTemperature === 1950);
+});
+
 test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupancy or Presets', { timeout: 30000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const deps = { api: stack.api, log: recordingLog().log, getWsClient: () => panel() };
@@ -101,8 +115,8 @@ test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupanc
     for (const [device, features, sequence] of cases) {
         await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [deviceToMatterAccessory(device, deps)]);
         const state = thermo(stack, device.id);
-        assert.equal(stack.deviceTypeName(device.id), 'Thermostat', device.outputRole);
-        for (const [feature, on] of Object.entries(features)) assert.equal(state.featureMap[feature], on, `${device.outputRole}.${feature}`);
+        assert.equal(stack.deviceTypeName(device.id), 'Thermostat', device.status.outputRole);
+        for (const [feature, on] of Object.entries(features)) assert.equal(state.featureMap[feature], on, `${device.status.outputRole}.${feature}`);
         assert.equal(state.featureMap.occupancy, false);
         assert.equal(state.featureMap.presets, false);
         assert.equal(state.controlSequenceOfOperation, sequence);

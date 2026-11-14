@@ -86,7 +86,7 @@ test('state known from the Homebridge cache still seeds the endpoint', async (t)
 
 test('a thermostat that falls back during recovery does not publish its placeholder temperature', async (t) => {
     process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
-    const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_6'] });
+    const hb = makeHbMatterApi({ unqueryableTimes: { thermostat_6: 2 } }); // both Thermostat payloads (TH-01)
     const reg = registry(t, hb);
     const device = {
         id: 'thermostat_6', type: 'thermostat', name: 'Riscaldamento Solaio', description: '',

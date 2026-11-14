@@ -10,6 +10,7 @@
  */
 
 import type { KseniaThermostat, ThermostatOutputRole } from '../types';
+import { hasObservedState } from '../device-observation';
 import { isRoleInSeason, thermostatRole, thermostatRunningState } from './matter-thermostat-role';
 import { getThermostatPresetWorkaroundAttributes, thermostatShapeOf } from './matter-thermostat-shape';
 
@@ -229,15 +230,20 @@ export function buildThermostatMatterState(device: KseniaThermostat): Thermostat
     const role = thermostatRole(device);
     const legacy = thermostatShapeOf(device.id) === 'legacy';
     const coolActive = isCoolingSetpointActiveForRole(role, modeOf(device));
-    const localTempC = coerceToFiniteNumber(device.status?.currentTemperature ?? device.currentTemperature)
-        ?? DEFAULT_LOCAL_TEMPERATURE_C;
+    // LocalTemperature is nullable ("X", thermostat-cluster.element.js:31): a
+    // reading the panel never gave is unknown, not 0 °C or a default.
+    const localTempC = hasObservedState(device)
+        ? coerceToFiniteNumber(device.status?.currentTemperature ?? device.currentTemperature)
+        : undefined;
     const targetC = coerceToFiniteNumber(device.status?.targetTemperature ?? device.targetTemperature)
         ?? (coolActive ? DEFAULT_COOLING_SETPOINT_C : DEFAULT_HEATING_SETPOINT_C);
     const heats = legacy || role !== 'cooling';
     const cools = legacy || role !== 'heating';
 
     const base: Record<string, unknown> = {
-        localTemperature: clampMatterTemperature(toMatterTemperatureCelsius(localTempC), TEMP_ABS_MIN_CENTI, TEMP_ABS_MAX_CENTI),
+        localTemperature: localTempC === undefined
+            ? null
+            : clampMatterTemperature(toMatterTemperatureCelsius(localTempC), TEMP_ABS_MIN_CENTI, TEMP_ABS_MAX_CENTI),
     };
     const schemaInvariants: Record<string, unknown> = {};
     if (heats && cools) {

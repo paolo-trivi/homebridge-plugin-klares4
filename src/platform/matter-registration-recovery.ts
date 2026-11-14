@@ -5,6 +5,8 @@ import { hasObservedState } from '../device-observation';
 import { mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
 import { registrationProbeCluster, type MatterTopologyCoordinator } from './matter-topology-coordinator';
+import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { registerNextThermostatAttempt, resetThermostatAttempts } from './matter-thermostat-attempts';
 
 const MATTER_REGISTER_RECOVERY_LIMIT = 2;
 
@@ -58,6 +60,8 @@ interface RecoveryDeps {
     resolveDisplayName?: (device: KseniaDevice) => string;
     /** Wait before a transient refusal may be retried (`MatterTimings.registerRetryMs`). */
     registerRetryMs: number;
+    /** Records the payload of a second Thermostat attempt as pushed (echo guard). */
+    thermostatEchoTracker?: MatterThermostatEchoTracker;
 }
 
 /** True when the registration currently maps to the TemperatureSensor fallback shape. */
@@ -102,6 +106,8 @@ export async function handleMissingRegisteredAccessory(
         && deps.thermostatFallbackEnabled;
 
     if (shouldFallbackThermostat) {
+        // A runtime that refused the conformant payload may take the 2.2.0 one (TH-01).
+        if (await registerNextThermostatAttempt(reg, deps)) return;
         deps.log.warn(
             `[Matter] ${reg.displayName} was not queryable after registration; `
             + 'falling back to TemperatureSensor before sending state updates.',
@@ -153,6 +159,7 @@ export async function handleRegisterFailure(
     const transient = isTransientRegisterError(msg);
     // A transient refusal says nothing about the Thermostat shape: no fallback.
     if (device.type === 'thermostat' && deps.thermostatFallbackEnabled && !transient) {
+        if (await registerNextThermostatAttempt(reg, deps)) return;
         deps.log.warn(
             `Matter Thermostat registration failed for ${device.name}; falling back to TemperatureSensor. Error: ${msg}`,
         );
@@ -182,6 +189,7 @@ export async function registerFallbackAccessory(
     reg: MatterRegistration,
     deps: Pick<RecoveryDeps, 'api' | 'log' | 'getWsClient' | 'thermostatFallbackUUIDs' | 'scheduleComplete' | 'momentaryAutoOffMs' | 'onFallbackPersist' | 'resolveDisplayName' | 'topologyCoordinator'>,
 ): Promise<void> {
+    resetThermostatAttempts(device.id);
     const fallback = mapThermostatAsTemperatureSensor(device, {
         api: deps.api,
         log: deps.log,

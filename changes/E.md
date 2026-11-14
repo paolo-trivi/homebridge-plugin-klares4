@@ -10,10 +10,10 @@ None added, renamed or removed. `matterRecoveryRequests` keeps working as before
 
 | Type | Field | Meaning | Who fills it |
 |---|---|---|---|
-| `KseniaThermostat` (`src/types/device.types.ts`) | `outputRole?: 'heating' \| 'cooling' \| 'heating-cooling'` | role of the output in its thermostat program (`HEATING_OUT` / `COOLING_OUT`) | discovery layer (task D or integration), with `deriveThermostatOutputRole(outputId, program, panelName)` from `src/platform/matter-thermostat-role.ts` |
-| `ThermostatStatus` (`src/types/device-status.types.ts`) | `season?: 'winter' \| 'summer'` | active season from the realtime `ACT_SEA` (`WIN` / `SUM`) | thermostat status updater (task D) |
+| `ThermostatStatus` (`src/types/device-status.types.ts`) | `outputRole?: ThermostatOutputRole` (`'heating' \| 'cooling' \| 'heating-cooling'`, type exported from the same file) | role of the output in its thermostat program (`HEATING_OUT` / `COOLING_OUT`) | discovery layer (task D), e.g. with `deriveThermostatOutputRole(outputId, program, panelName)` from `src/platform/matter-thermostat-role.ts` |
+| `ThermostatStatus` | `season?: 'WIN' \| 'SUM'` | active season (`ACT_SEA`) | thermostat status updater (task D) |
 
-Both are read if present. Without `outputRole` the Matter endpoint falls back to the 2.2.0 name heuristic (see "Integration" below); without `season` the season is inferred from `MAN` + season (`heat` = winter, `cool` = summer) and is unknown in `AUTO`/`OFF`.
+The Matter code reads both only through these optional status fields. Task D adds the same two fields to `ThermostatStatus` (plus `observedAt`, `acknowledged`): when D is merged the two hunks meet in that interface; keep one declaration of each. D's `outputRole` is `'heating' | 'cooling'`; `'heating-cooling'` (the same output named as both `HEATING_OUT` and `COOLING_OUT`) is accepted by the Matter code and should be kept in the union. Without `outputRole` the Matter endpoint falls back to the 2.2.0 name heuristic; without `season` the season is inferred from `MAN` (`heat` = winter, `cool` = summer) and is unknown in `AUTO`/`OFF`.
 
 ## Changelog entries (2.3.0)
 
@@ -24,6 +24,7 @@ Both are read if present. Without `outputRole` the Matter endpoint falls back to
 - A Matter command sent shortly after another one is no longer dropped as "already current" because the panel had not reported the first one yet (for example 26 °C and then back to 23 °C, or Off and then Heat, within two seconds). Two quick +1 °C steps now add up to +2 °C. (TH-08, F33)
 - Matter thermostats no longer declare the Occupancy feature: the "unoccupied" setpoints, which the plugin never used, are gone. (TH-09)
 - Matter thermostats publish whether the heating or cooling output is running (`thermostatRunningState`). (TH-10)
+- A Matter thermostat whose room temperature has not been read yet shows it as unknown instead of a made-up 20 °C (or 0 °C). (F2 note on the thermostat path)
 - Auto (and Cool) on a heating-only Matter thermostat is refused to the controller instead of being accepted and silently ignored. A cooling-only output refuses Heat and Auto the same way. (TH-15)
 - A Matter thermostat command that cannot reach the panel (no connection) is reported as failed and the previous value comes back, instead of looking accepted. (TH-17, MAT-15)
 - The Matter fallback store no longer rewrites a file it does not understand (a version written as text, an unknown layout): it is left untouched and the state is kept in memory. An unreadable file is copied to `klares4-matter-fallback.json.unreadable.bak` before the store starts again. A recovery in progress is no longer reported as "interrupted" by the plugin itself while it is still running. (TH-14)
@@ -37,39 +38,17 @@ Both are read if present. Without `outputRole` the Matter endpoint falls back to
 - The store file gains an optional field `nativeShapeRevision` (the Thermostat payload revision of the last native attempt). 2.2.0 reads the file unchanged (the field is kept as is).
 - Without the program data (no `PRG_THERMOSTATS` and no `.ksa`), the plugin still decides heating-only vs heating-and-cooling from the name, as 2.2.0 did, until the discovery layer fills `outputRole` (see below).
 
-## Integration (requests to other tasks)
+## Integration
 
-### F1 — second registration attempt (`src/platform/matter-registration-recovery.ts`)
-The first attempt (conformant payload) needs no hook. The second attempt, for a runtime that refuses it, needs this in the recovery path, **before** the TemperatureSensor fallback, in both `handleMissingRegisteredAccessory` (probe negative) and `handleRegisterFailure` (register threw, not transient):
-
-```ts
-import { nextThermostatAttempt, resetThermostatAttempts } from './matter-thermostat-attempts';
-
-// handleMissingRegisteredAccessory, before `if (shouldFallbackThermostat)`:
-// handleRegisterFailure, before the fallback branch, when !transient:
-const next = reg.deviceType === 'thermostat' && !isFallbackTemperatureSensor(reg)
-    ? nextThermostatAttempt(reg.matterAccessory) : undefined;
-if (next) {
-    deps.log.warn(`[Matter] ${reg.displayName}: Homebridge did not create the Thermostat; trying the 2.2.0 payload before falling back`);
-    await removeBeforeReregister(reg, deps);
-    // the registry's echo tracker should also record next.clusters.thermostat as pushed (as performRegistration does)
-    await deps.topologyCoordinator.register(next);
-    reg.matterAccessory = next;
-    reg.registeredDisplayName = next.displayName;
-    reg.status = 'pending';
-    deps.scheduleComplete(reg.uuid);
-    return;
-}
-// and in registerFallbackAccessory: resetThermostatAttempts(device.id);
-```
-`nextThermostatAttempt(accessory: MatterAccessory): MatterAccessory | undefined` returns the same accessory (UUID, metadata, handlers) with the Thermostat cluster rebuilt with the 2.2.0 payload, and from then on every cluster built for that UUID (re-map, state updates) has the same attribute set; it returns `undefined` when there is no further attempt. Tested by hand-driving the chain on the fixture (`test/matter-thermostat-role-attempts.test.js`, "the attempt chain ends native").
-
-The automatic recovery of old fallbacks needs no hook: it lives in `resolvePersistedThermostatFallback` (`matter-thermostat-recovery-request.ts`, same signature) and the store.
+### Done in this task, in F1's files (after F1 was merged)
+- `matter-registration-recovery.ts`: in `handleMissingRegisteredAccessory` (thermostat branch, before the TemperatureSensor fallback) and in `handleRegisterFailure` (thermostat, not transient) one line `if (await registerNextThermostatAttempt(reg, deps)) return;`; in `registerFallbackAccessory` `resetThermostatAttempts(device.id)`; `RecoveryDeps` gains the optional `thermostatEchoTracker`.
+- `matter-registration-flow.ts`: `recoveryDeps()` passes `thermostatEchoTracker`.
+- The attempt itself is `registerNextThermostatAttempt` in `matter-thermostat-attempts.ts`: rebuilds the cluster with the 2.2.0 payload, unregisters the refused endpoint, records the new payload as pushed (echo guard), registers and lets the probe decide. F1's strict probe checks the declared clusters (`thermostat`), so a heating-only Thermostat is queryable (tested on the real stack).
+- Existing tests that modelled "Thermostat refused once → TemperatureSensor" now refuse both payloads (`matter-accessory-registry`, `matter-placeholder-initial-state`, `matter-registration-race`): the fallback is reached after the second attempt.
 
 ### D (or integration) — fill `outputRole` and `status.season`
-- `outputRole`: where thermostat devices are created or refreshed after `PRG_THERMOSTATS` / the `.ksa` cache (`thermostat-read-handler.ts` `cacheProgramThermostats`, and the `.ksa` path that fills `thermostatProgramById` in `websocket-client/state.ts`):
-  `device.outputRole = deriveThermostatOutputRole(outputId, state.thermostatProgramById.get(state.thermostatProgramIdByOutputId.get(outputId) ?? ''), panelName)` on the client's own device (panel name, before `customNames`). The Matter copy carries it.
-- `status.season`: in `thermostat-status-updater.ts` from `THERM.ACT_SEA` (`parseSeason` already exists): `WIN` → `'winter'`, `SUM` → `'summer'`, and `updateThermostatStatus` should accept it in its partial. Needed for the right Off/Heat on a heating output in `AUTO`, and for the running state of an output that does both.
+- `status.outputRole` from `PRG_THERMOSTATS` / the `.ksa` cache (D already does this in its branch). Only the panel's own name may be used as fallback, never a custom/Matter name.
+- `status.season` from `ACT_SEA` (D already does this). Needed for the right Off/Heat on a heating output in `AUTO`, and for the running state of an output that does both.
 
 ### F2 — none required
 `matter-device-mapper.ts` keeps calling `buildThermostatMatterState(device)`, `thermostatSupportsCooling(device)` and `buildThermostatHandlers({...})` with unchanged signatures. `supportsCooling` in the handler deps is now ignored (the handlers read the role from the latest snapshot); it can be dropped later. `domainModeToMatterMode` there duplicates `domainModeToMatterSystemMode`.
@@ -82,4 +61,4 @@ The automatic recovery of old fallbacks needs no hook: it lives in `resolvePersi
 ## To verify in the field (rc)
 - A thermostat on the production bridge registers as Thermostat after the automatic recovery, and Apple Home / Alexa show heating only for heating outputs.
 - Apple Home and Alexa behaviour on a heating output while the program is in summer (endpoint Off; a refused Heat comes back to Off).
-- On a Homebridge 2.4.x bridge (CI matrix): whether the conformant payload is accepted, or the second attempt is needed (only with the F1 hook).
+- On a Homebridge 2.4.x bridge (CI matrix): whether the conformant payload is accepted, or the second attempt (log line `trying the payload of earlier versions`) is needed. If the second attempt is what works, every restart tries the conformant payload first again (the choice is per process).

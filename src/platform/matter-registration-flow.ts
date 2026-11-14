@@ -247,6 +247,7 @@ export class MatterRegistrationFlow {
             onFallbackPersist: (uuid) => ctx.fallbackStore.add(uuid),
             resolveDisplayName: (device: KseniaDevice) => ctx.nameService.resolveName(device),
             registerRetryMs: ctx.timings.registerRetryMs,
+            thermostatEchoTracker: ctx.thermostatEchoTracker,
         };
     }
 }
