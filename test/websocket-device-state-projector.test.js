@@ -90,14 +90,15 @@ test('parseOutputDevice creates thermostat with aligned fields', () => {
   assert.equal(thermostat.status.mode, thermostat.mode);
 });
 
-test('numeric parsing and cover mapping clamp values safely', () => {
-  assert.equal(parseIntegerInRange('101', 0, 100), 100);
-  assert.equal(parseIntegerInRange('-10', 0, 100), 0);
+// WS-13: out-of-range readings are discarded (undefined), never clamped.
+test('numeric parsing discards out-of-range values and cover mapping stays safe', () => {
+  assert.equal(parseIntegerInRange('101', 0, 100), undefined);
+  assert.equal(parseIntegerInRange('-10', 0, 100), undefined);
   assert.equal(parseIntegerInRange('abc', 0, 100), undefined);
 
   assert.equal(parseFloatInRange('+21.4', 5, 40), 21.4);
   assert.equal(parseFloatInRange('21,5', 5, 40), 21.5);
-  assert.equal(parseFloatInRange('99', 5, 40), 40);
+  assert.equal(parseFloatInRange('99', 5, 40), undefined);
 
   assert.equal(mapCoverPosition('UP', undefined), 100);
   assert.equal(mapCoverPosition('DOWN', undefined), 0);

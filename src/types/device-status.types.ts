@@ -29,6 +29,8 @@ export interface ZoneStatus {
     bypassed: boolean;
     fault: boolean;
     open: boolean;
+    /** From the zone's `T` field; absent until the panel reports it. */
+    tampered?: boolean;
 }
 
 export interface ScenarioStatus {

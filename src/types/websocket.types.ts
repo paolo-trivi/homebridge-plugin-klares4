@@ -93,6 +93,8 @@ export interface KseniaZoneStatusRaw {
     BYP?: string;
     A?: string;
     FM?: string;
+    /** Tamper: `N` when not tampered (the only value seen in real captures). */
+    T?: string;
 }
 
 export interface KseniaSystemStatus {
@@ -207,6 +209,12 @@ export interface KseniaWebSocketOptions {
     connectTimeoutMs?: number;
     /** Expose PARTIAL (partial-arm) scenarios; ARM/DISARM are never exposed. Default false. */
     exposePartialArmScenarios?: boolean;
+    /** Largest inbound frame in bytes (internal, default 4 MiB). */
+    maxPayloadBytes?: number;
+    /** Delay between logins once repeated failed logins slowed reconnection (internal, default 1 h). */
+    suspendedLoginRetryMs?: number;
+    /** Budget from an accepted login to the accepted realtime registration (internal, default 60 s). */
+    syncTimeoutMs?: number;
     domusThermostat?: DomusThermostatConfig;
     ksaCache?: KsaSanitizedCache;
 }

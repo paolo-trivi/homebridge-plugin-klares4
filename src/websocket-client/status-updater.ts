@@ -3,8 +3,8 @@ import type {
     KseniaOutputStatusRaw,
     KseniaSensorStatusRaw,
     KseniaZoneStatusRaw,
-    CoverStatus,
-    LightStatus,
+    KseniaCover,
+    KseniaLight,
     SensorStatus,
     ThermostatStatus,
     ZoneStatus,
@@ -20,7 +20,10 @@ import {
     mapCoverState,
     parseFloatInRange,
     parseIntegerInRange,
+    parseOnOff,
 } from '../websocket/device-state-projector';
+import { setBounded } from './bounded-map';
+import { ZoneFieldReader } from './zone-status-reader';
 import { forEachIsolated } from '../isolation';
 import type { WebSocketClientState } from './types';
 
@@ -34,54 +37,30 @@ interface StatusUpdaterDeps {
 }
 
 export class StatusUpdater {
-    constructor(private readonly deps: StatusUpdaterDeps) {}
+    private readonly zoneFields: ZoneFieldReader;
+
+    constructor(private readonly deps: StatusUpdaterDeps) {
+        this.zoneFields = new ZoneFieldReader(deps.log);
+    }
 
     public updateOutputStatuses(outputs: KseniaOutputStatusRaw[]): void {
         forEachIsolated(this.deps.log, 'STATUS_OUTPUTS entry', outputs, (output: KseniaOutputStatusRaw): void => {
             this.deps.observeOutputStatus?.(output);
-            this.deps.log.debug(
-                `Output update ${output.ID}: STA=${output.STA}, POS=${output.POS}, TPOS=${output.TPOS}`,
-            );
+            if (this.deps.logLevel >= LogLevel.DEBUG) {
+                this.deps.log.debug(`Output update ${output.ID}: STA=${output.STA}, POS=${output.POS}, TPOS=${output.TPOS}`);
+            }
             let matchedDevice = false;
 
             const lightDevice = this.deps.state.devices.get(`light_${output.ID}`);
             if (lightDevice && lightDevice.type === 'light') {
                 matchedDevice = true;
-                const lightStatus = lightDevice.status as LightStatus;
-                const wasOn = lightStatus.on;
-                lightStatus.on = output.STA === 'ON';
-                if (output.POS !== undefined) {
-                    const brightness = parseIntegerInRange(output.POS, 0, 100);
-                    if (brightness !== undefined) {
-                        lightStatus.brightness = brightness;
-                        lightStatus.dimmable = true;
-                    }
-                }
-                if (wasOn !== (output.STA === 'ON')) {
-                    this.deps.log.info(
-                        `Light ${lightDevice.name} (Output ${output.ID}): ${output.STA === 'ON' ? 'ON' : 'OFF'}`,
-                    );
-                }
-                this.deps.emitDeviceStatusUpdate(lightDevice);
+                this.applyLightStatus(lightDevice, output);
             }
 
             const coverDevice = this.deps.state.devices.get(`cover_${output.ID}`);
             if (coverDevice && coverDevice.type === 'cover') {
                 matchedDevice = true;
-                const coverStatus = coverDevice.status as CoverStatus;
-                const oldPos = coverStatus.position;
-                const newPosition = mapCoverPosition(output.STA, output.POS);
-                coverStatus.position = newPosition;
-                coverStatus.targetPosition =
-                    parseIntegerInRange(output.TPOS ?? output.POS, 0, 100) ?? newPosition;
-                coverStatus.state = mapCoverState(output.STA, output.POS, output.TPOS);
-
-                if (oldPos !== newPosition) {
-                    this.deps.log.info(
-                        `Cover ${coverDevice.name} (Output ${output.ID}): ${output.STA} position ${newPosition}%`,
-                    );
-                }
-                this.deps.emitDeviceStatusUpdate(coverDevice);
+                this.applyCoverStatus(coverDevice, output);
             }
 
             const thermostatDevice = this.deps.state.devices.get(`thermostat_${output.ID}`);
@@ -119,7 +98,7 @@ export class StatusUpdater {
                     }
                 }
 
-                if (!hasFreshRealtime && output.MODE !== undefined) {
+                if (!hasFreshRealtime && typeof output.MODE === 'string') {
                     const oldMode = thermostatStatus.mode;
                     const newMode = kseniaModeToDomain(output.MODE);
                     updateThermostatStatus(thermostatDevice, {
@@ -139,7 +118,7 @@ export class StatusUpdater {
             }
 
             if (!matchedDevice) {
-                this.deps.state.pendingOutputStatuses.set(output.ID, output);
+                setBounded(this.deps.state.pendingOutputStatuses, output.ID, output);
             } else {
                 this.deps.state.pendingOutputStatuses.delete(output.ID);
             }
@@ -160,34 +139,19 @@ export class StatusUpdater {
                     );
                 }
 
-                const tempDevice = this.deps.state.devices.get(`sensor_temp_${sensorId}`);
-                if (tempDevice && tempDevice.type === 'sensor') {
+                // A reading that is absent or invalid leaves the device as it was:
+                // no emission, so a discovery placeholder never becomes "observed".
+                for (const [prefix, value] of [
+                    ['sensor_temp_', parsedTemp],
+                    ['sensor_hum_', parsedHum],
+                    ['sensor_light_', parsedLight],
+                ] as const) {
+                    const device = this.deps.state.devices.get(`${prefix}${sensorId}`);
+                    if (!device || device.type !== 'sensor') continue;
                     matchedDevice = true;
-                    const tempStatus = tempDevice.status as SensorStatus;
-                    if (parsedTemp !== undefined) {
-                        tempStatus.value = parsedTemp;
-                    }
-                    this.deps.emitDeviceStatusUpdate(tempDevice);
-                }
-
-                const humDevice = this.deps.state.devices.get(`sensor_hum_${sensorId}`);
-                if (humDevice && humDevice.type === 'sensor') {
-                    matchedDevice = true;
-                    const humStatus = humDevice.status as SensorStatus;
-                    if (parsedHum !== undefined) {
-                        humStatus.value = parsedHum;
-                    }
-                    this.deps.emitDeviceStatusUpdate(humDevice);
-                }
-
-                const lightSensorDevice = this.deps.state.devices.get(`sensor_light_${sensorId}`);
-                if (lightSensorDevice && lightSensorDevice.type === 'sensor') {
-                    matchedDevice = true;
-                    const lightStatus = lightSensorDevice.status as SensorStatus;
-                    if (parsedLight !== undefined) {
-                        lightStatus.value = parsedLight;
-                    }
-                    this.deps.emitDeviceStatusUpdate(lightSensorDevice);
+                    if (value === undefined) continue;
+                    (device.status as SensorStatus).value = value;
+                    this.deps.emitDeviceStatusUpdate(device);
                 }
 
                 if (parsedTemp !== undefined || parsedHum !== undefined) {
@@ -225,7 +189,7 @@ export class StatusUpdater {
                 }
 
                 if (!matchedDevice) {
-                    this.deps.state.pendingSensorStatuses.set(sensorId, { ...sensor, ID: sensorId });
+                    setBounded(this.deps.state.pendingSensorStatuses, sensorId, { ...sensor, ID: sensorId });
                 } else {
                     this.deps.state.pendingSensorStatuses.delete(sensorId);
                 }
@@ -237,18 +201,51 @@ export class StatusUpdater {
         forEachIsolated(this.deps.log, 'STATUS_ZONES entry', zones, (zone: KseniaZoneStatusRaw): void => {
             const zoneDevice = this.deps.state.devices.get(`zone_${zone.ID}`);
             if (zoneDevice && zoneDevice.type === 'zone') {
-                const zoneStatus = zoneDevice.status as ZoneStatus;
-                zoneStatus.open = zone.STA === 'A';
-                zoneStatus.bypassed = zone.BYP === 'YES';
-                zoneStatus.armed = zone.A === 'Y';
-                zoneStatus.fault = zone.FM === 'T';
-
-                this.deps.emitDeviceStatusUpdate(zoneDevice);
+                if (this.zoneFields.apply(zoneDevice.status as ZoneStatus, zone)) {
+                    this.deps.emitDeviceStatusUpdate(zoneDevice);
+                }
                 this.deps.state.pendingZoneStatuses.delete(zone.ID);
             } else {
-                this.deps.state.pendingZoneStatuses.set(zone.ID, zone);
+                setBounded(this.deps.state.pendingZoneStatuses, zone.ID, zone);
             }
         });
+    }
+
+    private applyLightStatus(lightDevice: KseniaLight, output: KseniaOutputStatusRaw): void {
+        const lightStatus = lightDevice.status;
+        const on = parseOnOff(output.STA);
+        const brightness = parseIntegerInRange(output.POS, 0, 100);
+        if (on === undefined && brightness === undefined) {
+            this.deps.log.debug(`Output ${output.ID}: no readable light state in this update, ignored`);
+            return;
+        }
+        if (on !== undefined) {
+            if (lightStatus.on !== on) {
+                this.deps.log.info(`Light ${lightDevice.name} (Output ${output.ID}): ${on ? 'ON' : 'OFF'}`);
+            }
+            lightStatus.on = on;
+        }
+        if (brightness !== undefined) {
+            lightStatus.brightness = brightness;
+            lightStatus.dimmable = true;
+        }
+        this.deps.emitDeviceStatusUpdate(lightDevice);
+    }
+
+    private applyCoverStatus(coverDevice: KseniaCover, output: KseniaOutputStatusRaw): void {
+        const coverStatus = coverDevice.status;
+        const newPosition = mapCoverPosition(output.STA, output.POS);
+        if (newPosition === undefined) {
+            this.deps.log.debug(`Output ${output.ID}: no readable cover position in this update, ignored`);
+            return;
+        }
+        if (coverStatus.position !== newPosition) {
+            this.deps.log.info(`Cover ${coverDevice.name} (Output ${output.ID}): ${output.STA} position ${newPosition}%`);
+        }
+        coverStatus.position = newPosition;
+        coverStatus.targetPosition = parseIntegerInRange(output.TPOS, 0, 100) ?? newPosition;
+        coverStatus.state = mapCoverState(output.STA, output.POS, output.TPOS);
+        this.deps.emitDeviceStatusUpdate(coverDevice);
     }
 
     public applyPendingOutputStatus(outputId: string): void {
