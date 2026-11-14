@@ -115,7 +115,8 @@ test('F05: the joined update is still delivered once the registration settles', 
 
 test('F14: fallback after a non-queryable registration unregisters the endpoint before re-registering', async (t) => {
     const storagePath = tmpStorage(t, 'klares4-race-');
-    const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_18'] });
+    // Neither Thermostat payload answers (TH-01: the 2.2.0 one is tried second).
+    const hb = makeHbMatterApi({ unqueryableTimes: { thermostat_18: 2 } });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath,
     });
@@ -124,7 +125,7 @@ test('F14: fallback after a non-queryable registration unregisters the endpoint 
     await delay(1500);
 
     assert.deepEqual(hb.log, [], 'Homebridge must not reject a duplicate registration');
-    assert.deepEqual(hb.unregisterCalls, ['thermostat_18']);
+    assert.deepEqual(hb.unregisterCalls, ['thermostat_18', 'thermostat_18']);
     assert.equal(hb.endpoints.get('thermostat_18').deviceType.name, 'TemperatureSensor');
     assert.equal(registry.getStatus('thermostat_18'), 'registered');
 });

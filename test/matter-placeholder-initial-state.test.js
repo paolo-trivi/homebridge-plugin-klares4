@@ -51,7 +51,11 @@ test('a fresh measurement endpoint starts with a null measuredValue, not the dis
 
 test('a thermostat TemperatureSensor fallback also starts with a null measuredValue', async (t) => {
     const storagePath = storage(t);
-    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({ thermostatAsTemperatureSensor: ['thermostat_5'] }));
+    // A fallback decided with the current Thermostat payload (a legacy one gets one native attempt, TH-01).
+    fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
+        version: 2,
+        thermostats: [{ deviceId: 'thermostat_5', mode: 'fallback', reason: 'registration-failure', attempts: 0, nativeShapeRevision: 2, pluginVersion: '2.3.0' }],
+    }));
     const hb = makeHbMatterApi();
     const reg = registry(t, hb, storagePath);
     const device = {
@@ -82,7 +86,7 @@ test('state known from the Homebridge cache still seeds the endpoint', async (t)
 
 test('a thermostat that falls back during recovery does not publish its placeholder temperature', async (t) => {
     process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
-    const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_6'] });
+    const hb = makeHbMatterApi({ unqueryableTimes: { thermostat_6: 2 } }); // both Thermostat payloads (TH-01)
     const reg = registry(t, hb);
     const device = {
         id: 'thermostat_6', type: 'thermostat', name: 'Riscaldamento Solaio', description: '',
