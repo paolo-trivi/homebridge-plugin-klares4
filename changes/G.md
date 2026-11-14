@@ -49,9 +49,10 @@ One key is retired:
 - README / docs (EN and IT): `applyDomusMappings` description becomes "adds the thermostat mappings of the backup that are missing; the pairs you configured are never replaced"; drop `applyExclusionSuggestions` from the KSA tables; HomeKit sensors show "No Response" until the panel reports a value; the summary of devices is printed once per change of the list.
 - ARCHITECTURE: `atomic-file.ts` (`writeFileAtomic` returns `{ method, path }`; options `mode`, `onInPlaceFallback`, `fileSystem`; `removeOrphanedTemporaryFiles`), `PlatformConfigFileService.updatePlatformConfig` returns a `ConfigUpdateOutcome` (`written | unchanged | no-platform-block | ambiguous | failed`), `platform/room-mapping-example.ts`, `ksa/parser.ts` `MAX_KSA_FILE_BYTES`.
 
-## For other tasks (also in the report)
-- `platform/index.ts`: pass the block selector so the debug flag is switched off in the right block when there are several: `disableDebugFlag(PLATFORM_NAME, { name: this.config.name, ip: this.runtime.ip })`. Without it, with several blocks the flag is left alone and a warning is logged. Optionally call `configFileService.removeOrphanedTemporaryFiles()` explicitly at startup (today it runs at the beginning of `KsaImportService.prepare`, which always runs).
-- Task I (debug capture): `writeFileAtomic*` now return `{ method, path }` (additive) and create new files `0600` by default, so the debug file is private without extra code.
+## Integration done in `platform/index.ts`
+- `disableDebugFlag(PLATFORM_NAME, { name, ip })`: with several `Lares4Complete` blocks the debug flag is switched off in the block of the running instance.
+- `removeOrphanedTemporaryFiles()` runs once at the start of `initializeLares4`, before the KSA import.
+- After the KSA import only the sections it can change (`domusThermostat`, `roomMapping`, `customNames`, `ksaImport`) are read again (`refreshKsaSections` in `runtime-config.ts`): configuration warnings and informative lines are never repeated, and a problem introduced by the import itself is still reported.
 
 ## Points to verify in the field
 - A real HomeKit read of an offline DOMUS sensor shows "No Response" (not 0).

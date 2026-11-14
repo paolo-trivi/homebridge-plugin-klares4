@@ -219,6 +219,28 @@ const DEPRECATED_KEYS: ReadonlyArray<{ key: keyof RawLares4Config & string; mess
     },
 ];
 
+/**
+ * The KSA import may change a few sections of `platform.config` after the
+ * first resolution. Only those are read again, so the problems of every other
+ * key (already reported once at startup) are not reported twice; what the
+ * import introduced in its own sections is.
+ */
+export function refreshKsaSections(previous: RuntimeConfig, raw: RawLares4Config, log: Logger): RuntimeConfig {
+    const issues = new ConfigIssues();
+    const names = parseCustomNames(raw.customNames, issues);
+    const refreshed: RuntimeConfig = {
+        ...previous,
+        customNames: names.map,
+        customNamesConfig: names.cleaned ?? [],
+        customNameRows: names.rows,
+        domusThermostat: resolveDomusThermostat(raw.domusThermostat, issues),
+        ksaImport: resolveKsaImport(raw.ksaImport, issues),
+        roomMapping: resolveRoomMapping(raw.roomMapping, issues),
+    };
+    issues.flush(log);
+    return refreshed;
+}
+
 /** One `info` line per deprecated key present in the config, whatever its value. Call once at startup. */
 export function reportDeprecatedKeys(raw: RawLares4Config | undefined, log: Logger): void {
     for (const { key, message } of DEPRECATED_KEYS) {

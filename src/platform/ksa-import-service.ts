@@ -22,8 +22,6 @@ export class KsaImportService {
     }
 
     public async prepare(config: Lares4Config, platformName: string): Promise<KsaSanitizedCache | undefined> {
-        // The first thing a start does with the storage directory: clear what a crashed write left.
-        await this.configFileService.removeOrphanedTemporaryFiles();
         const importConfig = config.ksaImport;
         if (!importConfig?.enabled) {
             return this.cacheService.load();

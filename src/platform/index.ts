@@ -18,14 +18,14 @@ import { AccessoryHandlerService } from './accessory-handler-service';
 import { createWebSocketClient, hasConnectionConfig } from './client-options';
 import { startRequestedDebugCapture } from './debug-capture-start';
 import { MatterAccessoryRegistry } from './matter-accessory-registry';
-import { PlatformConfigFileService } from './config-file-service';
+import { PlatformConfigFileService, type PlatformBlockSelector } from './config-file-service';
 import { DeviceListService } from './device-list-service';
 import { DeviceEventRouter } from './device-event-router';
 import { DiscoveryService } from './discovery-service';
 import { KsaImportService } from './ksa-import-service';
 import { reportConfigOverrides } from './override-reconciliation';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
-import { reportDeprecatedKeys, resolveRuntimeConfig, toPlatformConfig, type RuntimeConfig } from './runtime-config';
+import { refreshKsaSections, reportDeprecatedKeys, resolveRuntimeConfig, toPlatformConfig, type RuntimeConfig } from './runtime-config';
 import { SyncLifecycle } from './sync-lifecycle';
 import type { AccessoryHandler, Lares4Config, RawLares4Config } from './types';
 
@@ -158,13 +158,17 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 return;
             }
 
+            // The first thing a start does with the storage directory: clear what a crashed write left.
+            await this.configFileService.removeOrphanedTemporaryFiles();
+            if (this.initAborted()) return;
+
             const ksaCache = await this.ksaImportService.prepare(this.config, PLATFORM_NAME);
             // Nothing below awaits until connect(): one check covers the client,
             // the MQTT bridge, the debug capture and the connection.
             if (this.initAborted()) return;
 
-            // The KSA import may have replaced mappings in `this.config`: read them back.
-            this.runtime = resolveRuntimeConfig(this.config, this.log);
+            // The KSA import may have replaced mappings in `this.config`: read those sections back.
+            this.runtime = refreshKsaSections(this.runtime, this.config, this.log);
             const { ip, pin } = this.runtime;
             if (!ip || !pin) return;
             this.wsClient = createWebSocketClient({ ...this.runtime, ip, pin }, this.log, ksaCache);
@@ -180,7 +184,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
             if (this.runtime.generateDebugFile) {
                 this.debugCapture = startRequestedDebugCapture(this.runtime.debugCaptureDurationMs, this.log, this.api.user.storagePath(), this.wsClient);
-                void this.configFileService.disableDebugFlag(PLATFORM_NAME);
+                void this.configFileService.disableDebugFlag(PLATFORM_NAME, this.blockSelector());
             }
 
             await this.wsClient.connect();
@@ -201,6 +205,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         // a disabled category.
         if (device.type === 'scenario' && this.wsClient?.isScenarioSuppressed(device.id)) return false;
         return this.discoveryService.resolveMatterPolicy(device).exposed;
+    }
+
+    /** What tells this instance's block apart in config.json when it holds several. */
+    private blockSelector(): PlatformBlockSelector {
+        return { name: this.config.name, ip: this.runtime.ip };
     }
 
     private initAborted(): boolean {
