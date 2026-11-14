@@ -136,6 +136,26 @@ export interface WebSocketClientState {
     missingThermostatProgramWarningOutputIds: Set<string>;
     /** Normalized CAT of every scenario listed by MULTI_TYPES, exposed or not. */
     scenarioCategoryById: Map<string, string>;
+    /**
+     * Outputs and scenarios of the latest discovery read that the exposure
+     * policy kept out of `devices`, by the device ID they would have had.
+     * Created by the first discovery read (`exposure-report.ts`).
+     */
+    hiddenByExposurePolicy?: Map<string, HiddenDevice>;
+}
+
+/** An output or scenario the exposure policy does not expose (see `device-parsers.ts`). */
+export interface HiddenDevice {
+    /** The device ID it would have had (`light_7`, `scenario_4`), as in 2.2.0. */
+    deviceId: string;
+    kind: 'output' | 'scenario';
+    panelId: string;
+    name: string;
+    /** Normalized category as listed by the panel; empty when absent. */
+    category: string;
+    mode?: string;
+    /** False for ARM/DISARM and PARTIAL, which no per-device opt-in can expose. */
+    optInAllowed: boolean;
 }
 
 export interface MessagePipeline {

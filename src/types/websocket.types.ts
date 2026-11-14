@@ -31,6 +31,12 @@ export interface KseniaScenarioData {
     DES: string;
     CAT?: string;
     ENABLED?: string;
+    /**
+     * Per-scenario PIN flag the panel reports (`N`, `P`, `PR` seen). Its exact
+     * meaning is not established; it is recorded and reported, never used to
+     * decide exposure.
+     */
+    PIN?: string;
 }
 
 export interface KseniaBusHaData {
@@ -195,6 +201,23 @@ export interface KseniaMessage {
     CRC_16: string;
 }
 
+/**
+ * Accessory types an output of an unrecognized category can be exposed as.
+ * `light` keeps the device ID (`light_<id>`) such an output had in 2.2.0.
+ */
+export type OutputOptInType = 'light';
+
+/** One `exposeOutputs` row: a panel output ID and the accessory type to expose it as. */
+export interface OutputOptIn {
+    outputId: string;
+    exposeAs: OutputOptInType;
+}
+
+/** One `exposeScenarios` row: a panel scenario ID. */
+export interface ScenarioOptIn {
+    scenarioId: string;
+}
+
 export interface KseniaWebSocketOptions {
     debug?: boolean;
     logLevel?: number;
@@ -207,6 +230,10 @@ export interface KseniaWebSocketOptions {
     connectTimeoutMs?: number;
     /** Expose PARTIAL (partial-arm) scenarios; ARM/DISARM are never exposed. Default false. */
     exposePartialArmScenarios?: boolean;
+    /** Outputs of an unrecognized category (GEN, IRR, none) to expose anyway, one by one. Default none. */
+    exposeOutputs?: readonly OutputOptIn[];
+    /** Scenarios of a category other than GEN (not ARM/DISARM/PARTIAL) to expose anyway, one by one. Default none. */
+    exposeScenarios?: readonly ScenarioOptIn[];
     domusThermostat?: DomusThermostatConfig;
     ksaCache?: KsaSanitizedCache;
 }
