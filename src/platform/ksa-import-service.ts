@@ -2,13 +2,13 @@ import * as fs from 'fs';
 import type { Logger } from 'homebridge';
 import { KsaCacheService } from '../ksa/cache-service';
 import { deriveKsaImportResult } from '../ksa/derive';
-import { parseKsaProgramFromBuffer } from '../ksa/parser';
+import { assertKsaFileSize, parseKsaProgramFromBuffer } from '../ksa/parser';
 import type { KsaImportResult } from '../ksa/types';
 import type { KsaSanitizedCache } from '../types';
-import type { PlatformConfigFileService } from './config-file-service';
+import type { PlatformBlockSelector, PlatformConfigFileService } from './config-file-service';
 import type { Lares4Config } from './types';
 import { mergeCustomNames, type CustomNamesConfig } from './custom-names-config';
-import { applyExclusionSuggestions, resolveKsaRoomMapping } from './ksa-config-merge';
+import { existingRows, planPairMerge, resolveKsaRoomMapping, type PairMergePlan } from './ksa-config-merge';
 
 export class KsaImportService {
     private readonly cacheService: KsaCacheService;
@@ -22,6 +22,8 @@ export class KsaImportService {
     }
 
     public async prepare(config: Lares4Config, platformName: string): Promise<KsaSanitizedCache | undefined> {
+        // The first thing a start does with the storage directory: clear what a crashed write left.
+        await this.configFileService.removeOrphanedTemporaryFiles();
         const importConfig = config.ksaImport;
         if (!importConfig?.enabled) {
             return this.cacheService.load();
@@ -34,6 +36,7 @@ export class KsaImportService {
         }
 
         try {
+            assertKsaFileSize((await fs.promises.stat(filePath)).size);
             const raw = await fs.promises.readFile(filePath);
             const program = parseKsaProgramFromBuffer(raw);
             const result = deriveKsaImportResult(program, filePath, raw);
@@ -54,10 +57,22 @@ export class KsaImportService {
     private applyRuntimeConfig(config: Lares4Config, result: KsaImportResult): void {
         const importConfig = config.ksaImport ?? {};
         if (importConfig.applyDomusMappings !== false) {
+            const derived = result.derivedConfig.domusThermostat;
+            const manualPairs = planPairMerge(config.domusThermostat?.manualPairs, derived.manualPairs, 'domusSensorId');
+            const manualCommandPairs = planPairMerge(
+                config.domusThermostat?.manualCommandPairs, derived.manualCommandPairs, 'commandThermostatId',
+            );
+            this.logKeptPairs('manualPairs', manualPairs);
+            this.logKeptPairs('manualCommandPairs', manualCommandPairs);
+            // The user's pairs stay as they are; the backup only adds the missing ones.
             config.domusThermostat = {
                 ...(config.domusThermostat ?? {}),
-                manualPairs: result.derivedConfig.domusThermostat.manualPairs,
-                manualCommandPairs: result.derivedConfig.domusThermostat.manualCommandPairs,
+                ...(manualPairs.additions.length > 0
+                    ? { manualPairs: [...(config.domusThermostat?.manualPairs ?? []), ...manualPairs.additions] }
+                    : {}),
+                ...(manualCommandPairs.additions.length > 0
+                    ? { manualCommandPairs: [...(config.domusThermostat?.manualCommandPairs ?? []), ...manualCommandPairs.additions] }
+                    : {}),
             };
         }
 
@@ -72,26 +87,35 @@ export class KsaImportService {
         }
 
         if (importConfig.applyExclusionSuggestions) {
-            // Suggestions are added to the user's lists; they never replace them.
-            applyExclusionSuggestions(config as Record<string, unknown>, result.derivedConfig.suggestedExclusions);
+            this.log.info(
+                'ksaImport.applyExclusionSuggestions is ignored: devices the plugin does not expose by default are '
+                + 'already hidden, and your exclude* lists are never changed by the import.',
+            );
         }
     }
 
-    private async persistAppliedConfig(platformName: string, result: KsaImportResult, config: Lares4Config): Promise<void> {
-        await this.configFileService.updatePlatformConfig(platformName, (platformConfig) => {
+    private logKeptPairs(listName: string, plan: PairMergePlan<unknown>): void {
+        for (const conflict of plan.conflicts) {
+            this.log.info(
+                `KSA import: keeping your domusThermostat.${listName} entry for thermostat_${conflict.outputId} `
+                + `(${conflict.kept}); the backup has ${conflict.backup}`,
+            );
+        }
+    }
+
+    private async persistAppliedConfig(
+        platformName: string,
+        result: KsaImportResult,
+        config: Lares4Config,
+    ): Promise<void> {
+        const selector: PlatformBlockSelector = { name: config.name, ip: config.ip };
+        const outcome = await this.configFileService.updatePlatformConfig(platformName, (platformConfig) => {
             const importConfig = (platformConfig.ksaImport as Record<string, unknown> | undefined) ?? {};
             const applyDomusMappings = importConfig.applyDomusMappings !== false;
             const applyRoomMapping = importConfig.applyRoomMapping !== false;
             const applyCustomNames = importConfig.applyCustomNames === true;
-            const applyExclusions = importConfig.applyExclusionSuggestions === true;
 
-            if (applyDomusMappings) {
-                platformConfig.domusThermostat = {
-                    ...(platformConfig.domusThermostat as Record<string, unknown> ?? {}),
-                    manualPairs: result.derivedConfig.domusThermostat.manualPairs,
-                    manualCommandPairs: result.derivedConfig.domusThermostat.manualCommandPairs,
-                };
-            }
+            if (applyDomusMappings) this.persistDomusPairs(platformConfig, result);
             if (applyRoomMapping) {
                 const roomMapping = resolveKsaRoomMapping(
                     platformConfig.roomMapping,
@@ -106,21 +130,47 @@ export class KsaImportService {
                     result.derivedConfig.customNames,
                 );
             }
-            if (applyExclusions) {
-                applyExclusionSuggestions(platformConfig, result.derivedConfig.suggestedExclusions);
-            }
 
             platformConfig.ksaImport = {
                 ...importConfig,
                 applyAtStartup: false,
             };
             return true;
-        });
+        }, selector);
+
+        if (outcome.status !== 'written') {
+            // Left as it is: the import is applied again at the next start, nothing is lost.
+            this.log.warn(
+                `KSA import was applied for this run but could not be saved to config.json (${outcome.status}); `
+                + 'applyAtStartup stays on and the import will run again at the next start.',
+            );
+            return;
+        }
         config.ksaImport = {
             ...(config.ksaImport ?? {}),
             applyAtStartup: false,
         };
         this.log.info('KSA import applied to config.json and applyAtStartup has been reset');
+    }
+
+    /** The user's rows, as written, plus the pairs the backup adds. */
+    private persistDomusPairs(platformConfig: Record<string, unknown>, result: KsaImportResult): void {
+        const current = typeof platformConfig.domusThermostat === 'object' && platformConfig.domusThermostat !== null
+            ? platformConfig.domusThermostat as Record<string, unknown>
+            : {};
+        const derived = result.derivedConfig.domusThermostat;
+        const manualPairs = planPairMerge(current.manualPairs, derived.manualPairs, 'domusSensorId');
+        const manualCommandPairs = planPairMerge(current.manualCommandPairs, derived.manualCommandPairs, 'commandThermostatId');
+        if (manualPairs.additions.length === 0 && manualCommandPairs.additions.length === 0) return;
+        platformConfig.domusThermostat = {
+            ...current,
+            ...(manualPairs.additions.length > 0
+                ? { manualPairs: [...existingRows(current.manualPairs), ...manualPairs.additions] }
+                : {}),
+            ...(manualCommandPairs.additions.length > 0
+                ? { manualCommandPairs: [...existingRows(current.manualCommandPairs), ...manualCommandPairs.additions] }
+                : {}),
+        };
     }
 
     private logPreview(result: KsaImportResult): void {
