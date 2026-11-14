@@ -56,6 +56,8 @@ test('recovery generations accept both shapes and reject invalid values', () => 
         { deviceId: 'thermostat_19', generation: 0 },
         { deviceId: 'thermostat_20', generation: 1.5 },
         { deviceId: 'thermostat_21' },
+        { generation: 1 }, // F41: the empty UI row older schemas wrote on every save
+        {},
     ]), {});
     assert.deepEqual(normalizeMatterRecoveryRequests(undefined), {});
 });

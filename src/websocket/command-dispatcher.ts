@@ -15,6 +15,8 @@ interface PendingCommandRequest {
     expectedCmds?: Set<string>;
     requirePositiveResult: boolean;
     allowGenericErrorFallback: boolean;
+    /** When set, a response without an exact ID must carry one of these PAYLOAD_TYPEs. */
+    fallbackPayloadTypes?: Set<string>;
     registeredAt: number;
 }
 
@@ -29,8 +31,11 @@ export interface ResponseLikeMessage {
 }
 
 export class CommandDispatcher {
+    private static readonly RETIRED_ID_LIMIT = 256;
     private readonly commandQueues: Map<string, Promise<void>> = new Map();
     private readonly pendingCommands: Map<string, PendingCommandRequest> = new Map();
+    /** IDs of commands that already finished (settled, timed out or cleared), oldest first. */
+    private readonly retiredCommandIds: Set<string> = new Set();
 
     public enqueueDeviceCommand(deviceId: string, command: () => Promise<void>): Promise<void> {
         const previous = this.commandQueues.get(deviceId) ?? Promise.resolve();
@@ -53,13 +58,16 @@ export class CommandDispatcher {
         responseCmds?: string[],
         requirePositiveResult = false,
         allowGenericErrorFallback = false,
+        fallbackPayloadTypes?: string[],
     ): Promise<CommandAcknowledgement> {
         if (this.pendingCommands.has(commandId)) {
             return Promise.reject(new Error(`Command ID ${commandId} is already pending`));
         }
+        this.retiredCommandIds.delete(commandId);
         return new Promise((resolve, reject) => {
             const timeout = setTimeout((): void => {
                 this.pendingCommands.delete(commandId);
+                this.retire(commandId);
                 reject(new RetryableKlaresError(`Command ${commandId} timed out after ${timeoutMs}ms`));
             }, timeoutMs);
 
@@ -69,17 +77,22 @@ export class CommandDispatcher {
                 resolve: (acknowledgement): void => {
                     clearTimeout(timeout);
                     this.pendingCommands.delete(commandId);
+                    this.retire(commandId);
                     resolve(acknowledgement);
                 },
                 reject: (error: Error): void => {
                     clearTimeout(timeout);
                     this.pendingCommands.delete(commandId);
+                    this.retire(commandId);
                     reject(error);
                 },
                 expectedCmds:
                     responseCmds && responseCmds.length > 0 ? new Set(responseCmds) : undefined,
                 requirePositiveResult,
                 allowGenericErrorFallback,
+                fallbackPayloadTypes: fallbackPayloadTypes && fallbackPayloadTypes.length > 0
+                    ? new Set(fallbackPayloadTypes.map((type) => type.toUpperCase()))
+                    : undefined,
                 registeredAt: Date.now(),
             });
         });
@@ -92,6 +105,12 @@ export class CommandDispatcher {
                 return;
             }
             this.settle(pendingCommand, message, 'exact-id');
+            return;
+        }
+
+        // A late or duplicate response for a command that already finished must
+        // not be re-attributed to whichever other command happens to be pending.
+        if (this.retiredCommandIds.has(message.ID)) {
             return;
         }
 
@@ -111,6 +130,20 @@ export class CommandDispatcher {
         return this.pendingCommands.has(commandId);
     }
 
+    /** Pending or recently finished: a new command must not reuse the ID. */
+    public isKnownCommandId(commandId: string): boolean {
+        return this.pendingCommands.has(commandId) || this.retiredCommandIds.has(commandId);
+    }
+
+    /**
+     * A command sent without awaiting its response (login data reads, realtime
+     * register). Its ID is remembered with the finished ones so its response is
+     * recognised and ignored instead of being handed to another pending command.
+     */
+    public noteFireAndForget(commandId: string): void {
+        if (!this.pendingCommands.has(commandId)) this.retire(commandId);
+    }
+
     public clearPendingCommand(commandId: string): void {
         const pendingCommand = this.pendingCommands.get(commandId);
         if (!pendingCommand) {
@@ -119,6 +152,7 @@ export class CommandDispatcher {
 
         clearTimeout(pendingCommand.timeout);
         this.pendingCommands.delete(commandId);
+        this.retire(commandId);
     }
 
     public rejectAllPendingCommands(error: Error): void {
@@ -132,14 +166,35 @@ export class CommandDispatcher {
         this.commandQueues.clear();
     }
 
+    private retire(commandId: string): void {
+        this.retiredCommandIds.delete(commandId);
+        this.retiredCommandIds.add(commandId);
+        if (this.retiredCommandIds.size > CommandDispatcher.RETIRED_ID_LIMIT) {
+            const oldest = this.retiredCommandIds.values().next().value;
+            if (oldest !== undefined) this.retiredCommandIds.delete(oldest);
+        }
+    }
+
     private isCompatible(
         pending: PendingCommandRequest,
         message: ResponseLikeMessage,
         exactId: boolean,
     ): boolean {
+        if (!exactId && !this.matchesFallbackPayloadType(pending, message)) return false;
         if (!pending.expectedCmds || pending.expectedCmds.has(message.CMD)) return true;
         if (!this.isExplicitFailure(message)) return false;
-        return exactId || pending.allowGenericErrorFallback;
+        if (exactId) return true;
+        // Without an exact ID, a typed response (READ_RES, WRITE_CFG_RES, ...) only
+        // answers its own command type: the READ_RES FAIL the panel sends for
+        // PRG_THERMOSTATS at every login must not reject a pending CMD_USR. Only an
+        // untyped error (GENERIC, PAYLOAD_TYPE ERROR) may stand in for the response.
+        return pending.allowGenericErrorFallback && !message.CMD.toUpperCase().endsWith('_RES');
+    }
+
+    private matchesFallbackPayloadType(pending: PendingCommandRequest, message: ResponseLikeMessage): boolean {
+        if (!pending.fallbackPayloadTypes) return true;
+        const payloadType = message.PAYLOAD_TYPE?.toUpperCase();
+        return payloadType !== undefined && pending.fallbackPayloadTypes.has(payloadType);
     }
 
     private isExplicitFailure(message: ResponseLikeMessage): boolean {

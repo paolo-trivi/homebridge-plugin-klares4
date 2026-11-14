@@ -105,19 +105,34 @@ export class CommandExecutor {
     }
 
     private handleThermostatCommand(accessory: ThermostatAccessory, command: MqttThermostatCommand): void {
-        if (command.targetTemperature !== undefined) {
-            accessory.setTargetTemperature(command.targetTemperature).catch((error: unknown): void => {
-                this.deps.log.error('MQTT: Thermostat temperature error:', toErrorMessage(error));
-            });
-            this.deps.log.info(`MQTT: Thermostat requested -> ${command.targetTemperature}C`);
-        }
+        void this.runThermostatCommand(accessory, command);
+    }
+
+    /**
+     * Mode first, setpoint after its acknowledgement: the setpoint is written
+     * to the season the mode selects, which is only known once the panel
+     * accepted the mode. A failed mode change skips the setpoint.
+     */
+    private async runThermostatCommand(accessory: ThermostatAccessory, command: MqttThermostatCommand): Promise<void> {
         if (command.mode !== undefined) {
-            accessory
-                .setTargetHeatingCoolingState(domainModeToHomeKitTarget(command.mode))
-                .catch((error: unknown): void => {
-                    this.deps.log.error('MQTT: Thermostat mode error:', toErrorMessage(error));
-                });
             this.deps.log.info(`MQTT: Thermostat mode requested -> ${command.mode}`);
+            try {
+                await accessory.setTargetHeatingCoolingState(domainModeToHomeKitTarget(command.mode));
+            } catch (error: unknown) {
+                this.deps.log.error('MQTT: Thermostat mode error:', toErrorMessage(error));
+                if (command.targetTemperature !== undefined) {
+                    this.deps.log.warn('MQTT: Thermostat setpoint skipped because the mode change failed');
+                }
+                return;
+            }
+        }
+        if (command.targetTemperature !== undefined) {
+            this.deps.log.info(`MQTT: Thermostat requested -> ${command.targetTemperature}C`);
+            try {
+                await accessory.setTargetTemperature(command.targetTemperature);
+            } catch (error: unknown) {
+                this.deps.log.error('MQTT: Thermostat temperature error:', toErrorMessage(error));
+            }
         }
     }
 

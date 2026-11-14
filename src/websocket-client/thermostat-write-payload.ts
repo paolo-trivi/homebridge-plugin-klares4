@@ -1,16 +1,36 @@
 import type { ThermostatMode } from '../thermostat-mode';
 
-export function updateThermostatSeasonHint(
-    seasonById: Map<string, 'WIN' | 'SUM'>,
-    thermostatId: string,
-    mode: ThermostatMode,
-): void {
-    if (mode === 'cool') {
-        seasonById.set(thermostatId, 'SUM');
-        return;
+export type ThermostatSeason = 'WIN' | 'SUM';
+
+function asSeason(value: unknown): ThermostatSeason | undefined {
+    const upper = typeof value === 'string' ? value.toUpperCase() : '';
+    return upper === 'WIN' || upper === 'SUM' ? upper : undefined;
+}
+
+/**
+ * Which season a thermostat is really in, so a setpoint lands in the right
+ * block. The freshest of two observations wins: the season carried by our last
+ * acknowledged WRITE_CFG, and the one the panel reports in realtime
+ * (STATUS_TEMPERATURES.THERM.ACT_SEA). Without either, the cached cfg decides.
+ * A command is recorded only once the panel accepted it: a rejected "cool"
+ * must not move later setpoints to summer.
+ */
+export class ThermostatSeasonTracker {
+    private readonly acknowledged = new Map<string, { season: ThermostatSeason; at: number }>();
+
+    public recordAcknowledged(thermostatId: string, cfgEntry: Record<string, unknown>): void {
+        const season = asSeason(cfgEntry.ACT_SEA);
+        if (season) this.acknowledged.set(thermostatId, { season, at: Date.now() });
     }
-    if (mode === 'heat') {
-        seasonById.set(thermostatId, 'WIN');
+
+    public resolve(
+        thermostatId: string,
+        realtime: { season?: ThermostatSeason; updatedAt: number } | undefined,
+        cfg: Record<string, unknown> | undefined,
+    ): ThermostatSeason {
+        const acked = this.acknowledged.get(thermostatId);
+        if (acked && realtime?.season) return realtime.updatedAt > acked.at ? realtime.season : acked.season;
+        return acked?.season ?? realtime?.season ?? asSeason(cfg?.ACT_SEA) ?? 'WIN';
     }
 }
 
@@ -29,20 +49,8 @@ export function buildThermostatModeCfgPayload(mode: ThermostatMode): Record<stri
 }
 
 export function buildThermostatSetpointCfgPayload(
-    seasonById: Map<string, 'WIN' | 'SUM'>,
-    thermostatId: string,
+    season: ThermostatSeason,
     temperature: number,
 ): Record<string, unknown> {
-    const season = seasonById.get(thermostatId) ?? 'WIN';
-    const tempValue = temperature.toFixed(1);
-    if (season === 'SUM') {
-        return {
-            ACT_SEA: 'SUM',
-            SUM: { TM: tempValue },
-        };
-    }
-    return {
-        ACT_SEA: 'WIN',
-        WIN: { TM: tempValue },
-    };
+    return { ACT_SEA: season, [season]: { TM: temperature.toFixed(1) } };
 }

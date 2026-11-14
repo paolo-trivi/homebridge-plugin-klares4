@@ -60,3 +60,35 @@ test('successful recovery remains native across restart', () => {
 
   assert.deepEqual([...new MatterFallbackStore(dir, log).load()], []);
 });
+
+test('F32: a store written by a newer version is left untouched (read-only)', () => {
+  const dir = storage();
+  const file = path.join(dir, FILE);
+  const future = JSON.stringify({ version: 3, thermostats: [{ deviceId: 'thermostat_18', mode: 'fallback' }], extra: true });
+  fs.writeFileSync(file, future);
+  const warnings = [];
+  const store = new MatterFallbackStore(dir, { ...log, warn: (m) => warnings.push(m) });
+
+  assert.deepEqual([...store.load()], []);
+  store.add('thermostat_19');
+  assert.equal(store.has('thermostat_19'), true);
+  assert.equal(fs.readFileSync(file, 'utf8'), future);
+  assert.equal(fs.existsSync(`${file}.v1.bak`), false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /version 3/);
+});
+
+test('F32: the store is replaced by rename and leaves no temp file', () => {
+  const dir = storage();
+  const renames = [];
+  const originalRename = fs.renameSync;
+  fs.renameSync = (from, to) => { renames.push([from, to]); return originalRename(from, to); };
+  try {
+    new MatterFallbackStore(dir, log).add('thermostat_18');
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  assert.equal(renames.length, 1);
+  assert.equal(renames[0][1], path.join(dir, FILE));
+  assert.deepEqual(fs.readdirSync(dir), [FILE]);
+});

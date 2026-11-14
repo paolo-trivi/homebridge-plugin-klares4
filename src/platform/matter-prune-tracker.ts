@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { API, Logger } from 'homebridge';
+import { writeJsonAtomicSync } from '../atomic-file';
 import type { KseniaDevice } from '../types';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterFallbackStore } from './matter-fallback-store';
@@ -64,6 +65,8 @@ export class MatterPruneTracker {
     private stats: MatterCycleStats = emptyStats();
     private readonly counterFilePath?: string;
     private countersDirty = false;
+    /** Set when the file comes from a newer plugin version: it is never rewritten. */
+    private countersReadOnly = false;
 
     /**
      * When `storagePath` is provided the missing-cycle counters persist across
@@ -85,6 +88,14 @@ export class MatterPruneTracker {
         try {
             if (!fs.existsSync(this.counterFilePath)) return;
             const parsed = JSON.parse(fs.readFileSync(this.counterFilePath, 'utf8')) as Partial<CounterStoreShape>;
+            if (parsed && typeof parsed.version === 'number' && parsed.version > 1) {
+                this.countersReadOnly = true;
+                this.log.warn(
+                    `[Matter] Prune-counter store ${this.counterFilePath} has unsupported version ${String(parsed.version)}; `
+                    + 'it will not be modified. Counters are kept in memory for this session.',
+                );
+                return;
+            }
             if (!parsed.missing || typeof parsed.missing !== 'object') return;
             for (const [uuid, count] of Object.entries(parsed.missing)) {
                 if (typeof count === 'number' && Number.isInteger(count) && count > 0) {
@@ -97,14 +108,14 @@ export class MatterPruneTracker {
     }
 
     private saveCountersIfDirty(): void {
-        if (!this.counterFilePath || !this.countersDirty) return;
+        if (!this.counterFilePath || !this.countersDirty || this.countersReadOnly) return;
         this.countersDirty = false;
         try {
             const payload: CounterStoreShape = {
                 version: 1,
                 missing: Object.fromEntries([...this.missingCycleCounts.entries()].sort(([a], [b]) => (a < b ? -1 : 1))),
             };
-            fs.writeFileSync(this.counterFilePath, JSON.stringify(payload, null, 2), 'utf8');
+            writeJsonAtomicSync(this.counterFilePath, payload, 2);
         } catch (err) {
             this.log.warn(`[Matter] Could not write prune-counter store (${this.counterFilePath}): ${err instanceof Error ? err.message : String(err)}`);
         }

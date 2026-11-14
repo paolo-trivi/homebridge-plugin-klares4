@@ -95,3 +95,43 @@ test('initial websocket state preloads thermostat program maps from KSA cache', 
   assert.equal(state.domusSensorIdByThermostatProgramId.get('3'), '4');
   assert.equal(state.thermostatProgramById.get('3').HEATING_OUT, '21');
 });
+
+function emptyProgram(overrides = {}) {
+  return { outputs: [], zones: [], scenarios: [], busHas: [], thermostats: [], rooms: [], maps: [], ...overrides };
+}
+
+test('F35: IDs named like Object.prototype members never resolve to inherited values', () => {
+  const program = emptyProgram({
+    outputs: [{ ID: '21', DES: 'Riscaldamento Test', CAT: 'THERMO' }],
+    thermostats: [{ ID: 'constructor', DES: 'Termostato', HEATING_OUT: '21' }],
+    rooms: [{ ID: '5', DES: 'Sala' }],
+    maps: [{ ROOM: 'toString', OT: 'prgOutputs', OID: '21' }],
+  });
+  const result = deriveKsaImportResult(program, undefined, Buffer.from('x'));
+  assert.deepEqual(result.derivedConfig.domusThermostat.manualPairs, []);
+  assert.deepEqual(result.derivedConfig.roomMapping.rooms, []);
+  for (const pair of result.derivedConfig.domusThermostat.manualCommandPairs) {
+    assert.equal(typeof pair.commandThermostatId, 'string');
+  }
+});
+
+test('F35: a null or non-object entry is skipped instead of aborting the import', () => {
+  const program = emptyProgram({
+    outputs: [null, 7, { ID: '1', DES: 'Luce Test', CAT: 'LIGHT' }],
+    zones: [null, { ID: '2', DES: 'Zona Test' }],
+    scenarios: [null],
+    busHas: [null, { ID: '3' }],
+    thermostats: [null],
+    rooms: [null, { ID: '4', DES: 'Sala' }],
+    maps: [null, { ROOM: '4', OT: 'prgZones', OID: '2' }],
+  });
+  const result = deriveKsaImportResult(program, undefined, Buffer.from('x'));
+  assert.deepEqual(result.cache.outputNamesById, { 1: 'Luce Test' });
+  assert.deepEqual(result.cache.zoneNamesById, { 2: 'Zona Test' });
+  assert.equal(result.derivedConfig.roomMapping.rooms.length, 1);
+
+  const payload = { INFO: {}, DATA: { PRG_OUTPUTS: [null, { ID: '1', DES: 'Luce Test' }], PRG_MAPS: [null] } };
+  const parsed = parseKsaProgramFromBuffer(Buffer.from(JSON.stringify(payload)));
+  assert.equal(parsed.outputs.length, 1);
+  assert.equal(parsed.maps.length, 0);
+});

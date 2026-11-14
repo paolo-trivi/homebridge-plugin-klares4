@@ -49,6 +49,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly handlerService: AccessoryHandlerService;
     private readonly configFileService: PlatformConfigFileService;
     private readonly ksaImportService: KsaImportService;
+    private debugCapture?: DebugCaptureManager;
 
     constructor(
         public readonly log: Logger,
@@ -81,6 +82,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 this.handlerService.createAccessoryHandler(accessory, device),
             updateAccessoryHandler: (handler, device): void =>
                 this.handlerService.updateAccessoryHandler(handler, device),
+            isDeviceExcluded: (device): boolean => this.discoveryService.isDeviceExcluded(device),
         });
         this.matterRegistry = new MatterAccessoryRegistry({
             api: this.api,
@@ -105,6 +107,8 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.log.error('PIN missing in configuration');
             return;
         }
+        // A PIN typed as a number in the JSON editor would escape every string-based mask and scrub.
+        this.config.pin = String(config.pin);
 
         initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW, [
             this.config.ip,
@@ -162,6 +166,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                     heartbeatInterval: this.config.heartbeatInterval ?? 30000,
                     commandTimeoutMs: this.config.commandTimeoutMs ?? 8000,
                     allowInsecureTls: this.config.allowInsecureTls ?? false,
+                    exposePartialArmScenarios: this.config.exposePartialArmScenarios === true,
                     domusThermostat: this.config.domusThermostat,
                     ksaCache,
                 },
@@ -182,8 +187,11 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             this.wsClient.onInitialSyncComplete = (): void => {
                 this.handleInitialSyncComplete();
             };
-            await this.wsClient.connect();
-
+            this.wsClient.onConnected = (): void => this.matterRegistry.setPanelReachable(true);
+            this.wsClient.onDisconnected = (): void => this.matterRegistry.setPanelReachable(false);
+            // MQTT and debug capture must not depend on the first connect: if the
+            // panel is offline at boot, connect() rejects while the client keeps
+            // reconnecting in the background.
             if (this.config.mqtt?.enabled) {
                 this.mqttBridge = new MqttBridge(this.config.mqtt, this.log, this);
                 this.log.info('MQTT Bridge initialized');
@@ -201,10 +209,12 @@ export class Lares4Platform implements DynamicPlatformPlugin {
                 );
                 const durationSeconds = Math.round(durationMs / 1000);
                 this.log.warn(`[DEBUG] Debug capture requested - starting ${durationSeconds}-second capture...`);
-                const debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
-                debugCapture.startCapture(this.wsClient, durationMs);
+                this.debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
+                this.debugCapture.startCapture(this.wsClient, durationMs);
                 void this.configFileService.disableDebugFlag(PLATFORM_NAME);
             }
+
+            await this.wsClient.connect();
 
             this.log.info('Ksenia Lares4 initialized successfully');
         } catch (error: unknown) {
@@ -221,6 +231,10 @@ export class Lares4Platform implements DynamicPlatformPlugin {
      * `matterExposure` opt-out. HAP and MQTT paths are NOT affected by this.
      */
     private isMatterEligible(device: KseniaDevice): boolean {
+        // Arming scenarios hidden by the security policy count as not exposed, so a
+        // cache-restored endpoint left from an older version is pruned like one of
+        // a disabled category.
+        if (device.type === 'scenario' && this.wsClient?.isScenarioSuppressed(device.id)) return false;
         return this.discoveryService.resolveMatterPolicy(device).exposed;
     }
 
@@ -244,6 +258,9 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
     private cleanupConnections(): void {
         this.lifecycleService.cleanupConnections((): void => {
+            // Flush before disconnecting: both write synchronously, Homebridge exits right after.
+            this.debugCapture?.shutdown();
+            this.deviceListService.flush();
             this.wsClient?.disconnect();
             this.mqttBridge?.disconnect();
         });
