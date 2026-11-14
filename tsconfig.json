@@ -1,9 +1,10 @@
 {
     "compilerOptions": {
-        "target": "ES2020",
+        "target": "ES2022",
         "lib": [
-            "ES2020"
+            "ES2023"
         ],
+        "useDefineForClassFields": false,
         "module": "commonjs",
         "outDir": "./dist",
         "rootDir": "./src",
@@ -13,7 +14,6 @@
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
         "declaration": true,
-        "declarationMap": true,
         "sourceMap": true
     },
     "include": [
