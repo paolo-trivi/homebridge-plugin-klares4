@@ -3,7 +3,9 @@ import { RetryableKlaresError } from '../errors';
 /**
  * - `serial`: every command runs, in order.
  * - `latest-wins`: for outputs whose state is observable (lights, covers): a new
- *   command replaces the ones still waiting, which are refused as superseded.
+ *   command replaces the ones still waiting. A replaced request is not a failure
+ *   (a dragged slider sends many): it is never sent and settles with the outcome
+ *   of the command that replaced it, once that one is confirmed or has failed.
  * - `reject-while-busy`: for momentary outputs (gates, scenarios): a command
  *   arriving while another one is queued or running is refused at once. A pulse
  *   that times out may still have been executed: repeating it later is unsafe.
@@ -18,6 +20,7 @@ export interface DeviceQueueOptions {
     maxDepth?: number;
 }
 
+/** `superseded` is no longer produced (replaced requests follow the newer one); kept for callers that name it. */
 export type CommandQueueRejection = 'busy' | 'superseded' | 'expired' | 'queue-full';
 
 export class CommandQueueRejectedError extends RetryableKlaresError {
@@ -27,10 +30,15 @@ export class CommandQueueRejectedError extends RetryableKlaresError {
     }
 }
 
-interface QueuedCommand {
-    run: () => Promise<void>;
+interface Settlement {
     resolve: () => void;
     reject: (error: Error) => void;
+}
+
+interface QueuedCommand extends Settlement {
+    run: () => Promise<void>;
+    /** Requests this command replaced (`latest-wins`): they share its outcome. */
+    followers: Settlement[];
     expiry?: ReturnType<typeof setTimeout>;
 }
 
@@ -54,19 +62,19 @@ export class DeviceCommandQueue {
                 'busy', key, 'a previous command for it is still in progress',
             ));
         }
-        if (policy === 'latest-wins') {
-            for (const superseded of queue.waiting.splice(0)) {
-                this.drop(superseded, new CommandQueueRejectedError('superseded', key, 'replaced by a newer command'));
-            }
-        }
+        const replaced = policy === 'latest-wins' ? queue.waiting.splice(0) : [];
         const maxDepth = options.maxDepth ?? DeviceCommandQueue.DEFAULT_MAX_DEPTH;
         if (queue.waiting.length >= maxDepth) {
-            return Promise.reject(new CommandQueueRejectedError(
-                'queue-full', key, `${maxDepth} command(s) already waiting`,
-            ));
+            const full = new CommandQueueRejectedError('queue-full', key, `${maxDepth} command(s) already waiting`);
+            for (const older of replaced) this.drop(older, full);
+            return Promise.reject(full);
         }
         return new Promise<void>((resolve, reject) => {
-            const entry: QueuedCommand = { run, resolve, reject };
+            const entry: QueuedCommand = { run, resolve, reject, followers: [] };
+            for (const older of replaced) {
+                if (older.expiry) clearTimeout(older.expiry);
+                entry.followers.push(...older.followers, { resolve: older.resolve, reject: older.reject });
+            }
             if (busy && options.maxWaitMs !== undefined) {
                 const maxWaitMs = options.maxWaitMs;
                 entry.expiry = setTimeout((): void => {
@@ -115,15 +123,17 @@ export class DeviceCommandQueue {
         // command and sends the next one at once must not find the device busy.
         result.then((): void => {
             this.runNext(key, queue);
-            entry.resolve();
+            // Oldest first, the command that ran last: a caller that stores the value it
+            // asked for (HAP accessory cache) ends up with the value really sent.
+            for (const settlement of [...entry.followers, entry]) settlement.resolve();
         }, (error: unknown): void => {
             this.runNext(key, queue);
-            entry.reject(error instanceof Error ? error : new Error(String(error)));
+            this.drop(entry, error instanceof Error ? error : new Error(String(error)));
         });
     }
 
     private drop(entry: QueuedCommand, error: Error): void {
         if (entry.expiry) clearTimeout(entry.expiry);
-        entry.reject(error);
+        for (const settlement of [entry, ...entry.followers]) settlement.reject(error);
     }
 }

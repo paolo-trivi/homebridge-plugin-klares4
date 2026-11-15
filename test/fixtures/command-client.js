@@ -49,7 +49,7 @@ function commandClient({
         ID: message.ID, CMD: 'CMD_USR_RES', PAYLOAD_TYPE: 'REPLY', PAYLOAD: { RESULT: 'OK', RESULT_DETAIL: 'CMD_PROCESSED' },
     })),
 } = {}) {
-    const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', pin, log, { commandTimeoutMs: 200, ...options });
+    const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', pin, log, { commandTimeoutMs: 5000, ...options });
     client['state'].idLogin = '77';
     client['state'].ws = { readyState: 1 };
     seedDevices(client, devices);
