@@ -17,7 +17,7 @@ test('determineOutputType preserves output classification contract', () => {
   assert.equal(determineOutputType('GATE', 'M'), 'gate');
   assert.equal(determineOutputType('GATE', 'B'), 'cover');
   assert.equal(determineOutputType('THERMOSTAT'), 'thermostat');
-  assert.equal(determineOutputType('GATE', 'm'), 'gate', 'MOD is compared without case');
+  assert.equal(determineOutputType('GATE', 'm'), 'cover', 'MOD compared exactly as in 2.2.0: the ID must not change');
   // WS-01: an unrecognized category is not a light.
   for (const category of ['UNKNOWN', 'GEN', 'IRR', '', '  ']) {
     assert.equal(determineOutputType(category, 'M'), undefined, category);
@@ -55,21 +55,22 @@ test('OutputTypeMemory: unambiguous re-classification (explicit MOD) is still ho
   assert.equal(mem.resolve('7', 'GATE', 'B'), 'cover');
 });
 
-test('parseOutputDevice: device.id prefix stays stable when a later update has incomplete CAT/MOD for a known gate', () => {
-  const first = parseOutputDevice({
-    ID: 'stable-gate-5', DES: 'Cancello Box', TYPE: 'GATE', STATUS: '0', ENABLED: 'YES', CAT: 'GATE', MOD: 'M',
+test('discovery: device.id prefix stays stable when a later read has incomplete CAT/MOD for a known gate', () => {
+  // The type memory belongs to the client (one per panel), so this goes through a client's discovery.
+  const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
+  const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', '1234', { info() {}, warn() {}, error() {}, debug() {} }, {});
+  const read = (output) => client['messageService'].handleReadResponse({
+    CMD: 'READ_RES', ID: '10', SENDER: 'p', RECEIVER: '', TIMESTAMP: '0', CRC_16: '0x0000',
+    PAYLOAD_TYPE: 'MULTI_TYPES', PAYLOAD: { RESULT: 'OK', OUTPUTS: [output] },
   });
-  assert.equal(first.id, 'gate_stable-gate-5');
-  assert.equal(first.type, 'gate');
+  read({ ID: '5', DES: 'Cancello Box', TYPE: 'GATE', STATUS: '0', ENABLED: 'YES', CAT: 'GATE', MOD: 'M' });
+  assert.equal(client['state'].devices.get('gate_5')?.type, 'gate');
 
   // Later, incomplete re-poll: MOD missing for the same system ID.
-  const second = parseOutputDevice({
-    ID: 'stable-gate-5', DES: 'Cancello Box', TYPE: 'GATE', STATUS: '0', ENABLED: 'YES', CAT: 'GATE',
-  });
-  assert.equal(second.id, 'gate_stable-gate-5', 'device.id prefix must remain gate_ despite the incomplete update');
-  assert.equal(second.type, 'gate');
+  read({ ID: '5', DES: 'Cancello Box', TYPE: 'GATE', STATUS: '0', ENABLED: 'YES', CAT: 'GATE' });
+  assert.ok(client['state'].devices.has('gate_5'), 'device.id prefix must remain gate_ despite the incomplete update');
+  assert.equal(client['state'].devices.has('cover_5'), false);
 });
-
 test('parseOutputDevice: a brand-new output with sufficient data still classifies correctly', () => {
   const device = parseOutputDevice({
     ID: 'stable-light-1', DES: 'Luce Taverna', TYPE: 'LIGHT', STATUS: '0', ENABLED: 'YES', CAT: 'LIGHT',

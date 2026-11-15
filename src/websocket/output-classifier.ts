@@ -10,9 +10,14 @@ export const OUTPUT_OPT_IN_TYPES: readonly OutputOptInType[] = ['light'];
  * The type of an output of a recognized category; `undefined` for any other
  * category (`GEN`, `IRR`, empty, unknown): such an output is not a light, a
  * cover, a gate or a thermostat as far as the plugin can tell.
+ *
+ * The comparisons are exactly those of 2.2.0 (category upper-cased but not
+ * trimmed, `MOD` compared as `M`): the type is the device ID prefix, so an
+ * output 2.2.0 exposed keeps its ID, UUID and MQTT topic, or is hidden by the
+ * fail-closed policy when 2.2.0 only reached it through its "light" default.
  */
 export function determineOutputType(category: string, mode?: string): ProjectedOutputType | undefined {
-    const catUpper = typeof category === 'string' ? category.trim().toUpperCase() : '';
+    const catUpper = typeof category === 'string' ? category.toUpperCase() : '';
 
     if (catUpper === 'ROLL') {
         return 'cover';
@@ -23,7 +28,7 @@ export function determineOutputType(category: string, mode?: string): ProjectedO
     }
 
     if (catUpper === 'GATE') {
-        if (normalizedMode(mode) === 'M') {
+        if (mode === 'M') {
             return 'gate';
         }
         return 'cover';
@@ -44,48 +49,46 @@ export function determineOutputType(category: string, mode?: string): ProjectedO
     return undefined;
 }
 
-function normalizedMode(mode: unknown): string {
-    return typeof mode === 'string' ? mode.trim().toUpperCase() : '';
+/** For log lines only: classification uses the panel's value as listed. */
+function displayed(value: unknown): string {
+    return typeof value === 'string' ? value.trim().toUpperCase() : '';
+}
+
+interface RememberedType {
+    type: ProjectedOutputType;
+    /** The upper-cased category the type was derived from. */
+    category: string;
 }
 
 /**
- * Determines whether (category, mode) carries enough information to classify
- * an output confidently. CAT is required, and category GATE specifically
- * needs MOD to tell a gate apart from a roller cover (see `determineOutputType`).
- */
-function isAmbiguousClassification(category: string, mode?: string): boolean {
-    const catUpper = category.trim().toUpperCase();
-    if (!catUpper) return true;
-    if (catUpper === 'GATE' && !normalizedMode(mode)) return true;
-    return false;
-}
-
-/**
- * Remembers the last confidently-classified output type per Klares4 system
- * ID, so a later update with missing/ambiguous CAT or MOD (e.g. a partial
- * re-poll during a WS reconnect) can't flip an already-known output's type —
- * which would change its `device.id` prefix (gate_/cover_/...) and make
- * Matter/Alexa perceive a brand-new device for the same physical output.
+ * Remembers, per panel output ID, the type of the last read that carried a
+ * recognized category, for re-reads that do not say what the output is:
+ * no (or a blank) category, or `GATE` without `MOD` for an output already
+ * known from a `GATE` read. Without it such a re-read (e.g. a partial re-poll
+ * during a reconnect) would flip the ID prefix and Matter/Alexa would see a
+ * brand-new device. An explicit category always wins: an output reconfigured
+ * on the panel (LIGHT → GATE) takes its new type, and its old device leaves
+ * the client state with the end of the discovery round.
+ * One instance per client: two panels may use the same output IDs.
  */
 export class OutputTypeMemory {
-    private readonly lastKnownType = new Map<string, ProjectedOutputType>();
+    private readonly lastKnown = new Map<string, RememberedType>();
 
     /** The recognized type, or `undefined` for a category the plugin does not recognize. */
     resolve(systemId: string, category: string, mode?: string): ProjectedOutputType | undefined {
-        const known = this.lastKnownType.get(systemId);
-        if (known && isAmbiguousClassification(category, mode)) {
-            return known;
+        const known = this.lastKnown.get(systemId);
+        const catUpper = typeof category === 'string' ? category.toUpperCase() : '';
+        if (known && (catUpper.trim() === '' || (catUpper === 'GATE' && known.category === 'GATE' && !mode))) {
+            return known.type;
         }
         const computed = determineOutputType(category, mode);
         // A category the plugin does not recognize is a confident answer too:
         // a later read without a category must not bring the old type back.
-        if (computed) this.lastKnownType.set(systemId, computed);
-        else this.lastKnownType.delete(systemId);
+        if (computed) this.lastKnown.set(systemId, { type: computed, category: catUpper });
+        else this.lastKnown.delete(systemId);
         return computed;
     }
 }
-
-const outputTypeMemory = new OutputTypeMemory();
 
 /**
  * Output category as the panel reports it: `CAT`, or `TYPE` on older
@@ -101,29 +104,40 @@ export type OutputExposure =
     | { exposed: false; category: string; mode: string };
 
 /**
+ * The type decided for one element of a discovery read, for `classifyOutput`
+ * when the projector parses that same element right after. Keyed by the
+ * element itself, so nothing outlives the read or crosses clients.
+ */
+const decidedTypes = new WeakMap<KseniaOutputData, ProjectedOutputType>();
+
+/**
  * Fail-closed exposure of a discovered output: only recognized categories
  * (LIGHT, ROLL, GATE, thermostat) are exposed on their own; any other output
  * is exposed only when `exposeOutputs` lists its ID, as the type given there.
- * An output already recognized in this process keeps its type when a re-read
- * comes without a category (see `OutputTypeMemory`).
+ * `memory` is the client's (see `OutputTypeMemory`).
  */
 export function resolveOutputExposure(
     outputData: KseniaOutputData,
     optIns: ReadonlyMap<string, OutputOptInType>,
+    memory: OutputTypeMemory,
 ): OutputExposure {
     const category = outputCategory(outputData);
-    const type = outputTypeMemory.resolve(String(outputData.ID), category, outputData.MOD);
-    if (type) return { exposed: true, type, source: 'category' };
+    const type = memory.resolve(String(outputData.ID), category, outputData.MOD);
     const optIn = optIns.get(String(outputData.ID));
-    if (optIn) return { exposed: true, type: optIn, source: 'opt-in' };
-    return { exposed: false, category: category.trim().toUpperCase(), mode: normalizedMode(outputData.MOD) };
+    const exposure: OutputExposure = type ? { exposed: true, type, source: 'category' }
+        : optIn ? { exposed: true, type: optIn, source: 'opt-in' }
+            : { exposed: false, category: displayed(category), mode: displayed(outputData.MOD) };
+    if (exposure.exposed) decidedTypes.set(outputData, exposure.type);
+    return exposure;
 }
 
 /**
- * Type of an output the exposure policy has let through, stable across
- * ambiguous re-reads of the same ID. An unrecognized category only gets here
- * through an `exposeOutputs` row, whose only type is `light`.
+ * Type of an output the exposure policy has let through: the one
+ * `resolveOutputExposure` decided for this element, else its category (an
+ * unrecognized one only gets here through `exposeOutputs`, whose type is `light`).
  */
 export function classifyOutput(outputData: KseniaOutputData): ProjectedOutputType {
-    return outputTypeMemory.resolve(String(outputData.ID), outputCategory(outputData), outputData.MOD) ?? 'light';
+    return decidedTypes.get(outputData)
+        ?? determineOutputType(outputCategory(outputData), outputData.MOD)
+        ?? 'light';
 }
