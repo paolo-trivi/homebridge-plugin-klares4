@@ -12,6 +12,7 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 const { tmpStorage } = require('./fixtures/tmp-storage.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
@@ -147,27 +148,45 @@ test('F14: registration retry unregisters the stale endpoint on the first attemp
     assert.equal(registry.getStatus('light_9'), 'registered');
 });
 
-test('F37: a rename waits until Homebridge has really released the UUID before registering again', async (t) => {
-    process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '150';
-    const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
-    // Homebridge closes the endpoint first (probe already undefined) and
-    // deletes the UUID from its registry only afterwards. On 2.4 the unregister
-    // call resolved before that; on 2.5 it resolves after it, and the rename
-    // must not race the close on either.
-    const hb = makeHbMatterApi({ unregisterCloseMs: 80 });
-    const coordinator = new MatterTopologyCoordinator(hb.api, silentLog(), 2000);
-    const light = (name) => ({
-        UUID: 'light_37', displayName: name, serialNumber: 'light_37', manufacturer: 'Ksenia', model: 'Lares4 light',
+// F37. Homebridge closes the endpoint first (reads already answer nothing)
+// and deletes the UUID from its registry only afterwards. On 2.4 the
+// unregister call resolves before that, so only the coordinator's settle (and
+// the second probe after it) keeps the register that follows from racing the
+// close; on 2.5 the call resolves after it. Without the settle the 2.4 case
+// fails with "already registered" (last test).
+function f37Light(uuid, name) {
+    return {
+        UUID: uuid, displayName: name, serialNumber: uuid, manufacturer: 'Ksenia', model: 'Lares4 light',
         deviceType: deviceTypes.OnOffLight, clusters: { onOff: { onOff: false } },
+    };
+}
+
+for (const semantics of ['2.4', '2.5']) {
+    test(`F37: a re-register waits until Homebridge has really released the UUID (${semantics})`, async () => {
+        const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
+        const hb = makeHbMatterApi({ semantics, unregisterCloseMs: 80 });
+        const coordinator = new MatterTopologyCoordinator(hb.api, silentLog(), 2000, 150);
+
+        await coordinator.register(f37Light('light_37', 'PC'));
+        await waitFor(() => hb.endpoints.has('light_37'));
+        assert.equal(await coordinator.unregister('light_37', 'onOff'), true);
+        await coordinator.register(f37Light('light_37', 'PC Test'));
+        await waitFor(() => hb.endpoints.get('light_37')?.displayName === 'PC Test' || hb.log.length > 0);
+
+        assert.deepEqual(hb.log, [], 'register raced the endpoint close');
+        assert.equal(hb.endpoints.get('light_37')?.closing, undefined);
     });
+}
 
-    await coordinator.register(light('PC'));
-    await delay(10);
-    assert.equal(await coordinator.unregister('light_37', 'onOff'), true);
-    await coordinator.register(light('PC Test'));
-    await delay(50);
+test('F37: the 2.4 race is real: without the settle the re-register is refused', async () => {
+    const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
+    const hb = makeHbMatterApi({ semantics: '2.4', unregisterCloseMs: 80 });
+    const coordinator = new MatterTopologyCoordinator(hb.api, silentLog(), 2000, 0);
 
-    assert.deepEqual(hb.log, [], 'register raced the endpoint close');
-    assert.equal(hb.endpoints.get('light_37')?.closing, undefined);
-    process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
+    await coordinator.register(f37Light('light_38', 'A'));
+    await waitFor(() => hb.endpoints.has('light_38'));
+    await coordinator.unregister('light_38', 'onOff');
+    await coordinator.register(f37Light('light_38', 'B'));
+    await waitFor(() => hb.log.length > 0);
+    assert.match(hb.log[0], /already registered/);
 });

@@ -58,5 +58,6 @@ export async function upgradeToDimmableLight(
         return;
     }
     deps.registrations.delete(device.id);
+    deps.topologyCoordinator.inheritOnNextRegister(device.id, uniqueId);
     await deps.register(device, uniqueId);
 }

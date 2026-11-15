@@ -5,7 +5,7 @@ import { hasObservedState } from '../device-observation';
 import { mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
 import { declaredClusters, type MatterTopologyCoordinator } from './matter-topology-coordinator';
-import { replaceEndpoint } from './matter-endpoint-replacement';
+import { inheritIdentity, replaceEndpoint } from './matter-endpoint-replacement';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { registerNextThermostatAttempt, resetThermostatAttempts } from './matter-thermostat-attempts';
 import { takeSensorIdentity } from './matter-thermostat-recovery-request';
@@ -213,7 +213,7 @@ export async function registerFallbackAccessory(
     });
     await replaceEndpoint(reg, deps.topologyCoordinator, 'other-device');
     // Back to the sensor a recovery removed: the same device again, with its identity.
-    reg.inheritedUniqueId = takeSensorIdentity(device.id);
+    inheritIdentity(reg, deps.topologyCoordinator, takeSensorIdentity(device.id));
     await deps.topologyCoordinator.register(fallback);
     deps.thermostatFallbackUUIDs.add(device.id);
     deps.onFallbackPersist?.(device.id);

@@ -32,14 +32,26 @@ const HAP_BRIDGE_LIMIT_ERROR = /^Cannot Bridge more than (\d+) Accessories$/;
 export class DeviceEventRouter {
     private readonly discoveredDevices: Map<string, KseniaDevice> = new Map();
     private readonly matterDevices: Map<string, KseniaDevice> = new Map();
+    /** Devices the panel reported (discovery or status) since the current sync started. */
+    private readonly reportedThisSync = new Set<string>();
     /** Devices HAP refused for the per-bridge accessory limit: not retried this session. */
     private readonly beyondHapLimit = new Set<string>();
 
     constructor(private readonly deps: DeviceEventRouterDeps) {}
 
-    /** Latest Matter-named snapshot of every routed device. */
+    /**
+     * Latest Matter-named snapshot of every routed device the panel reported
+     * in the current sync. A device deleted on the panel stops being reported
+     * and so stops counting as live for the Matter name map (its name becomes
+     * a reservation that expires 30 days after it was last reported).
+     */
     public get matterSnapshots(): Iterable<KseniaDevice> {
-        return this.matterDevices.values();
+        return [...this.matterDevices.values()].filter((device) => this.reportedThisSync.has(device.id));
+    }
+
+    /** A new sync (login) starts: what counts as reported starts over. */
+    public startSync(): void {
+        this.reportedThisSync.clear();
     }
 
     /** Returns whether the device was routed (false: excluded, or its names could not be derived). */
@@ -58,6 +70,7 @@ export class DeviceEventRouter {
         if (!names) return false;
         const { sharedDevice, matterDevice } = names;
         this.matterDevices.set(device.id, matterDevice);
+        this.reportedThisSync.add(device.id);
         log.info(`Device discovered: ${sharedDevice.type} - ${sharedDevice.name}`);
 
         this.isolate(device, 'HAP', () => this.addToHap(sharedDevice));
@@ -79,6 +92,7 @@ export class DeviceEventRouter {
         if (!names) return false;
         const { sharedDevice, matterDevice } = names;
         this.matterDevices.set(device.id, matterDevice);
+        this.reportedThisSync.add(device.id);
         log.debug(`Device status update: ${sharedDevice.name}`);
 
         this.isolate(device, 'HAP', () => this.deps.accessoryRegistry.updateAccessory(sharedDevice));

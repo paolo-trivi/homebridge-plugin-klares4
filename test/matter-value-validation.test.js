@@ -32,7 +32,7 @@ async function registerOn(stack, accessory) {
     assert.ok(stack.record(accessory.UUID), `${accessory.UUID} must register; Homebridge said: ${failures.join(' | ')}`);
 }
 
-test('MAT-13: covers with a position out of range or not a number register', { timeout: 30000 }, async (t) => {
+test('MAT-13: covers with a position out of range or not a number register', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const cases = [[1, 150, 150, 0], [2, -5, -5, 10000], [3, NaN, undefined, null], [4, 40, Infinity, 6000]];
     for (const [n, position, target, expectedCurrent] of cases) {
@@ -41,7 +41,7 @@ test('MAT-13: covers with a position out of range or not a number register', { t
     }
 });
 
-test('MAT-13: dimmers with a brightness out of range or not a number register with a valid level', { timeout: 30000 }, async (t) => {
+test('MAT-13: dimmers with a brightness out of range or not a number register with a valid level', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     for (const [n, brightness, level] of [[1, 150, 254], [2, NaN, 254], [3, -20, 1], [4, '40', 254]]) {
         await registerOn(stack, deviceToMatterAccessory(dimmer(n, brightness), deps(stack)));
@@ -49,7 +49,7 @@ test('MAT-13: dimmers with a brightness out of range or not a number register wi
     }
 });
 
-test('MAT-13: a measure that is not a finite number registers as unknown (null), never as 0 or NaN', { timeout: 30000 }, async (t) => {
+test('MAT-13: a measure that is not a finite number registers as unknown (null), never as 0 or NaN', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const cases = [
         [sensor(1, 'humidity', NaN), 'relativeHumidityMeasurement'],

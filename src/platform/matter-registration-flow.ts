@@ -219,12 +219,15 @@ export class MatterRegistrationFlow {
             return;
         }
 
-        reg.status = 'registered';
-        ctx.topologyCoordinator.markLocallyPublished(uuid);
-        reg.registeredAt = Date.now();
+        // The coordinator already gave the inherited identity with the register
+        // (`inheritOnNextRegister`); this checks it before the endpoint counts
+        // as registered, for a runtime whose endpoint appeared after that.
         const inherited = reg.inheritedUniqueId;
         reg.inheritedUniqueId = undefined;
         if (inherited) await ctx.topologyCoordinator.restoreUniqueId(uuid, inherited);
+        reg.status = 'registered';
+        ctx.topologyCoordinator.markLocallyPublished(uuid);
+        reg.registeredAt = Date.now();
         this.onRegistered(reg);
         ctx.stateUpdateQueue.markReadyAfterBootstrap(reg, timings.stateBootstrapMs);
         ctx.log.info(`[Matter] registered: ${reg.displayName}`);

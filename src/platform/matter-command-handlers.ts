@@ -139,6 +139,11 @@ function liftPercent100ths(panelPosition: number): number {
  * and here it already has, so the status goes with the positions; it returns
  * to stopped when `current` reaches the target (:162-169). Matter state only:
  * the device snapshot is not touched.
+ *
+ * The update goes through the registry's state-update queue (`pushState`),
+ * which holds it until the command has finished (`matter-command-guard.ts`);
+ * a newer panel status queued later replaces it. Without a queue (the mapper
+ * used on its own) the same push is made directly on a later turn.
  */
 function keepReportedPosition(device: KseniaCover, requested: number, ctx: CommandContext<KseniaCover>): void {
     setTimeout(() => {

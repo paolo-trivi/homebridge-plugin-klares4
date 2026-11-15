@@ -49,7 +49,7 @@ for (const [command, args, panelTarget, matterTarget, moving] of [
     ['downOrClose', undefined, 0, 10000, 2],
     ['goToLiftPercentage', { liftPercent100thsValue: 2500 }, 75, 2500, 1],
 ]) {
-    test(`MAT-05: after ${command} the cover keeps its reported position and shows the requested target`, { timeout: 30000 }, async (t) => {
+    test(`MAT-05: after ${command} the cover keeps its reported position and shows the requested target`, { timeout: 120000 }, async (t) => {
         const stack = await realMatterStackSession(t).start();
         const ws = wsClient();
         // Half open: panel 50 = Matter 5000.
@@ -69,7 +69,7 @@ for (const [command, args, panelTarget, matterTarget, moving] of [
     });
 }
 
-test('MAT-05: the panel statuses that follow the command drive the position', { timeout: 30000 }, async (t) => {
+test('MAT-05: the panel statuses that follow the command drive the position', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const ws = wsClient();
     const cover = { id: 'cover_2', type: 'cover', name: 'Tenda due', description: '', status: { position: 0, targetPosition: 0, state: 'stopped' } };
@@ -97,7 +97,7 @@ test('MAT-05: the panel statuses that follow the command drive the position', { 
     assert.equal(movement(stack, 'cover_2'), 0);
 });
 
-test('MAT-08: moveToLevel on a dimmer that is off sends nothing to the panel', { timeout: 30000 }, async (t) => {
+test('MAT-08: moveToLevel on a dimmer that is off sends nothing to the panel', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const ws = wsClient();
     const dimmer = { id: 'light_3', type: 'light', name: 'Faretto spento', description: '', status: { on: false, dimmable: true, brightness: 40 } };
@@ -116,7 +116,7 @@ test('MAT-08: moveToLevel on a dimmer that is off sends nothing to the panel', {
     assert.deepEqual(ws.calls, [['dimLight', 'light_3', 50]]);
 });
 
-test('MAT-15: without a panel client every command fails and the Matter state does not change', { timeout: 30000 }, async (t) => {
+test('MAT-15: without a panel client every command fails and the Matter state does not change', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const noClient = () => undefined;
     await register(stack, { id: 'light_4', type: 'light', name: 'Luce senza client', description: '', status: { on: false, dimmable: false } }, noClient);

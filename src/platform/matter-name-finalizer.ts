@@ -115,5 +115,6 @@ async function refreshName(
         return;
     }
     deps.registrations.delete(deviceId);
+    coordinator.inheritOnNextRegister(deviceId, uniqueId);
     await deps.registerRenamed(device, uniqueId);
 }
