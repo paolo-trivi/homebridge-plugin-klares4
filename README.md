@@ -56,7 +56,7 @@ If you already run Home Assistant, both options are valid; this plugin is the si
 ### Requirements and compatibility
 
 - A Ksenia **Lares 4.0** panel (firmware exposing the `KS_WSOCK` WebSocket subprotocol on the local IP) and a user PIN enabled for the WebSocket API. If your model works or has issues, please open an issue so the list can grow.
-- **Node.js 22.12 or later.** Node 22, 24 and 26 are tested in CI.
+- **Node.js 22.12 or later.** Node 22, 24 and 26 are tested in CI. Matter needs Node 22.13 or later: the Matter stack of Homebridge 2.5 (matter.js 0.18) does not install on 22.12.
 - **Homebridge**: the package accepts `^1.6.0 || ^2.0.0-beta.0`. Homebridge **2.5.x** is the verified version (contract tests against the real Homebridge Matter stack, and a real installation); **2.4.x** is covered by a CI contract job; **1.x is not tested** and may work for HomeKit only. **Matter requires Homebridge 2.x.**
 - **HomeKit limit**: one Homebridge bridge accepts at most **149 accessories**. Beyond that the plugin logs one warning (`HomeKit (HAP) limit reached`) and the other devices stay available on Matter and MQTT. Use the exclusion lists or a child bridge to stay under the limit.
 - **One panel per Homebridge instance**: device IDs (`light_1`, `zone_3`) are not namespaced per panel, so two `Lares4Complete` blocks in the same Homebridge instance would collide on accessory identities, on the plugin's files in the storage folder and on MQTT topics. For a second panel run a second Homebridge instance with its own storage folder and a different `mqtt.topicPrefix`.
@@ -514,7 +514,7 @@ Se usi già Home Assistant, entrambe le opzioni sono valide; questo plugin è la
 ### Requisiti e compatibilità
 
 - Una centrale Ksenia **Lares 4.0** (firmware che espone il sottoprotocollo WebSocket `KS_WSOCK` sull'IP locale) e un PIN utente abilitato per l'API WebSocket. Se il tuo modello funziona o ha problemi, apri una issue così l'elenco può crescere.
-- **Node.js 22.12 o successivo.** Node 22, 24 e 26 sono testati in CI.
+- **Node.js 22.12 o successivo.** Node 22, 24 e 26 sono testati in CI. Matter richiede Node 22.13 o successivo: lo stack Matter di Homebridge 2.5 (matter.js 0.18) non si installa su 22.12.
 - **Homebridge**: il pacchetto accetta `^1.6.0 || ^2.0.0-beta.0`. Homebridge **2.5.x** è la versione verificata (test di contratto sullo stack Matter reale di Homebridge e un'installazione reale); **2.4.x** è coperta da un job di contratto in CI; **1.x non è testato** e può funzionare solo per HomeKit. **Matter richiede Homebridge 2.x.**
 - **Limite HomeKit**: un bridge Homebridge accetta al massimo **149 accessori**. Oltre il limite il plugin registra un solo avviso (`HomeKit (HAP) limit reached`) e gli altri dispositivi restano disponibili su Matter e MQTT. Usa le liste di esclusione o un child bridge per restare sotto il limite.
 - **Una centrale per istanza di Homebridge**: gli ID dei dispositivi (`light_1`, `zone_3`) non hanno un namespace per centrale, quindi due blocchi `Lares4Complete` nella stessa istanza di Homebridge entrerebbero in collisione sulle identità degli accessori, sui file del plugin nella cartella storage e sui topic MQTT. Per una seconda centrale usa una seconda istanza di Homebridge con la propria cartella storage e un `mqtt.topicPrefix` diverso.

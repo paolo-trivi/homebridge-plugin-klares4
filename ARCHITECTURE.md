@@ -90,7 +90,7 @@ One policy decides what exists, applied **before** anything enters the client st
 
 ## Release and CI
 
-- `ci.yml`: `npm run verify` on Node 22, 24 and 26 and on the lower Node bound; the Matter contract tests (`npm run test:contract`) on Homebridge 2.4.x and 2.5.x; coverage thresholds on `src/`; `npm run check:pack` (tarball content allowlist, no source maps, no orphan build output).
+- `ci.yml`: `npm run verify` on Node 22, 24 and 26; on the lower Node bound the same without the tests on the real Matter stack (matter.js does not install there); the Matter contract tests (`npm run test:contract`) on Homebridge 2.4.x and 2.5.x; coverage thresholds on `src/`; `npm run check:pack` (tarball content allowlist, no source maps, no orphan build output).
 - `release-publish.yml` (tag `v*`): job `build` (no publish rights: `scripts/release-guard.js`, `verify`, `npm pack`, `scripts/check-pack.js`, checksum, artifact) then job `publish` (environment `npm-publish`, no checkout, publishes the tarball with provenance). The tagged commit must be on `main`; a stable `X.Y.Z` requires a published `X.Y.Z-rc.N` with the same dependencies. All actions are pinned by commit SHA; Dependabot auto-merges only development dependencies and actions.
 
 ## Compatibility Contract

@@ -6,6 +6,8 @@
 //
 //   node scripts/run-tests.js                   every test file
 //   node scripts/run-tests.js --real-stack-only only the real-stack files
+//   node scripts/run-tests.js --no-real-stack   every file but the real-stack ones
+//     (for a Node version on which matter.js cannot be installed)
 //
 // `node --test --test-timeout` is a per-file budget as well as a per-test one,
 // and a file that boots matter.js is CPU-heavy: on a small or busy runner (or
@@ -77,10 +79,17 @@ function runNodeTest(files, extraArgs) {
 
 function main() {
     const realStackOnly = process.argv.includes('--real-stack-only');
+    const noRealStack = process.argv.includes('--no-real-stack');
+    if (realStackOnly && noRealStack) {
+        console.error('--real-stack-only and --no-real-stack exclude each other: nothing would run');
+        process.exitCode = 2;
+        return;
+    }
     const { light, realStack } = planTestRuns(listTestFiles(TEST_DIR));
     const statuses = [];
     if (!realStackOnly) statuses.push(runNodeTest(light, [`--test-timeout=${LIGHT_TIMEOUT_MS}`]));
-    statuses.push(runNodeTest(realStack, ['--test-concurrency=1', `--test-timeout=${REAL_STACK_TIMEOUT_MS}`]));
+    if (noRealStack) console.log(`# ${realStack.length} real-stack test file(s) not run (--no-real-stack)`);
+    else statuses.push(runNodeTest(realStack, ['--test-concurrency=1', `--test-timeout=${REAL_STACK_TIMEOUT_MS}`]));
     process.exitCode = statuses.some((status) => status !== 0) ? 1 : 0;
 }
 

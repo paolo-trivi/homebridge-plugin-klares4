@@ -50,7 +50,7 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 - **Sensors the panel has not reported** (an offline DOMUS, for example) show "No Response" on HomeKit instead of 0 °C, 50 %, 100 lux or "no motion". Out-of-range or unreadable panel values are discarded instead of being moved to the nearest limit.
 - **Files the plugin creates for the first time are private (`0600`);** existing files keep their permissions.
 - **The log is quieter at the default level, and `logLevel` now does what it says.** Level `1` no longer writes a line for every state change the panel reports (a zone opening, a light switching, a thermostat reading) nor four lines per device at every start; those are level `2`, which now shows them without running Homebridge in debug mode (`-D`), marked `[debug]`. Level `0` writes warnings and errors only. If you read zone openings in the Homebridge log, set `logLevel` to `2`. The legacy `debug` switch is the same as level `2`.
-- **Requirements.** Node.js 22.12 or later (22, 24 and 26 are tested). Homebridge 2.5.x is the verified version, 2.4.x is covered by a CI contract job, and Homebridge 1.x is allowed by the package but **not tested**. The npm package no longer ships source maps.
+- **Requirements.** Node.js 22.12 or later (22, 24 and 26 are tested); Matter needs Node 22.13 or later, a requirement of the Matter stack of Homebridge 2.5. Homebridge 2.5.x is the verified version, 2.4.x is covered by a CI contract job, and Homebridge 1.x is allowed by the package but **not tested**. The npm package no longer ships source maps.
 
 ### Security
 

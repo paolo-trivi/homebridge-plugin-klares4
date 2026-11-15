@@ -68,8 +68,15 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Verify
-        run: npm run verify
+      # matter.js 0.18 (the Matter stack of Homebridge 2.5) installs only on Node 22.13 or
+      # later, so at the floor the tests that boot the real Matter stack cannot run.
+      # Everything else does: the line gate, the type check, the build and the other tests.
+      - name: Verify (without the real Matter stack)
+        run: |
+          npm run check:max-lines
+          npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+          npm run build
+          node scripts/run-tests.js --no-real-stack
 
   contract:
     name: Contract (Homebridge ${{ matrix.homebridge }}.x)
