@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import type { KsaSanitizedCache } from '../types';
-import { createDeviceSlug } from '../mqtt/topic-parser';
+import { createDeviceSlug } from '../device-slug';
 import { determineOutputType } from '../websocket/device-state-projector';
 import type { KsaDerivedConfig, KsaImportResult, KsaMapRecord, ParsedKsaProgram } from './types';
 

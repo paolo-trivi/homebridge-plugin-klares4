@@ -6,23 +6,6 @@ export type BrokerUrlCheck =
     | { ok: true; url: string; display: string }
     | { ok: false; reason: string };
 
-/**
- * Replaces the `user:password@` part of a broker URL with `***@`, for logging.
- * Leading and trailing spaces are dropped first (mqtt.js accepts them), and a
- * URL without a scheme is masked from its first character.
- */
-export function maskBrokerUrl(brokerUrl: string): string {
-    const url = brokerUrl.trim();
-    const authorityStart = SCHEME_PREFIX.exec(url)?.[0].length ?? 0;
-    const rest = url.slice(authorityStart);
-    const authorityEnd = rest.search(/[/?#]/);
-    const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
-    // The last '@' of the authority: a password with an unescaped '@' is masked whole.
-    const at = authority.lastIndexOf('@');
-    if (at === -1) return url;
-    return `${url.slice(0, authorityStart)}***@${rest.slice(at + 1)}`;
-}
-
 const PORT_REASON = 'the port in the broker URL must be a number from 1 to 65535';
 
 /**

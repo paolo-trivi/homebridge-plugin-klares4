@@ -176,7 +176,7 @@ function analyzePair(leftItem: AnalyzedDevice, rightItem: AnalyzedDevice): Voice
     if (left.type !== right.type) risks.push('cross-type-conflict');
     const scenario = left.type === 'scenario' ? a : right.type === 'scenario' ? b : undefined;
     const entity = left.type === 'scenario' ? b : a;
-    if (scenario && ACTION_VERBS.has(scenario.tokens[0])
+    if (scenario && ACTION_VERBS.has(scenario.tokens[0] ?? '')
         && scenario.tokens.slice(1).join(' ') === entity.singular) {
         risks.push('scenario-verb-entity');
         base = Math.max(base, 92);
@@ -212,7 +212,9 @@ export function analyzeMatterVoiceCollisions(
     const findings: VoiceCollisionFinding[] = [];
     for (let left = 0; left < analyzed.length; left += 1) {
         for (let right = left + 1; right < analyzed.length; right += 1) {
-            const finding = analyzePair(analyzed[left], analyzed[right]);
+            const a = analyzed[left];
+            const b = analyzed[right];
+            const finding = a && b ? analyzePair(a, b) : undefined;
             if (finding) findings.push(finding);
         }
     }

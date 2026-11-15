@@ -131,8 +131,9 @@ export class CommandDispatcher {
             if (this.isCompatible(candidate, message, false)) compatiblePending.push(candidate);
         }
 
-        if (compatiblePending.length === 1) {
-            this.settle(compatiblePending[0], message, 'single-compatible');
+        const [only] = compatiblePending;
+        if (compatiblePending.length === 1 && only !== undefined) {
+            this.settle(only, message, 'single-compatible');
         }
     }
 

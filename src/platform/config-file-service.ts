@@ -17,7 +17,7 @@ const DEFAULT_INDENT = '    ';
 /** The indentation the file already uses, so a rewrite changes only the edited keys. */
 function detectIndent(content: string): string {
     const match = /^\{\r?\n([ \t]+)\S/.exec(content);
-    return match ? match[1] : DEFAULT_INDENT;
+    return match?.[1] ?? DEFAULT_INDENT;
 }
 
 /** What tells this instance's platform block apart when config.json holds more than one. */

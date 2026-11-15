@@ -1,9 +1,10 @@
-import type { API, Logger, MatterAccessory } from 'homebridge';
+import type { API, Logger } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import { hasObservedState } from '../device-observation';
 import { mapThermostatAsTemperatureSensor } from './matter-device-mapper';
-import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
+import type { MatterRegistration } from './matter-registry-types';
+import { buildStateUpdates } from './matter-state-updates';
 import { declaredClusters, type MatterTopologyCoordinator } from './matter-topology-coordinator';
 import { inheritIdentity, replaceEndpoint } from './matter-endpoint-replacement';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
@@ -12,33 +13,7 @@ import { takeSensorIdentity } from './matter-thermostat-recovery-request';
 
 const MATTER_REGISTER_RECOVERY_LIMIT = 2;
 
-export interface MatterRegistration {
-    uuid: string;
-    displayName: string;
-    deviceType: string;
-    matterAccessory: MatterAccessory;
-    status: 'pending' | 'registered' | 'failed' | 'skipped';
-    registeredAt?: number;
-    stateUpdatesReadyAt?: number;
-    failedAt?: number;
-    lastError?: string;
-    recoveryAttempts: number;
-    pendingStateUpdates: PendingMatterStateUpdate[];
-    /**
-     * displayName last pushed to matter.js via `registerPlatformAccessories`.
-     * This is the name the live endpoint (and the controllers) actually hold —
-     * unlike `matterAccessory.displayName`, which in-memory re-mapping may
-     * update without any push. The name-map finalize pass diffs against this.
-     */
-    registeredDisplayName?: string;
-    /** Set when the failure was transient: earliest time a new update may retry the registration. */
-    retryAfter?: number;
-    /**
-     * `uniqueId` of the endpoint this registration replaces, given back to the
-     * new endpoint once it answers (see `matter-endpoint-replacement.ts`).
-     */
-    inheritedUniqueId?: string;
-}
+export type { MatterRegistration };
 
 /**
  * Homebridge 2.4 rejects a bridged register while the bridge's Matter server

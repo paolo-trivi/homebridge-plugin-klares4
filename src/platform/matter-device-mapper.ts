@@ -25,31 +25,10 @@ import { toErrorMessage } from '../errors';
 
 const matterNameRegistry = new MatterNameRegistry();
 
-/**
- * Drain the typed-suffix collision queue of the module-level fallback
- * registry. Legacy escape hatch: since 2.1.4-rc.6 the authoritative naming
- * source is the batch name-map (`MatterNameService`, injected via
- * `MapperDeps.resolveDisplayName`), and `MatterAccessoryRegistry` refreshes
- * renamed accessories from the finalize diff instead of this queue.
- */
-export function consumePendingMatterRenames(): Map<string, string> {
-    return matterNameRegistry.consumePendingRenames();
-}
-
 // Re-exports for legacy callers (registry pushStateUpdate, tests)
 export { toMatterTemperatureCelsius as toCentidegrees };
 export { buildThermostatMatterState };
 export { clampCentidegrees, luxToMatterIlluminance } from './matter-value-guards';
-
-// Matter Thermostat systemMode values (Matter spec 1.3 §4.3.7.32): 0=Off, 1=Auto, 3=Cool, 4=Heat
-export function domainModeToMatterMode(mode: 'off' | 'heat' | 'cool' | 'auto'): number {
-    switch (mode) {
-        case 'heat': return 4;
-        case 'cool': return 3;
-        case 'auto': return 1;
-        default:     return 0;
-    }
-}
 
 interface MapperDeps {
     api: API;

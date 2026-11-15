@@ -32,8 +32,8 @@ function toId(key: ExclusionKey, entry: unknown): string | undefined {
     }
     if (NUMERIC_ID.test(text)) return canonicalNumber(text);
     if (key === 'excludeSensors' && SYSTEM_SENSOR_ID.test(text)) return text;
-    const match = EXCLUSION_LISTS[key].family.exec(text);
-    return match ? canonicalNumber(match[1]) : undefined;
+    const id = EXCLUSION_LISTS[key].family.exec(text)?.[1];
+    return id !== undefined ? canonicalNumber(id) : undefined;
 }
 
 /**

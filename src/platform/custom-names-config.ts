@@ -132,14 +132,14 @@ function parseArrayForm(configured: unknown[], issues: ConfigIssues): ParsedCust
             return;
         }
         for (const [pattern, category] of CATEGORY_BY_PREFIX) {
-            const match = pattern.exec(deviceId);
-            if (!match) continue;
-            const previous = hasOwn(map[category], match[1]) ? map[category][match[1]] : undefined;
+            const id = pattern.exec(deviceId)?.[1];
+            if (id === undefined) continue;
+            const previous = hasOwn(map[category], id) ? map[category][id] : undefined;
             if (previous !== undefined && previous !== name) {
                 issues.warn(where, `${cite(deviceId)} is named more than once; the last name wins`);
             }
-            setOwn(map[category], match[1], name);
-            rows.push({ deviceId, category, id: match[1], name });
+            setOwn(map[category], id, name);
+            rows.push({ deviceId, category, id, name });
             return;
         }
         issues.warn(where, `${cite(deviceId)} is not a valid device ID (for example zone_3 or light_37); ignoring the row`);

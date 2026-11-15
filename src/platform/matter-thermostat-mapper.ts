@@ -27,7 +27,6 @@ export const DEFAULT_MAX_COOL_C = 35;
 export const DEFAULT_DEADBAND_C = 2;
 export const DEFAULT_HEATING_SETPOINT_C = 20;
 export const DEFAULT_COOLING_SETPOINT_C = 24;
-export const DEFAULT_LOCAL_TEMPERATURE_C = 20;
 
 // Matter temperature attribute hard limits (int16, centidegrees)
 export const TEMP_ABS_MIN_CENTI = -27000; // −270.00 °C
@@ -95,24 +94,6 @@ export function domainModeToMatterSystemMode(mode: DomainThermostatMode | undefi
 // ---------------------------------------------------------------------------
 
 /**
- * Map a Matter SystemMode value (Matter spec §4.3.7.32) back to a klares4 domain mode.
- * Returns null for modes the device does not support (e.g. Cool/Auto on a heating-only
- * thermostat) so callers can log a warning and skip the command instead of crashing.
- */
-export function matterSystemModeToKlares4Mode(
-    matterMode: number,
-    supportsCooling: boolean,
-): DomainThermostatMode | null {
-    switch (matterMode) {
-        case SYSTEM_MODE_OFF:  return 'off';
-        case SYSTEM_MODE_HEAT: return 'heat';
-        case SYSTEM_MODE_COOL: return supportsCooling ? 'cool' : null;
-        case SYSTEM_MODE_AUTO: return supportsCooling ? 'auto' : null;
-        default:               return null;
-    }
-}
-
-/**
  * Convert a Matter setpoint (centidegrees) to °C, clamped to [minC, maxC].
  * Returns the (possibly clamped) value and a flag indicating whether clamping occurred.
  */
@@ -146,14 +127,6 @@ export function matterSystemModeForRole(matterMode: number, role: ThermostatOutp
 /** True when the endpoint declares cooling: a cooling output, or one that does both. */
 export function thermostatSupportsCooling(device: KseniaThermostat): boolean {
     return thermostatRole(device) !== 'heating';
-}
-
-/**
- * The single Lares4 target is the cooling setpoint only in cool mode on a
- * cooling-capable zone; otherwise it is the heating setpoint.
- */
-export function isCoolingSetpointActive(supportsCooling: boolean, mode: DomainThermostatMode | undefined): boolean {
-    return supportsCooling && mode === 'cool';
 }
 
 /** True when the panel's single target is this endpoint's cooling setpoint. */
@@ -289,28 +262,4 @@ export function buildThermostatMatterState(device: KseniaThermostat, roleOverrid
     if (running) base.thermostatRunningState = running;
     else schemaInvariants.thermostatRunningState = { heat: false, cool: false };
     return { base, schemaInvariants };
-}
-
-// ---------------------------------------------------------------------------
-// Echo-suppression guard for Matter attribute-change handlers
-// ---------------------------------------------------------------------------
-
-/**
- * Prevents feedback loops when Matter attribute-change handlers send commands to
- * Lares4, which then echoes the change back as a state update: the plugin pushes
- * the update via `api.matter.updateAccessoryState`, which writes the Matter attribute,
- * which re-fires the handler — an infinite loop.
- *
- * Usage: call `record(key, centi)` immediately before sending a command; the handler
- * checks `isEcho(key, centi)` first and returns early if the invocation is an echo.
- */
-export class ThermostatEchoGuard {
-    private readonly sent = new Map<string, { centi: number; time: number }>();
-    private readonly ttlMs: number;
-    constructor(ttlMs = 8000) { this.ttlMs = ttlMs; }
-    record(key: string, centi: number): void { this.sent.set(key, { centi, time: Date.now() }); }
-    isEcho(key: string, centi: number): boolean {
-        const s = this.sent.get(key);
-        return !!s && s.centi === centi && (Date.now() - s.time) < this.ttlMs;
-    }
 }

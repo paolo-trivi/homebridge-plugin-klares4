@@ -34,8 +34,11 @@ export function resolveMatterExposure(raw: unknown, issues: ConfigIssues): Resol
         if (typeof section[key] === 'boolean') explicit.add(key);
         return readBoolean(section[key], true, `matterExposure.${key}`, issues);
     };
-    const [zones, sensors, scenarios, lights, covers, gates, thermostats] = MATTER_EXPOSURE_KEYS.map(read);
-    return { exposure: { zones, sensors, scenarios, lights, covers, gates, thermostats }, explicit };
+    const exposure = {
+        zones: read('zones'), sensors: read('sensors'), scenarios: read('scenarios'), lights: read('lights'),
+        covers: read('covers'), gates: read('gates'), thermostats: read('thermostats'),
+    };
+    return { exposure, explicit };
 }
 
 export function resolveTemperatureDefaults(raw: unknown, issues: ConfigIssues): {

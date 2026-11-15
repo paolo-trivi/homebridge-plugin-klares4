@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { resolveRuntimeConfig, toPlatformConfig } = require('../dist/platform/runtime-config.js');
-const { maskBrokerUrl, checkBrokerUrl } = require('../dist/mqtt/broker-url.js');
+const { checkBrokerUrl } = require('../dist/mqtt/broker-url.js');
 const { recordingLog } = require('./fixtures/fake-mqtt.js');
 
 function resolve(mqtt) {
@@ -43,13 +43,6 @@ for (const wrong of ['false', 'true', 0, 1, null, 'off', {}, []]) {
 test('SP-04: the other boolean keys keep their rule (invalid value -> default)', () => {
   const { runtime } = resolve({ retain: 'false', enabled: true });
   assert.equal(runtime.mqtt.retain, true);
-});
-
-test('SP-14: maskBrokerUrl hides credentials with surrounding spaces or without a scheme', () => {
-  assert.equal(maskBrokerUrl(' mqtt://mario:Sup3r@127.0.0.1:1884'), 'mqtt://***@127.0.0.1:1884');
-  assert.equal(maskBrokerUrl('mario:Sup3r@broker.example:1883'), '***@broker.example:1883');
-  assert.equal(maskBrokerUrl('MQTT://USER:Pw@broker.example'), 'MQTT://***@broker.example');
-  assert.equal(maskBrokerUrl('tcp://u:p@h:1883 '), 'tcp://***@h:1883');
 });
 
 test('SP-14: checkBrokerUrl describes the broker without credentials', () => {

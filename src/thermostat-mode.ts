@@ -31,24 +31,6 @@ export function parseKseniaMode(mode: unknown): ThermostatMode | undefined {
     }
 }
 
-/** Legacy: unknown values become 'off'. Prefer parseKseniaMode. */
-export function kseniaModeToDomain(mode: string | undefined): ThermostatMode {
-    return parseKseniaMode(mode) ?? 'off';
-}
-
-export function domainModeToKsenia(mode: ThermostatMode): '0' | '1' | '2' | '3' {
-    switch (mode) {
-        case 'heat':
-            return '1';
-        case 'cool':
-            return '2';
-        case 'auto':
-            return '3';
-        default:
-            return '0';
-    }
-}
-
 export function domainModeToHomeKitTarget(mode: ThermostatMode): 0 | 1 | 2 | 3 {
     switch (mode) {
         case 'heat':

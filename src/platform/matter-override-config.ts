@@ -120,7 +120,7 @@ export function normalizeMatterOverrides(
             issues.warn(where, `exposed of ${cite(deviceId)} must be true or false, received ${typeName(row.exposed)}; ignoring it`);
         }
         if (override.name === undefined && override.exposed === undefined) continue;
-        const merged: MatterDeviceOverride = hasOwn(normalized, deviceId) ? normalized[deviceId] : {};
+        const merged: MatterDeviceOverride = (hasOwn(normalized, deviceId) ? normalized[deviceId] : undefined) ?? {};
         mergeOverride(merged, override, deviceId, issues);
         setOwn(normalized, deviceId, merged);
     }

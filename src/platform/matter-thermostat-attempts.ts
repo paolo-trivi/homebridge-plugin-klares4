@@ -19,7 +19,7 @@
 
 import type { Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice, KseniaThermostat } from '../types';
-import type { MatterRegistration } from './matter-registration-recovery';
+import type { MatterRegistration } from './matter-registry-types';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { buildThermostatMatterState } from './matter-thermostat-mapper';
 import { derivedThermostatRole } from './matter-thermostat-role';

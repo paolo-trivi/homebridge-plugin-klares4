@@ -21,10 +21,6 @@ export function frameResult(message: ResultCarrier): string | undefined {
     return normalizeResult(raw) ?? 'INVALID';
 }
 
-export function isPositiveResult(message: ResultCarrier): boolean {
-    return frameResult(message) === 'OK';
-}
-
 /** `RESULT_DETAIL` trimmed, for logs; `undefined` when absent. */
 export function resultDetail(message: ResultCarrier): string | undefined {
     const detail = message.PAYLOAD?.RESULT_DETAIL;

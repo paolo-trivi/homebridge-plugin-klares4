@@ -63,7 +63,7 @@ export class AccessoryIndexService {
         });
 
         if (inRoomHandlers.length === 1) {
-            return inRoomHandlers[0];
+            return inRoomHandlers[0] ?? null;
         }
         if (inRoomHandlers.length > 1) {
             this.warn(

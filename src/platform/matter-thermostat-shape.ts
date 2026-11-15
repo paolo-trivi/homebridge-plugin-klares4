@@ -28,7 +28,7 @@
 export type ThermostatShape = 'conformant' | 'legacy';
 
 /** Preferred order when nothing is remembered. */
-const SHAPE_ORDER: readonly ThermostatShape[] = ['conformant', 'legacy'];
+const SHAPE_ORDER = ['conformant', 'legacy'] as const satisfies readonly ThermostatShape[];
 
 /**
  * Revision of the payload the first attempt sends (1 = the 2.2.0 payload, 2 =

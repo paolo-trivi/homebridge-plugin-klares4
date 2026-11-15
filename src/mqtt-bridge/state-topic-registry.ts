@@ -61,8 +61,9 @@ export class StateTopicRegistry {
         const result = new Map<string, string>();
         const fallback: Entry[] = [];
         for (const [natural, group] of byNatural) {
-            if (group.length === 1 && group[0].slug !== '') {
-                result.set(group[0].deviceId, natural);
+            const only = group.length === 1 ? group[0] : undefined;
+            if (only !== undefined && only.slug !== '') {
+                result.set(only.deviceId, natural);
                 continue;
             }
             fallback.push(...group);
@@ -84,6 +85,8 @@ export class StateTopicRegistry {
     }
 
     private warnCollision(natural: string, group: Entry[]): void {
+        const example = group[0];
+        if (example === undefined) return;
         const key = `${natural}|${group.map((entry) => entry.deviceId).sort().join(',')}`;
         if (this.warned.has(key)) return;
         this.warned.add(key);
@@ -92,7 +95,7 @@ export class StateTopicRegistry {
             ? `the name of ${ids} has no letters or digits for a topic`
             : `${ids} have names that give the same state topic ${natural}`;
         this.log.warn(
-            `MQTT: ${why}; publishing under the device ID instead (e.g. .../${group[0].deviceType}/${group[0].deviceId}/state). ` +
+            `MQTT: ${why}; publishing under the device ID instead (e.g. .../${example.deviceType}/${example.deviceId}/state). ` +
                 'Give each device a distinct name (customNames) to get a name-based topic.',
         );
     }

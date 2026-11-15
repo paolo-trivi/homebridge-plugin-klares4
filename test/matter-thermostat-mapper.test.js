@@ -9,7 +9,6 @@ const {
     getThermostatPresetWorkaroundAttributes,
     thermostatSupportsCooling,
     buildThermostatMatterState,
-    matterSystemModeToKlares4Mode,
     normalizeMatterSetpointC,
     DEFAULT_HEATING_SETPOINT_C,
     DEFAULT_DEADBAND_C,
@@ -25,7 +24,6 @@ const {
     SYSTEM_MODE_HEAT,
     SYSTEM_MODE_COOL,
     SYSTEM_MODE_AUTO,
-    ThermostatEchoGuard,
 } = require('../dist/platform/matter-thermostat-mapper.js');
 
 test('toMatterTemperatureCelsius: numeric values', () => {
@@ -178,28 +176,6 @@ test('buildThermostatMatterState: deadband invariant always holds (cooling - hea
 });
 
 // ---------------------------------------------------------------------------
-// matterSystemModeToKlares4Mode
-// ---------------------------------------------------------------------------
-
-test('matterSystemModeToKlares4Mode: heating-only thermostat', () => {
-    const supportsCooling = false;
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_OFF, supportsCooling), 'off');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_HEAT, supportsCooling), 'heat');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_COOL, supportsCooling), null, 'cool not supported → null');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_AUTO, supportsCooling), null, 'auto not supported → null');
-    assert.equal(matterSystemModeToKlares4Mode(99, supportsCooling), null, 'unknown → null');
-});
-
-test('matterSystemModeToKlares4Mode: cooling-capable thermostat', () => {
-    const supportsCooling = true;
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_OFF, supportsCooling), 'off');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_HEAT, supportsCooling), 'heat');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_COOL, supportsCooling), 'cool');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_AUTO, supportsCooling), 'auto');
-    assert.equal(matterSystemModeToKlares4Mode(99, supportsCooling), null, 'unknown → null');
-});
-
-// ---------------------------------------------------------------------------
 // normalizeMatterSetpointC
 // ---------------------------------------------------------------------------
 
@@ -237,44 +213,4 @@ test('normalizeMatterSetpointC: clamps cooling value below minimum', () => {
     const { value, clamped } = normalizeMatterSetpointC(100, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C);
     assert.equal(value, DEFAULT_MIN_COOL_C);
     assert.equal(clamped, true);
-});
-
-// ThermostatEchoGuard
-
-test('ThermostatEchoGuard: isEcho returns false when nothing was recorded', () => {
-    const guard = new ThermostatEchoGuard();
-    assert.equal(guard.isEcho('heat', 2100), false);
-});
-
-test('ThermostatEchoGuard: isEcho returns true immediately after record', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    assert.equal(guard.isEcho('heat', 2100), true);
-});
-
-test('ThermostatEchoGuard: isEcho returns false for different key', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    assert.equal(guard.isEcho('cool', 2100), false);
-});
-
-test('ThermostatEchoGuard: isEcho returns false for different value', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    assert.equal(guard.isEcho('heat', 2200), false);
-});
-
-test('ThermostatEchoGuard: isEcho returns false after TTL expires', async () => {
-    const guard = new ThermostatEchoGuard(50); // 50 ms TTL
-    guard.record('heat', 2100);
-    await new Promise(r => setTimeout(r, 60));
-    assert.equal(guard.isEcho('heat', 2100), false);
-});
-
-test('ThermostatEchoGuard: record overwrites previous entry for same key', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    guard.record('heat', 2200);
-    assert.equal(guard.isEcho('heat', 2100), false);
-    assert.equal(guard.isEcho('heat', 2200), true);
 });

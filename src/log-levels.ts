@@ -38,9 +38,10 @@ function maskKeys(text: string, keyPattern: RegExp, quote: string): string {
     let cursor = 0;
     keyPattern.lastIndex = 0;
     for (let match = keyPattern.exec(text); match !== null; match = keyPattern.exec(text)) {
-        if (!isCredentialKey(match[1])) continue;
+        const key = match[1] ?? '';
+        if (!isCredentialKey(key)) continue;
         const valueEnd = endOfValue(text, keyPattern.lastIndex, quote);
-        masked += `${text.slice(cursor, match.index)}${quote}${match[1]}${quote}:${quote}***${quote}`;
+        masked += `${text.slice(cursor, match.index)}${quote}${key}${quote}:${quote}***${quote}`;
         cursor = valueEnd;
         keyPattern.lastIndex = valueEnd;
     }
@@ -66,7 +67,7 @@ function endOfValue(text: string, start: number, quote: string): number {
         return text.length;
     }
     let end = start;
-    while (end < text.length && !/[,}\]\s\\]/.test(text[end])) end += 1;
+    while (end < text.length && !/[,}\]\s\\]/.test(text.charAt(end))) end += 1;
     return end;
 }
 

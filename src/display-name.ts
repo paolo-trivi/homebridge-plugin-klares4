@@ -68,7 +68,7 @@ export type NameLengthUnit = 'code-points' | 'utf16';
  */
 function trimEnd(characters: string[], isValidEnd: RegExp): string {
     let end = characters.length;
-    while (end > 0 && !isValidEnd.test(characters[end - 1])) end -= 1;
+    while (end > 0 && !isValidEnd.test(characters[end - 1] ?? '')) end -= 1;
     return characters.slice(0, end).join('');
 }
 

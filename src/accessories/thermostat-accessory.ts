@@ -9,6 +9,7 @@ import {
     homeKitTargetToDomainMode,
 } from '../thermostat-mode';
 import { syncThermostatTopLevelFromStatus } from '../thermostat-state';
+import { clampHapHumidity, clampHapTemperature } from './hap-ranges';
 import { MissingValueWarning } from './missing-value-warning';
 import { toErrorMessage } from '../errors';
 
@@ -139,10 +140,10 @@ export class ThermostatAccessory {
             if (this.missingCurrent.shouldWarn(true)) {
                 this.platform.log.warn(`${this.device.name}: Current temperature not available, using ${fallback}C`);
             }
-            return Math.max(-270, Math.min(100, fallback));
+            return clampHapTemperature(fallback);
         }
         this.missingCurrent.shouldWarn(false);
-        return Math.max(-270, Math.min(100, this.device.currentTemperature));
+        return clampHapTemperature(this.device.currentTemperature);
     }
 
     public async getTargetTemperature(): Promise<CharacteristicValue> {
@@ -221,7 +222,7 @@ export class ThermostatAccessory {
 
     public async getCurrentRelativeHumidity(): Promise<CharacteristicValue> {
         if (this.device.humidity !== undefined) {
-            return Math.max(0, Math.min(100, this.device.humidity));
+            return clampHapHumidity(this.device.humidity);
         }
         return 50; // Default value
     }
@@ -246,7 +247,7 @@ export class ThermostatAccessory {
         const currentTemp =
             this.device.currentTemperature !== undefined &&
                 this.device.currentTemperature !== null
-                ? Math.max(-270, Math.min(100, this.device.currentTemperature))
+                ? clampHapTemperature(this.device.currentTemperature)
                 : 0;
 
         const defaultTemp =
@@ -270,7 +271,7 @@ export class ThermostatAccessory {
         if (this.device.humidity !== undefined) {
             this.service.updateCharacteristic(
                 this.platform.Characteristic.CurrentRelativeHumidity,
-                Math.max(0, Math.min(100, this.device.humidity)),
+                clampHapHumidity(this.device.humidity),
             );
         }
     }
@@ -285,7 +286,7 @@ export class ThermostatAccessory {
             this.accessory.context.lastKnownTemp = newDevice.currentTemperature;
             this.service.updateCharacteristic(
                 this.platform.Characteristic.CurrentTemperature,
-                Math.max(-270, Math.min(100, newDevice.currentTemperature)),
+                clampHapTemperature(newDevice.currentTemperature),
             );
         }
         if (Number.isFinite(newDevice.targetTemperature)) {
@@ -305,7 +306,7 @@ export class ThermostatAccessory {
         if (newDevice.humidity !== undefined) {
             this.service.updateCharacteristic(
                 this.platform.Characteristic.CurrentRelativeHumidity,
-                Math.max(0, Math.min(100, newDevice.humidity)),
+                clampHapHumidity(newDevice.humidity),
             );
         }
 

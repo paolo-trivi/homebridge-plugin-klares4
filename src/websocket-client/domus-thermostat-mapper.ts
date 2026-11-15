@@ -41,8 +41,7 @@ export function normalizeThermostatOutputId(id: string): string {
 
 export function normalizeDomusSensorId(id: string): string {
     const raw = stripDevicePrefix(String(id)).trim();
-    const parts = raw.split('_');
-    const last = parts[parts.length - 1];
+    const last = raw.split('_').at(-1) ?? raw;
     return normalizeNumericId(/^[0-9]+$/.test(last) ? last : raw);
 }
 

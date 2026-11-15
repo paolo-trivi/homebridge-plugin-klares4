@@ -4,11 +4,7 @@ import type { KseniaSensor } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
 import { hasObservedState } from '../device-observation';
-
-// HomeKit's ranges for each characteristic.
-const clampTemperature = (value: number): number => Math.max(-270, Math.min(100, value));
-const clampHumidity = (value: number): number => Math.max(0, Math.min(100, value));
-const clampLux = (value: number): number => Math.max(0.0001, Math.min(100000, value));
+import { clampHapHumidity, clampHapLux, clampHapTemperature } from './hap-ranges';
 
 /**
  * Sensor Accessory Handler
@@ -138,15 +134,15 @@ export class SensorAccessory {
     }
 
     public async getCurrentTemperature(): Promise<CharacteristicValue> {
-        return clampTemperature(this.reading());
+        return clampHapTemperature(this.reading());
     }
 
     public async getCurrentHumidity(): Promise<CharacteristicValue> {
-        return clampHumidity(this.reading());
+        return clampHapHumidity(this.reading());
     }
 
     public async getCurrentLightLevel(): Promise<CharacteristicValue> {
-        return clampLux(this.reading());
+        return clampHapLux(this.reading());
     }
 
     public async getMotionDetected(): Promise<CharacteristicValue> {
@@ -192,13 +188,13 @@ export class SensorAccessory {
 
         switch (this.device.status.sensorType) {
             case 'temperature':
-                this.service.updateCharacteristic(Characteristic.CurrentTemperature, clampTemperature(value));
+                this.service.updateCharacteristic(Characteristic.CurrentTemperature, clampHapTemperature(value));
                 break;
             case 'humidity':
-                this.service.updateCharacteristic(Characteristic.CurrentRelativeHumidity, clampHumidity(value));
+                this.service.updateCharacteristic(Characteristic.CurrentRelativeHumidity, clampHapHumidity(value));
                 break;
             case 'light':
-                this.service.updateCharacteristic(Characteristic.CurrentAmbientLightLevel, clampLux(value));
+                this.service.updateCharacteristic(Characteristic.CurrentAmbientLightLevel, clampHapLux(value));
                 break;
             case 'motion':
                 this.service.updateCharacteristic(Characteristic.MotionDetected, value > 0);

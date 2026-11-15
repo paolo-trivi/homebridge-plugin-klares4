@@ -39,7 +39,7 @@ export function reportConfigOverrides(
     log: Logger,
 ): void {
     const hidden = Object.keys(runtime.matterOverrides)
-        .filter((id: string): boolean => discoveredIds.has(id) && runtime.matterOverrides[id].exposed === false);
+        .filter((id: string): boolean => discoveredIds.has(id) && runtime.matterOverrides[id]?.exposed === false);
     if (hidden.length > 0) {
         // A Homebridge UI save before 2.2.0 wrote exposed:false on every override row.
         log.warn(

@@ -132,15 +132,14 @@ test('TH-05 data for Matter: season and output role are on the thermostat status
     assert.equal(typeof h.device().status.observedAt, 'number');
 });
 
-test('C contract: parseKseniaMode returns undefined for unknown values, kseniaModeToDomain keeps its legacy off', () => {
-    const { parseKseniaMode, kseniaModeToDomain } = require('../dist/thermostat-mode.js');
+test('C contract: parseKseniaMode returns undefined for unknown values', () => {
+    const { parseKseniaMode } = require('../dist/thermostat-mode.js');
     assert.equal(parseKseniaMode('MAN'), undefined);
     assert.equal(parseKseniaMode(undefined), undefined);
     assert.equal(parseKseniaMode(3), undefined);
     assert.equal(parseKseniaMode(' Heat '), 'heat');
     assert.equal(parseKseniaMode('0'), 'off');
     assert.equal(parseKseniaMode('automatico'), 'auto');
-    assert.equal(kseniaModeToDomain('MAN'), 'off');
 });
 
 test('unreadable realtime values (NA, garbage) leave the thermostat state as it was', () => {

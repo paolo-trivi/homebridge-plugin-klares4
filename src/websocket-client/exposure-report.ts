@@ -21,7 +21,7 @@ const DEVICE_ID = /^([a-z]+)_(.+)$/;
 export function isHiddenByExposurePolicy(state: WebSocketClientState, deviceId: string): boolean {
     const match = DEVICE_ID.exec(deviceId);
     if (!match) return false;
-    const [, prefix, panelId] = match;
+    const [, prefix = '', panelId = ''] = match;
     const kind = prefix === 'scenario' ? 'scenario' : OUTPUT_PREFIXES.includes(prefix) ? 'output' : undefined;
     if (!kind) return false;
     for (const device of state.hiddenByExposurePolicy?.values() ?? []) {

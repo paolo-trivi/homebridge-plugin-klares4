@@ -2,28 +2,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  kseniaModeToDomain,
-  domainModeToKsenia,
+  parseKseniaMode,
   domainModeToHomeKitTarget,
   homeKitTargetToDomainMode,
   deriveHomeKitCurrentState,
 } = require('../dist/thermostat-mode.js');
 
-test('kseniaModeToDomain supports numeric and textual aliases', () => {
-  assert.equal(kseniaModeToDomain('1'), 'heat');
-  assert.equal(kseniaModeToDomain('2'), 'cool');
-  assert.equal(kseniaModeToDomain('3'), 'auto');
-  assert.equal(kseniaModeToDomain('riscaldamento'), 'heat');
-  assert.equal(kseniaModeToDomain('raffreddamento'), 'cool');
-  assert.equal(kseniaModeToDomain('spento'), 'off');
-  assert.equal(kseniaModeToDomain('unexpected'), 'off');
-});
-
-test('domainModeToKsenia maps domain mode to write value', () => {
-  assert.equal(domainModeToKsenia('off'), '0');
-  assert.equal(domainModeToKsenia('heat'), '1');
-  assert.equal(domainModeToKsenia('cool'), '2');
-  assert.equal(domainModeToKsenia('auto'), '3');
+test('parseKseniaMode supports numeric and textual aliases, and does not turn an unknown value into off', () => {
+  assert.equal(parseKseniaMode('1'), 'heat');
+  assert.equal(parseKseniaMode('2'), 'cool');
+  assert.equal(parseKseniaMode('3'), 'auto');
+  assert.equal(parseKseniaMode('riscaldamento'), 'heat');
+  assert.equal(parseKseniaMode('raffreddamento'), 'cool');
+  assert.equal(parseKseniaMode('spento'), 'off');
+  assert.equal(parseKseniaMode('unexpected'), undefined);
 });
 
 test('homekit target mapping is symmetric with domain values', () => {

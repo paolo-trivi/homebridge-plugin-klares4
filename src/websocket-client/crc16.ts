@@ -23,8 +23,8 @@ export function calculateCRC16(jsonString: string): string {
  */
 export function crc16OfBytes(bytes: Uint8Array): string {
     let crc = 0xffff;
-    for (let i = 0; i < bytes.length; i += 1) {
-        crc = (((crc << 8) & 0xffff) | bytes[i]) ^ HIGH_BYTE_FEEDBACK[crc >> 8];
+    for (const byte of bytes) {
+        crc = (((crc << 8) & 0xffff) | byte) ^ (HIGH_BYTE_FEEDBACK[crc >> 8] ?? 0);
     }
     return '0x' + crc.toString(16).padStart(4, '0');
 }

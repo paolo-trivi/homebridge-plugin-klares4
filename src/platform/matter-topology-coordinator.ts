@@ -333,5 +333,5 @@ export function declaredClusters(accessory: Pick<MatterAccessory, 'clusters'>): 
 }
 
 export function registrationProbeCluster(accessory: Pick<MatterAccessory, 'clusters'>): string {
-    return declaredClusters(accessory)[0];
+    return declaredClusters(accessory)[0] ?? BRIDGED_INFO;
 }

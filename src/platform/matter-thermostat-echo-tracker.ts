@@ -12,11 +12,10 @@
  * handler — a self-sustaining loop that hammers the panel every ~2-3 s and
  * eventually times out WRITE_CFG (`Command timed out after 2500ms`).
  *
- * The previous closure-scoped `ThermostatEchoGuard` (matter-thermostat-mapper.ts)
- * could not catch this because:
- *   - it only recorded *outgoing handler-side writes*, not the plugin's own pushes;
- *   - it was recreated on every `refreshAccessoryMetadata`, losing its state;
- *   - it did not cover `systemMode`, only setpoints.
+ * A guard scoped to one handler closure cannot catch this: it has to record
+ * the plugin's own pushes as well as the handler-side writes, survive a
+ * metadata refresh of the accessory, and cover `systemMode` as well as the
+ * setpoints. Hence one tracker per registry.
  *
  * Responsibilities (small, deliberately):
  *   - `recordPushed(uuid, attrs)`  — call before/right after `updateAccessoryState`

@@ -75,10 +75,7 @@ export class DebugFileGenerator {
                         outgoing: outgoingMessages,
                         byCommand: countByCommand(rawMessages),
                     },
-                    devices:
-                        deviceSnapshots.length > 0
-                            ? deviceSnapshots[deviceSnapshots.length - 1].deviceCount
-                            : 0,
+                    devices: deviceSnapshots.at(-1)?.deviceCount ?? 0,
                 },
             };
 

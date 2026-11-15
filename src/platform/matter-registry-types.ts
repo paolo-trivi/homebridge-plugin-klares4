@@ -1,8 +1,37 @@
-import type { API, Logger } from 'homebridge';
+import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
+import type { PendingMatterStateUpdate } from './matter-state-updates';
 
 export type MatterRegistrationStatus = 'pending' | 'registered' | 'failed' | 'skipped';
+
+export interface MatterRegistration {
+    uuid: string;
+    displayName: string;
+    deviceType: string;
+    matterAccessory: MatterAccessory;
+    status: MatterRegistrationStatus;
+    registeredAt?: number;
+    stateUpdatesReadyAt?: number;
+    failedAt?: number;
+    lastError?: string;
+    recoveryAttempts: number;
+    pendingStateUpdates: PendingMatterStateUpdate[];
+    /**
+     * displayName last pushed to matter.js via `registerPlatformAccessories`.
+     * This is the name the live endpoint (and the controllers) actually hold —
+     * unlike `matterAccessory.displayName`, which in-memory re-mapping may
+     * update without any push. The name-map finalize pass diffs against this.
+     */
+    registeredDisplayName?: string;
+    /** Set when the failure was transient: earliest time a new update may retry the registration. */
+    retryAfter?: number;
+    /**
+     * `uniqueId` of the endpoint this registration replaces, given back to the
+     * new endpoint once it answers (see `matter-endpoint-replacement.ts`).
+     */
+    inheritedUniqueId?: string;
+}
 
 /**
  * Timings of the Matter registration path. Each one defaults to its
