@@ -7,26 +7,27 @@ export function asSeason(value: unknown): ThermostatSeason | undefined {
     return upper === 'WIN' || upper === 'SUM' ? upper : undefined;
 }
 
-/** A season seen on the panel (realtime ACT_SEA, or the ACT_SEA of a cfg read) and when. */
+/** A season seen on the panel (realtime ACT_SEA, or the ACT_SEA of a cfg read), with its event sequence number. */
 export interface SeasonObservation {
     season?: ThermostatSeason;
-    at: number;
+    seq: number;
 }
 
 /**
  * Which season a thermostat is really in, so a setpoint lands in the right
- * block. The freshest of the panel's observations (realtime, cfg read) and our
- * last acknowledged WRITE_CFG wins; on a tie the panel wins. An ACK is only a
+ * block. The latest of the panel's observations (realtime, cfg read) and our
+ * last acknowledged WRITE_CFG wins, in the order the client processed them
+ * (event sequence numbers: no ties, no clock). An ACK is only a
  * claim until the panel shows it: an ACK older than the latest observation
  * never overrides it, however long ago that observation last changed.
  * A command is recorded only once the panel accepted it: a rejected "cool"
  * must not move later setpoints to summer.
  */
 export class ThermostatSeasonTracker {
-    private readonly acknowledged = new Map<string, { season: ThermostatSeason; at: number }>();
+    private readonly acknowledged = new Map<string, { season: ThermostatSeason; seq: number }>();
 
-    public recordAcknowledged(cfgId: string, season: ThermostatSeason | undefined, at = Date.now()): void {
-        if (season) this.acknowledged.set(cfgId, { season, at });
+    public recordAcknowledged(cfgId: string, season: ThermostatSeason | undefined, seq: number): void {
+        if (season) this.acknowledged.set(cfgId, { season, seq });
     }
 
     public resolve(cfgId: string, observations: Array<SeasonObservation | undefined>): ThermostatSeason {
@@ -38,10 +39,10 @@ export class ThermostatSeasonTracker {
         let best: SeasonObservation | undefined;
         for (const observation of observations) {
             if (!observation?.season) continue;
-            if (!best || observation.at >= best.at) best = observation;
+            if (!best || observation.seq > best.seq) best = observation;
         }
         const acked = this.acknowledged.get(cfgId);
-        if (acked && (!best || acked.at > best.at)) return acked.season;
+        if (acked && (!best || acked.seq > best.seq)) return acked.season;
         return best?.season;
     }
 }

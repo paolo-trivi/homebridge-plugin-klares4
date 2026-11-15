@@ -60,10 +60,9 @@ test('TH-12: a command arriving while a write is in flight goes in the next writ
 
 test('TH-11: an acknowledged season never outlives a newer observation of the panel', () => {
     const tracker = new ThermostatSeasonTracker();
-    tracker.recordAcknowledged('1', 'SUM', 1000);
-    assert.equal(tracker.resolve('1', [{ season: 'WIN', at: 500 }]), 'SUM', 'ACK newer than the realtime');
-    assert.equal(tracker.resolve('1', [{ season: 'WIN', at: 1000 }]), 'WIN', 'tie: the panel wins');
-    assert.equal(tracker.resolve('1', [{ season: 'WIN', at: 600000 }]), 'WIN');
+    tracker.recordAcknowledged('1', 'SUM', 10);
+    assert.equal(tracker.resolve('1', [{ season: 'WIN', seq: 9 }]), 'SUM', 'ACK newer than the realtime');
+    assert.equal(tracker.resolve('1', [{ season: 'WIN', seq: 11 }]), 'WIN', 'the panel spoke after the ACK');
     assert.equal(tracker.resolve('2', []), 'WIN');
 });
 
@@ -178,4 +177,36 @@ test('L4: a mode command arriving while the cfg is being re-read waits for that 
     assert.deepEqual(sim.panel.writes.map((w) => Object.keys(w)), [['ID', 'WIN'], ['ID', 'ACT_MODE']]);
     const panel = sim.panel.cfg.get('1');
     assert.deepEqual([panel.ACT_MODE, panel.WIN.TM], ['MAN', '22.0']);
+});
+
+test('event order, not the clock: ACK and realtime in the same millisecond, both orders (frozen clock)', async (t) => {
+    const frozen = Date.now();
+    t.mock.method(Date, 'now', () => frozen);
+    const scenario = async (realtimeAfterAck) => {
+        const sim = createThermostatPanel({
+            thermostats: [{ out: '18', sensor: '1', cfg: '1' }],
+            cfgs: [realisticCfg('1', { mode: 'MAN', season: 'WIN' })],
+            realtimeAfterWrite: false,
+        });
+        sim.login();
+        sim.realtime('1'); // WIN, same millisecond as everything below
+        await sim.service.setThermostatMode('thermostat_18', 'cool'); // ACK: SUM
+        if (realtimeAfterAck) {
+            sim.panel.cfg.get('1').ACT_SEA = 'WIN'; // the panel reports winter after the ACK
+            sim.realtime('1');
+        }
+        await sim.service.setThermostatMode('thermostat_18', 'heat');
+        return sim.panel.writes.at(-1);
+    };
+    // Realtime (WIN) then ACK (SUM): the ACK is newer, Heat must switch the season back.
+    assert.deepEqual(await scenario(false), { ID: '1', ACT_MODE: 'MAN', ACT_SEA: 'WIN' });
+    // ACK (SUM) then realtime (WIN): the realtime is newer, the panel is already in winter.
+    assert.deepEqual(await scenario(true), { ID: '1', ACT_MODE: 'MAN' });
+});
+
+test('ThermostatSeasonTracker orders by event sequence: no ties', () => {
+    const tracker = new ThermostatSeasonTracker();
+    tracker.recordAcknowledged('1', 'SUM', 5);
+    assert.equal(tracker.resolve('1', [{ season: 'WIN', seq: 4 }]), 'SUM');
+    assert.equal(tracker.resolve('1', [{ season: 'WIN', seq: 6 }]), 'WIN');
 });

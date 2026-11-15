@@ -8,6 +8,7 @@ import type {
 } from '../types';
 import { parseFloatInRange } from '../websocket/device-state-projector';
 import { forEachIsolated } from '../isolation';
+import { nextThermostatEventSeq } from './thermostat-sequence';
 import type { WebSocketClientState } from './types';
 
 interface ThermostatStatusUpdaterDeps {
@@ -24,6 +25,7 @@ export class ThermostatStatusUpdater {
 
     public updateTemperatureStatuses(entries: KseniaTemperatureStatusRaw[]): void {
         forEachIsolated(this.deps.log, 'STATUS_TEMPERATURES entry', entries, (entry: KseniaTemperatureStatusRaw): void => {
+            const seq = nextThermostatEventSeq(this.deps.state);
             this.recordRealtimeSnapshot(entry);
             const thermostatOutputIds = this.resolveThermostatOutputIds(entry.ID);
             if (thermostatOutputIds.length === 0) {
@@ -35,7 +37,7 @@ export class ThermostatStatusUpdater {
             this.reportUnknownModel(entry);
             const patch = buildThermostatPatch(entry);
             for (const outputThermostatId of thermostatOutputIds) {
-                this.recordRealtimeSeason(outputThermostatId, entry);
+                this.recordRealtimeSeason(outputThermostatId, entry, seq);
                 const thermostatDevice = this.deps.state.devices.get(`thermostat_${outputThermostatId}`);
                 if (!thermostatDevice || thermostatDevice.type !== 'thermostat') {
                     continue;
@@ -48,6 +50,7 @@ export class ThermostatStatusUpdater {
                 const now = Date.now();
                 this.deps.state.thermostatRealtimeByOutputId.set(outputThermostatId, now);
                 thermostatDevice.status.observedAt = now;
+                thermostatDevice.status.observedSeq = seq;
                 if (changed) {
                     this.deps.emitDeviceStatusUpdate(thermostatDevice);
                 }
@@ -139,12 +142,12 @@ export class ThermostatStatusUpdater {
         return undefined;
     }
 
-    private recordRealtimeSeason(outputThermostatId: string, entry: KseniaTemperatureStatusRaw): void {
+    private recordRealtimeSeason(outputThermostatId: string, entry: KseniaTemperatureStatusRaw, seq: number): void {
         const season = parseSeason(entry);
         if (!season) return;
         // Stamped at every observation, not only on change: a season seen again
         // after one of our writes is newer than that write's ACK.
-        this.deps.state.thermostatRealtimeSeasonByOutputId.set(outputThermostatId, { season, updatedAt: Date.now() });
+        this.deps.state.thermostatRealtimeSeasonByOutputId.set(outputThermostatId, { season, updatedAt: Date.now(), seq });
     }
 
     /** One warning per ACT_MODEL value the plugin does not know (see parseThermostatMode). */

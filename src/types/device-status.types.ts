@@ -35,6 +35,12 @@ export interface ThermostatStatus {
     /** When the panel last reported this thermostat in realtime (STATUS_TEMPERATURES), epoch ms. */
     observedAt?: number;
     /**
+     * Event sequence number of that report: comparable with `acknowledged.seq`
+     * (same client, total order, no ties). Use it, not the timestamps, to tell
+     * which of the two is newer.
+     */
+    observedSeq?: number;
+    /**
      * What the panel last acknowledged (WRITE_CFG_RES OK) for this thermostat's
      * cfg, epoch ms. Newer than `observedAt`: the realtime has not caught up yet.
      */
@@ -42,6 +48,8 @@ export interface ThermostatStatus {
         mode?: 'off' | 'heat' | 'cool' | 'auto';
         targetTemperature?: number;
         at: number;
+        /** Event sequence number of the ACK (see `observedSeq`). */
+        seq?: number;
     };
 }
 

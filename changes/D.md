@@ -49,6 +49,12 @@ None added, renamed or removed. Changed meaning, no schema change needed beyond 
 - **ACT_SEA in mode writes.** No capture contains a mode write with `ACT_SEA` (the official app only sends `{ID, ACT_MODE}`; the plugin's own 2.2.0 captures are full writes). Heat/Cool in the season the panel is already in now send exactly the app's form `{ID, ACT_MODE:"MAN"}`; `ACT_SEA` is added only when the season must change, as the minimal form that changes nothing else. To be verified on the field (step 3b).
 - **L4.** Reads of one cfg are shared: a command arriving during a re-read waits for that read instead of issuing another (one READ). Its write still follows separately if the read answered after the queued write was sealed.
 
+## Event order (correction after rc.1)
+- What is newer between a realtime report, a cfg read and an ACK of ours is decided by a per-client event sequence number (`nextThermostatEventSeq`, `src/websocket-client/thermostat-sequence.ts`), taken when the event is processed, never by `Date.now()`: two events in the same millisecond used to tie, and the tie-break could ignore a "cool" just acknowledged (F06/TH-11 again, flaky test). Timestamps stay as information only.
+- Additive fields: `status.observedSeq` (with `observedAt`), `status.acknowledged.seq` (with `at`), `seq` on the realtime season entries, `readSeq` in the cfg freshness record. Existing fields keep their meaning.
+- Task E: its ACK ledger (`MatterThermostatEchoTracker.effectiveValue`, `observedAt > entry.at`) is used only when the client did not apply the ACK to `status.acknowledged`, which the plugin's client always does, so nothing changes in production. To make that path clock-free too: record `latest().status?.acknowledged?.seq` with the ledger entry and compare `status.observedSeq > entry.seq` (`matter-thermostat-echo-tracker.ts`, `matter-thermostat-push.ts:23-24`, `matter-thermostat-handlers.ts:74,78`).
+- Changelog addition (Fixed): "A thermostat setpoint right after a heat/cool change no longer goes to the wrong season when the panel's acknowledgement and a status report arrive in the same millisecond. (TH-11)"
+
 ## Contract with task E (Matter thermostats), after integration
 `ThermostatStatus` (one declaration per field, reconciled with E):
 - `season?: 'WIN' | 'SUM'`: realtime `ACT_SEA` (else the cfg read), filled by `thermostat-status-updater.ts` / `thermostat-config-sync.ts`.
