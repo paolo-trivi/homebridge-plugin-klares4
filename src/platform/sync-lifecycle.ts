@@ -15,7 +15,10 @@ export interface SyncLifecycleDeps {
     eligibleMatterDevices: () => KseniaDevice[];
     /** Runs once, at the end of the first complete sync, with every device ID the panel reported. */
     onFirstSyncComplete?: (discoveredIds: ReadonlySet<string>) => void;
-    /** The panel connection went up or down (published by the MQTT bridge on its status topic). */
+    /**
+     * The panel became usable (a sync completed) or was lost (published by the
+     * MQTT bridge on its status topic).
+     */
     onPanelConnection?: (connected: boolean) => void;
 }
 
@@ -32,6 +35,10 @@ interface CompletedSync extends SyncOutcome {
  * discovery cycle, so "seen" always means "seen in this sync", and the
  * families that answered are the families of the devices the panel listed in
  * this sync. Both prunes apply the same discipline (`prune-policy.ts`) to that.
+ *
+ * The panel counts as connected (Matter `reachable`, MQTT panel status) only
+ * once a sync has completed: a login alone proves nothing, since a panel can
+ * accept it and refuse the reads, and the session then retries with backoff.
  *
  * At the end of a sync: HAP prune, then the Matter name-map finalize and
  * prune. The Matter chain is single-flight (one run, at most one queued),
@@ -63,7 +70,6 @@ export class SyncLifecycle {
             deviceEvents.handleDeviceStatusUpdate(device);
         };
         client.onInitialSyncComplete = (): void => this.handleInitialSyncComplete();
-        client.onConnected = (): void => this.panelConnection(true);
         client.onDisconnected = (): void => this.panelConnection(false);
         // Not connected yet: if the panel stays unreachable past the grace
         // period, the endpoints Homebridge restored from its cache say so.
@@ -87,6 +93,7 @@ export class SyncLifecycle {
     public handleInitialSyncComplete(): void {
         const { log } = this.deps;
         log.info('Initial synchronization completed, finalizing Matter name-map and pruning stale accessories...');
+        this.panelConnection(true);
         const answeredFamilies = familiesOf(this.syncDeviceIds);
         runIsolated(log, 'HAP accessory prune', () => this.deps.accessoryRegistry.pruneStaleAccessories({ answeredFamilies }));
         this.completed = { epoch: this.epoch, answeredFamilies };
