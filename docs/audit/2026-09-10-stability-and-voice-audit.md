@@ -14,7 +14,7 @@
 3. Build e 244 test passano su Node 22; la CI recente è verde. Il pacchetto in produzione è però una release candidate, mentre `latest` npm resta `2.1.4`. `[Test]`
 4. L'attuale esposizione Matter è già scesa da 109 a 53 entità: zone e sensori sono nascosti; HomeKit/HAP non viene ridotto. `[Runtime][Codice]`
 5. Il naming garantisce soltanto unicità esatta case-insensitive entro 32 caratteri; non misura collisioni vocali, semantiche, fonetiche, con stanze o intenti Alexa. `[Codice][Test]`
-6. Rimangono collisioni forti tra nomi di luci e stanze, tra `Cancello` e `Apri Cancello`, e tra `Spegni Tutto` e un comando globale. `[Runtime][Inferenza]`
+6. Rimangono collisioni forti tra nomi di luci e stanze, tra `Cancello` e `Device 78`, e tra `Device 81` e un comando globale. `[Runtime][Inferenza]`
 7. Scenari e cancelli sono esposti come prese `OnOffPlugInUnit`: è un compromesso pragmatico per renderli comandabili, ma comunica ad Alexa una semantica sbagliata. `[Codice][Matter][Alexa]`
 8. Il problema più serio non è vocale: luci, tapparelle, cancelli e scenari non attendono né validano l'esito Klares; “command sent/executed” significa solo scrittura sul socket. `[Codice][Issue]`
 9. Tutti i sei termostati Matter correnti sono fallback read-only `TemperatureSensor`, e il marker persistente impedisce di ritentare spontaneamente il tipo Thermostat. `[Runtime][Codice]`
@@ -40,7 +40,7 @@
 | Warning Matter | 42 `Cannot lock ... basicInformation.state synchronously` durante il cambio di topologia |
 | Retention | circa cinque ore di log; Docker ruota `10 MB × 1`, senza backend log storico |
 
-I tre restart del child bridge seguono salvataggi/configurazioni e chiusure WebSocket normali; non hanno la firma di crash incontrollati. Le righe operative sono verificabili nel [log Homebridge](/root/smarthome/homebridge/homebridge.log:4592), mentre il blocco di warning parte dalla [notifica della parts list](/root/smarthome/homebridge/homebridge.log:8820). `[Log]`
+I tre restart del child bridge seguono salvataggi/configurazioni e chiusure WebSocket normali; non hanno la firma di crash incontrollati. Le righe operative sono verificabili nel `homebridge.log:4592`, mentre il blocco di warning parte dalla `homebridge.log:8820`. `[Log]`
 
 Questo consente di dire **“nessuna instabilità osservata nella finestra”**, non **“stabilità dimostrata da mesi”**. Il container complessivo arrivava a circa 1,1 GiB, ma include più processi Homebridge; un singolo snapshot non dimostra una perdita di memoria. `[Runtime]`
 
@@ -63,7 +63,7 @@ La funzione condivisa [`cleanDisplayName`](https://github.com/paolo-trivi/homebr
 - elimina separatori ai bordi;
 - tronca a 32 unità JavaScript per Matter e 64 per HAP.
 
-Il limite è applicato con `slice`, quindi conta code unit UTF-16, non scalari Unicode o byte UTF-8, e può troncare a metà parola. Nel fixture italiano non spezza emoji o surrogate pair, ma `Finestra Bagno Matrimoniale - Sens.` diventa `Finestra Bagno Matrimoni - Sens.`. `[Codice][Test]`
+Il limite è applicato con `slice`, quindi conta code unit UTF-16, non scalari Unicode o byte UTF-8, e può troncare a metà parola. Nel fixture italiano non spezza emoji o surrogate pair, ma `Device 11 - Sens.` diventa `Device 75 (truncated) - Sens.`. `[Codice][Test]`
 
 La mappa batch [`buildMatterNameMap`](https://github.com/paolo-trivi/homebridge-plugin-klares4/blob/92ec1eda88ff6c3e74679c7cb7837ad76b71ef2d/src/platform/matter-name-map.ts#L34-L82) ordina per priorità e UUID, quindi prova:
 
@@ -223,7 +223,7 @@ Distribuzione euristica che somma a 100%, utile per decidere l'ordine dei test:
 
 | # | Root cause candidata | Probabilità | Perché |
 |---:|---|---:|---|
-| 1 | namespace semantico: stanze/gruppi, verbi nel nome, intenti globali | **30%** | 8 luci coincidono con stanze; `Spegni Tutto` e nomi verbo-oggetto competono con comandi naturali |
+| 1 | namespace semantico: stanze/gruppi, verbi nel nome, intenti globali | **30%** | 8 luci coincidono con stanze; `Device 81` e nomi verbo-oggetto competono con comandi naturali |
 | 2 | scenari/gate rappresentati come `OnOffPlugInUnit` | **25%** | Alexa tenta la grammatica di una presa, non open/close o scene; il nome contiene già il verbo |
 | 3 | comando Klares non confermato o rifiutato | **20%** | il plugin restituisce successo alla sola scrittura socket; un fallimento reale sembra un errore di risoluzione vocale |
 | 4 | indice/cache Alexa non aggiornato dopo pruning/rename | **15%** | 42 notifiche parts-list fallite; il controller non conferma mai il nome osservato |
@@ -239,14 +239,14 @@ Su 109 nomi, la mappa cambia soltanto sei collisioni esatte, tutte coppie tappar
 
 | Entità passiva | Nome finale Matter |
 |---|---|
-| `zone_18` | `Finestra Studio - Sens.` |
-| `zone_19` | `Finestra Cucina - Sens.` |
-| `zone_22` | `Finestra Bagno - Sens.` |
-| `zone_24` | `Finestra Matrimoniale - Sens.` |
-| `zone_25` | `Finestra Bagno Matrimoni - Sens.` |
-| `zone_26` | `Finestra Cameretta - Sens.` |
+| `zone_18` | `Device 70 - Sens.` |
+| `zone_19` | `Device 69 - Sens.` |
+| `zone_22` | `Device 75 - Sens.` |
+| `zone_24` | `Device 32 - Sens.` |
+| `zone_25` | `Device 75 (truncated) - Sens.` |
+| `zone_26` | `Device 54 - Sens.` |
 
-`Finestra Cab. Armadio` e `Finestra Cabina Armadio` non sono viste come collisione, pur essendo equivalenti o molto vicine nel parlato. I test coprono il caso exact e accettano questa differenza. `[Test]`
+`Device 31` e `Device 22` non sono viste come collisione, pur essendo equivalenti o molto vicine nel parlato. I test coprono il caso exact e accettano questa differenza. `[Test]`
 
 Con l'esposizione corrente le zone e i sensori non sono live, quindi queste sei collisioni e gran parte del rumore passivo sono eliminate dal nuovo inventario. Restano però 53 endpoint, 20 dei quali modellati come prese momentanee e 6 come temperature sensor di fallback.
 
@@ -260,7 +260,7 @@ Lo scorer deve essere diagnostico e deterministico; non deve rinominare automati
 
 1. Unicode NFKC, trim, whitespace collapse, lowercase `it-IT`;
 2. punctuation → spazio e una seconda vista deaccentata per fuzzy matching;
-3. espansioni esplicite: `sens→sensore`, `tapp→tapparella`, `term→termostato`, `cab→cabina`, `balc→balcone`, `matrim→matrimoniale`, `tv→televisione`;
+3. espansioni esplicite: `sens→sensore`, `tapp→tapparella`, `term→termostato`, `cab→cabina`, `balc→balcone`, `matrim→Device 80`, `tv→televisione`;
 4. dizionario limitato singolare/plurale: luce/luci, finestra/finestre, tapparella/tapparelle, sensore/sensori, cancello/cancelli, scenario/scenari, termostato/termostati, volumetrico/volumetrici;
 5. rimozione di un suffisso artificiale solo se la provenance conferma che è stato aggiunto dal plugin;
 6. articoli/preposizioni a peso basso, ma verbi d'azione conservati;
@@ -297,26 +297,26 @@ Le righe aggregate indicano famiglie omogenee; il numero fra parentesi è il num
 
 | Score | Risk | Entity A | Type A | Entity B / namespace | Type B | Reason | Live |
 |---:|---|---|---|---|---|---|:---:|
-| 100 | CRITICAL | `Spegni Tutto` | scenario / plug | “spegni tutto” | intento globale | exact frase comando; può mirare una presa-scenario o tutta la casa | sì |
-| 100 | CRITICAL | `Cucina`, `Lavanderia`, `Studio`, `Bagno`, `Matrimoniale`, `Bagno Matrimoniale`, `Cameretta`, `Corridoio` (8) | light | stanze/gruppi omonimi | controller room/group | exact room equality | sì |
+| 100 | CRITICAL | `Device 81` | scenario / plug | “Device 81” | intento globale | exact frase comando; può mirare una presa-scenario o tutta la casa | sì |
+| 100 | CRITICAL | `Cucina`, `Device 83`, `Studio`, `Bagno`, `Device 80`, `Device 52`, `Device 84`, `Device 85` (8) | light | stanze/gruppi omonimi | controller room/group | exact room equality | sì |
 | 100 | CRITICAL | `Finestra <stanza>` (6) | zone / contact | tapparella omonima | cover | stessa radice; `- Sens.` non rende la frase naturale distinta | no |
-| 100 | CRITICAL | `Finestra Cab. Armadio` | zone / contact | `Finestra Cabina Armadio` | cover | abbreviazione equivalente, non intercettata | zona no |
-| 98 | CRITICAL | `Cancello` | gate / plug | `Apri Cancello` | scenario / plug | scenario verb+entity; la frase coincide col nome completo dello scenario | sì |
-| 93 | CRITICAL | `Finestra Bagno Matrimoniale - Sens.` | zone / contact | `Finestra Bagno Matrimoniale` | cover | troncamento a `Matrimoni` riduce il token distintivo | no |
+| 100 | CRITICAL | `Device 31` | zone / contact | `Device 22` | cover | abbreviazione equivalente, non intercettata | zona no |
+| 98 | CRITICAL | `Cancello` | gate / plug | `Device 78` | scenario / plug | scenario verb+entity; la frase coincide col nome completo dello scenario | sì |
+| 93 | CRITICAL | `Device 11 - Sens.` | zone / contact | `Device 11` | cover | troncamento del nome riduce il token distintivo | no |
 | 92 | CRITICAL | `Pulsante <luce>` (circa 13) | zone / contact | luce target corrispondente | light | tolto il generico “pulsante”, resta lo stesso target | no |
-| 88 | HIGH | `Attiva allarme` | light | sicurezza/allarme | intento controller | device light con nome imperativo e dominio incongruente | sì |
-| 84 | HIGH | `Apri Cancello` | scenario / plug | `Apri Cancello Grande` | scenario / plug | full prefix e stessa capability | sì |
-| 82 | HIGH | `Cancello` | gate / plug | `Comando Cancelletto` | scenario / plug | sinonimo/near-phonetic e stesso oggetto fisico possibile | sì |
-| 80 | HIGH | `Balcone Sala` | cover | `Balcone Sala Centrale` | cover | full prefix | sì |
-| 80 | HIGH | `Finestra Bagno` | cover | `Finestra Bagno Matrimoniale` | cover | full prefix | sì |
-| 80 | HIGH | `Bagno` | light | `Bagno Matrimoniale` | light | full prefix, oltre alla collisione con stanze | sì |
-| 78 | HIGH | `Faretti` | light | `Faretti Televisione` | light | full prefix e target generico | sì |
-| 78 | HIGH | `Inserisci Finestre` | scenario / plug | `Inserisci Finestre e Tapparelle`, `...e Volumetrici` | scenario / plug | prefix fra scenari | sì |
-| 78 | HIGH | `Inserisci Tapparelle` | scenario / plug | `Inserisci Tapparelle e Volumetri` | scenario / plug | prefix fra scenari | sì |
-| 76 | HIGH | `Apri/Chiudi/Spegni Zona Giorno` | scenario / plug | stessa terna `Zona Notte` | scenario / plug | differiscono solo verbo o ultimo token; grammatica d'azione nel nome | sì |
+| 88 | HIGH | `Device 73` | light | sicurezza/allarme | intento controller | device light con nome imperativo e dominio incongruente | sì |
+| 84 | HIGH | `Device 78` | scenario / plug | `Device 36` | scenario / plug | full prefix e stessa capability | sì |
+| 82 | HIGH | `Cancello` | gate / plug | `Device 44` | scenario / plug | sinonimo/near-phonetic e stesso oggetto fisico possibile | sì |
+| 80 | HIGH | `Device 79` | cover | `Device 30` | cover | full prefix | sì |
+| 80 | HIGH | `Device 75` | cover | `Device 11` | cover | full prefix | sì |
+| 80 | HIGH | `Bagno` | light | `Device 52` | light | full prefix, oltre alla collisione con stanze | sì |
+| 78 | HIGH | `Faretti` | light | `Device 45` | light | full prefix e target generico | sì |
+| 78 | HIGH | `Scenario A` | scenario / plug | `Scenario A and B`, `...and C` | scenario / plug | prefix fra scenari | sì |
+| 78 | HIGH | `Scenario B` | scenario / plug | `Scenario B and C` | scenario / plug | prefix fra scenari | sì |
+| 76 | HIGH | `Open/Close/Device 57` | scenario / plug | stessa terna `Device 58` | scenario / plug | differiscono solo verbo o ultimo token; grammatica d'azione nel nome | sì |
 | 75 | HIGH | `Tapparella <stanza>` (almeno 7) | zone / contact | `Finestra <stanza>` | cover | diverso sostantivo, stesso oggetto/stanza | no |
-| 72 | HIGH | `Pulsante Corridoio 1/2` | zone / contact | `Corridoio` | light/room | prefix e numerale finale debole nel parlato | no |
-| 60 | MEDIUM | `TV` / token abbreviati | mixed | `Faretti Televisione` e nomi estesi | mixed | espansione abbreviazione + containment | misto |
+| 72 | HIGH | `Device 37/2` | zone / contact | `Device 85` | light/room | prefix e numerale finale debole nel parlato | no |
+| 60 | MEDIUM | `TV` / token abbreviati | mixed | `Device 45` e nomi estesi | mixed | espansione abbreviazione + containment | misto |
 | 56 | MEDIUM | `Temperatura/Umidità/Luminosità <stanza>` | sensors | membri della stessa tripletta | sensors | stesso locale; la misura esplicita normalmente disambigua | no |
 | 52 | MEDIUM | `Temperatura Interna/Esterna` | sensors | `Riscaldamento/Raffrescamento <stanza>` | thermostat fallback | stessa stanza e dominio clima, tipi diversi | sensori no; fallback sì |
 
@@ -350,7 +350,7 @@ Regole pratiche:
 - mantenere un override Matter-only, lasciando invariati pannello e HAP;
 - rinominare soltanto finding `CRITICAL/HIGH` confermati dal test Alexa.
 
-Esempi indicativi, da validare sulla voce: luce `Studio` → `Lampadario Studio`; scenario `Spegni Tutto` → un nome nominale unico come `Assetto Casa Spenta`; scenario `Apri Cancello` → esporre un solo endpoint operativo per quel varco, non inventare due sinonimi concorrenti. Le linee guida Alexa consigliano friendly name semplici e non duplicati e l'aggiornamento proattivo in un'integrazione cloud: [best practice Alexa Smart Home](https://developer.amazon.com/en-US/blogs/alexa/alexa-skills-kit/2021/06/best-practices-for-controlling-devices-with-smart-home-skills). `[Alexa]`
+Esempi indicativi, da validare sulla voce: luce `Studio` → `Lampadario Studio`; scenario `Device 81` → un nome nominale unico come `Assetto Casa Spenta`; scenario `Device 78` → esporre un solo endpoint operativo per quel varco, non inventare due sinonimi concorrenti. Le linee guida Alexa consigliano friendly name semplici e non duplicati e l'aggiornamento proattivo in un'integrazione cloud: [best practice Alexa Smart Home](https://developer.amazon.com/en-US/blogs/alexa/alexa-skills-kit/2021/06/best-practices-for-controlling-devices-with-smart-home-skills). `[Alexa]`
 
 #### Opzione 3 — analizzatore
 
@@ -395,7 +395,7 @@ Sul tuo impianto consentirebbe di mantenere le zone nascoste, riattivare soltant
 2. Non cancellare `klares4-matter-fallback.json` e non forzare i sei termostati.
 3. Eseguire la matrice di test Alexa della sezione H, soprattutto app-tap versus voce e trascrizione.
 4. Decidere un solo endpoint per il cancello principale: `gate_29` oppure lo scenario omologo, in base a quale comando Klares è realmente valido.
-5. Evitare per ora di pronunciare `Spegni Tutto` come test non controllato: potrebbe spegnere il gruppo globale.
+5. Evitare per ora di pronunciare `Device 81` come test non controllato: potrebbe spegnere il gruppo globale.
 
 ### Intervento raccomandato
 
@@ -495,7 +495,7 @@ Nell'app Alexa:
 
 1. quanti dispositivi Klares/Matter sono visibili: 53 o un numero maggiore?
 2. esistono ancora zone `Pulsante ...`, sensori, oppure nomi `... - Sens.`?
-3. per `Cancello`, `Apri Cancello` e `Spegni Tutto`, quale tipo mostra l'app?
+3. per `Cancello`, `Device 78` e `Device 81`, quale tipo mostra l'app?
 4. i sei `Riscaldamento/Raffrescamento` sono mostrati come sensori temperatura o termostati?
 
 Se Alexa mostra >53 endpoint, la prima indagine è cache/pruning, non una nuova rinomina.
@@ -508,13 +508,13 @@ Per ogni frase annotare: trascrizione nella cronologia Alexa, risposta vocale, e
 |---|---|
 | tap dall'app su un endpoint, poi stessa azione a voce | se falliscono entrambi: tipo/ACK/pannello; se fallisce solo la voce: ASR/NLU/nome |
 | `accendi Studio` e `accendi Lampada Studio` | collisione stanza versus device |
-| `chiudi Finestra Studio` | verifica che il cover sia target unico dopo aver nascosto la zona |
-| `apri Cancello`, `accendi Cancello`, `accendi Apri Cancello` | grammatica open/close versus PowerController e duplicato gate/scenario |
-| `apri Cancello Grande` | prefix con lo scenario corto |
+| `chiudi Device 70` | verifica che il cover sia target unico dopo aver nascosto la zona |
+| `Device 78`, `accendi Cancello`, `accendi Device 78` | grammatica open/close versus PowerController e duplicato gate/scenario |
+| `Device 36` | prefix con lo scenario corto |
 | query della temperatura di una stanza | distinguere sensore fallback/room resolution |
 | stesso endpoint da Siri/HAP e Alexa/Matter | pannello/plugin comune versus controller specifico |
 
-Il test `Spegni Tutto` va fatto solo in una finestra sicura e con la possibilità di ripristinare i carichi: la frase potrebbe correttamente attivare il comando globale di Alexa.
+Il test `Device 81` va fatto solo in una finestra sicura e con la possibilità di ripristinare i carichi: la frase potrebbe correttamente attivare il comando globale di Alexa.
 
 ### H.3 Un solo rename controllato
 

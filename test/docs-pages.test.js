@@ -89,3 +89,20 @@ test('the pages say what 2.3.0 changed: no telemetry, fail-closed exposure, conf
         assert.doesNotMatch(all, /with PINs masked|con i PIN mascherati|PIN gia mascherati/);
     }
 });
+
+test('the audit archive index lists every audit document and its links resolve', () => {
+    const dir = path.join(root, 'docs', 'audit');
+    const index = read('docs/audit/README.md');
+    for (const name of fs.readdirSync(dir).filter((file) => file.endsWith('.md') && file !== 'README.md')) {
+        assert.ok(index.includes(`(${name})`), `${name} is not in the audit index`);
+        assert.deepEqual(linkProblems(read(`docs/audit/${name}`), root, `docs/audit/${name}`), [], name);
+    }
+    assert.deepEqual(linkProblems(index, root, 'docs/audit/README.md'), []);
+});
+
+test('the public review summary carries no installation data (addresses, PINs, device lists)', () => {
+    const text = read('docs/audit/2026-11-14-review-2.2.0.md');
+    assert.doesNotMatch(text, /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
+    assert.doesNotMatch(text, /\b(?:zone|light|cover|gate|thermostat|scenario)_\d+\b/);
+    assert.doesNotMatch(text, /\bPIN\b[^.\n]{0,20}\b\d{4,8}\b/);
+});
