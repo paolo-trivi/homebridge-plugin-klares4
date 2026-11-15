@@ -1,6 +1,6 @@
 'use strict';
 
-// WS-10: what the login guard counts. A real Lares4 refusal was never
+// WS-10, COMMS-01: what the login guard counts. A real Lares4 refusal was never
 // captured, so each observable shape is covered: a refusal with another ID,
 // a RESULT in another case, an OK without ID_LOGIN, the socket closed during
 // the login, a login never answered. WS-14: connect() always settles.
@@ -57,27 +57,51 @@ test('WS-10: RESULT is normalized like everywhere else', async (t) => {
     }
 });
 
-test('WS-10: an accepted login without ID_LOGIN is a failed login, never ID_LOGIN 1', async (t) => {
+test('WS-10: an accepted login without ID_LOGIN fails, is not a PIN refusal, and never uses ID_LOGIN 1', async (t) => {
     const { client } = await session(t, (m, socket) => {
         socket.send(frame('LOGIN_RES', m.ID, 'USER', { RESULT: 'OK' }));
     });
     assert.match(await settle(client.connect()), /without ID_LOGIN/);
     assert.equal(client['state'].idLogin, undefined);
-    assert.ok(client['state'].loginRejections >= 1);
+    assert.equal(client['state'].loginRejections, 0);
+    assert.ok(client['state'].unansweredLogins >= 1);
 });
 
-test('WS-10: a socket closed by the panel during the login counts as a failed login', async (t) => {
-    const { panel, client } = await session(t, (_m, socket) => socket.terminate());
-    assert.match(await settle(client.connect()), /rejected/);
-    await waitFor(() => client['state'].reconnectSuspended);
-    assert.equal(panel.logins, 3);
+const pinLines = (log) => log.lines.filter((l) => /check the PIN/.test(l));
+
+test('COMMS-01: a panel restarting (socket closed during the login) reconnects with the normal backoff', async (t) => {
+    const { panel, client, log } = await session(t, (m, socket, mock) => {
+        if (mock.logins <= 4) socket.terminate();
+        else socket.send(frame('LOGIN_RES', m.ID, 'USER', { RESULT: 'OK', ID_LOGIN: '3' }));
+    });
+    await settle(client.connect());
+    await waitFor(() => client['state'].idLogin === '3');
+    assert.equal(panel.logins, 5);
+    assert.equal(client['state'].reconnectSuspended, false);
+    assert.deepEqual(pinLines(log), []);
+    assert.equal(client['state'].unansweredLogins, 0, 'a successful login resets both counts');
+    assert.equal(client['state'].loginRejections, 0);
 });
 
-test('WS-10: logins the panel never answers count too', async (t) => {
-    const { panel, client } = await session(t, () => undefined, { loginTimeoutMs: 50 });
+test('COMMS-01: logins the panel never answers stay in the normal backoff and never blame the PIN', async (t) => {
+    const { panel, client, log } = await session(t, () => undefined, { loginTimeoutMs: 30 });
     assert.match(await settle(client.connect()), /Login timeout/);
+    await waitFor(() => panel.logins >= 6);
+    assert.equal(client['state'].reconnectSuspended, false);
+    assert.deepEqual(pinLines(log), []);
+    assert.equal(log.lines.filter((l) => /did not answer the last 5 logins/.test(l)).length, 1);
+});
+
+test('COMMS-01: refusals interleaved with unanswered logins still reach the slow pace after 3 refusals', async (t) => {
+    const { panel, client, log } = await session(t, (m, socket, mock) => {
+        if (mock.logins % 2 === 0) socket.terminate();
+        else socket.send(frame('LOGIN_RES', m.ID, 'USER', { RESULT: 'FAIL', RESULT_DETAIL: 'LOGIN_KO' }));
+    });
+    await settle(client.connect());
     await waitFor(() => client['state'].reconnectSuspended);
-    assert.equal(panel.logins, 3);
+    assert.equal(panel.logins, 5, 'FAIL, close, FAIL, close, FAIL');
+    assert.equal(client['state'].loginRejections, 3);
+    assert.equal(pinLines(log).length, 1);
 });
 
 test('WS-14: disconnect() during the login settles connect() and counts nothing', async (t) => {

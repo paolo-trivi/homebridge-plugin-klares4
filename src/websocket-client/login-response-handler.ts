@@ -1,6 +1,7 @@
 import type { Logger } from 'homebridge';
 import type { KseniaMessage } from '../types';
 import { frameResult, resultDetail } from '../websocket/protocol-result';
+import type { LoginFailureKind } from './login-rejection-guard';
 import type { WebSocketClientState } from './types';
 
 export interface LoginResponseHandlerDeps {
@@ -8,8 +9,8 @@ export interface LoginResponseHandlerDeps {
     log: Logger;
     /** The login succeeded: resolves the attempt, starts the heartbeat and the sync. */
     onLoginAccepted: () => void;
-    /** The login failed: counted by the rejection guard, socket closed, backoff. */
-    failLogin: (error: Error) => void;
+    /** The login failed: counted by the login guard by kind, socket closed, backoff. */
+    failLogin: (error: Error, kind: LoginFailureKind) => void;
 }
 
 /**
@@ -36,7 +37,7 @@ export class LoginResponseHandler {
                     'The panel refused a login with a LOGIN_RES that does not carry the ID of the LOGIN in progress; '
                     + 'it is counted as a rejection',
                 );
-                this.deps.failLogin(new Error(`Login failed: ${detail ?? result}`));
+                this.deps.failLogin(new Error(`Login failed: ${detail ?? result}`), 'refused');
                 return;
             }
             this.deps.log.warn('Ignoring LOGIN_RES that does not answer the LOGIN in progress');
@@ -46,14 +47,15 @@ export class LoginResponseHandler {
         if (result !== 'OK') {
             const reason = detail ?? result ?? 'no RESULT';
             this.deps.log.error('Login failed:', reason);
-            this.deps.failLogin(new Error(`Login failed: ${reason}`));
+            this.deps.failLogin(new Error(`Login failed: ${reason}`), 'refused');
             return;
         }
 
         const idLogin = readIdLogin(message.PAYLOAD.ID_LOGIN);
         if (idLogin === undefined) {
             this.deps.log.error('Login failed: the panel accepted the login without an ID_LOGIN');
-            this.deps.failLogin(new Error('Login failed: LOGIN_RES without ID_LOGIN'));
+            // Accepted but unusable: not a refusal of the PIN.
+            this.deps.failLogin(new Error('Login failed: LOGIN_RES without ID_LOGIN'), 'unanswered');
             return;
         }
         this.deps.state.idLogin = idLogin;
