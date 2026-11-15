@@ -29,10 +29,20 @@ test('SP-04: mqtt.commands:false turns commands off', () => {
   assert.equal(config.mqtt.commands, false);
 });
 
-test('SP-04: a mqtt.commands that is not a boolean keeps the default and is reported', () => {
-  const { runtime, log } = resolve({ commands: 'false' });
-  assert.equal(runtime.mqtt.commands, true);
-  assert.ok(log.all().includes('mqtt.commands'), log.all());
+for (const wrong of ['false', 'true', 0, 1, null, 'off', {}, []]) {
+  test(`SP-04: mqtt.commands ${JSON.stringify(wrong)} (not a boolean) turns commands off and says so`, () => {
+    const { runtime, config, log } = resolve({ commands: wrong });
+    assert.equal(runtime.mqtt.commands, false);
+    assert.equal(config.mqtt.commands, false);
+    const line = log.lines.warn.find((l) => l.includes('mqtt.commands'));
+    assert.ok(line, log.all());
+    assert.match(line, /MQTT commands stay off \(the safe value\)/);
+  });
+}
+
+test('SP-04: the other boolean keys keep their rule (invalid value -> default)', () => {
+  const { runtime } = resolve({ retain: 'false', enabled: true });
+  assert.equal(runtime.mqtt.retain, true);
 });
 
 test('SP-14: maskBrokerUrl hides credentials with surrounding spaces or without a scheme', () => {
