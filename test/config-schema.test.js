@@ -62,7 +62,8 @@ test('exposeOutputs rows: a numeric outputId and the single exposeAs value "ligh
     assert.deepEqual(Object.keys(row).sort(), ['exposeAs', 'outputId']);
     assert.equal(row.outputId.required, true);
     assert.deepEqual(row.exposeAs.enum, ['light']);
-    assert.equal(row.exposeAs.default, 'light');
+    assert.equal(row.exposeAs.default, undefined, 'an item default makes the UI write a junk row on every save');
+    assert.match(row.exposeAs.description, /empty means light/);
     for (const id of ['1', '12', '115']) assert.match(id, new RegExp(row.outputId.pattern));
     for (const id of ['', 'light_12', '1.5', ' 12']) assert.doesNotMatch(id, new RegExp(row.outputId.pattern));
     assert.deepEqual(validate([{ outputId: '12', exposeAs: 'light' }], props.exposeOutputs, 'exposeOutputs'), []);

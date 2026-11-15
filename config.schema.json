@@ -171,8 +171,7 @@
                             "enum": [
                                 "light"
                             ],
-                            "default": "light",
-                            "description": "The output appears as a light (on/off), with the same ID, HomeKit identity and MQTT topic it had in 2.2.0"
+                            "description": "The output appears as a light (on/off), with the same ID, HomeKit identity and MQTT topic it had in 2.2.0. A row that leaves this empty means light."
                         }
                     }
                 }

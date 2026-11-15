@@ -159,8 +159,10 @@ test('boolean and text defaults in the schema equal what the runtime applies whe
     for (const key of ['exposeOutputs', 'exposeScenarios']) assert.deepEqual(runtime[key], []);
 });
 
-test('an exposeOutputs row without exposeAs means "light", as the schema default says', () => {
+test('an exposeOutputs row without exposeAs means "light", as the schema says', () => {
     const row = rootSchema.properties.exposeOutputs.items.properties.exposeAs;
+    assert.deepEqual(row.enum, ['light']);
+    assert.match(row.description, /empty means light/);
     const runtime = resolveRuntimeConfig({ platform: 'Lares4Complete', ip: '192.0.2.10', pin: '123456', exposeOutputs: [{ outputId: '3' }] }, collectingLog());
-    assert.deepEqual(runtime.exposeOutputs, [{ outputId: '3', exposeAs: row.default }]);
+    assert.deepEqual(runtime.exposeOutputs, [{ outputId: '3', exposeAs: 'light' }]);
 });

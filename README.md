@@ -143,7 +143,7 @@ How values are read:
 | `coverStepSize` | integer | 5 | 1..20 | Percentage moved at each animation step while a cover travels in HomeKit. HomeKit (HAP) only |
 | `scenarioAutoOffDelay` | integer | 500 | 100..5000 | Milliseconds before a scenario switch, or a gate, returns to Off after it was triggered |
 | `exposePartialArmScenarios` | boolean | false | — | Exposes partial-arm scenarios (category `PARTIAL`). Off by default: they are neither exposed nor runnable, like ARM/DISARM scenarios, which are never exposed. Turn it on only if you accept that anyone who can operate the switch (voice assistants, scenes, automations, MQTT) can partially arm the alarm without a PIN prompt |
-| `exposeOutputs` | array | [] | — | Outputs of an unrecognized category to expose anyway: `[{ outputId, exposeAs }]`, `outputId` the numeric output ID, `exposeAs` only `"light"` (the default when omitted). See [Exposure policy](#exposure-policy-fail-closed) |
+| `exposeOutputs` | array | [] | — | Outputs of an unrecognized category to expose anyway: `[{ outputId, exposeAs }]`, `outputId` the numeric output ID, `exposeAs` only `"light"` (what an empty value means). See [Exposure policy](#exposure-policy-fail-closed) |
 | `exposeScenarios` | array | [] | — | Scenarios of an unknown category to expose anyway: `[{ scenarioId }]`. Never exposes ARM/DISARM; PARTIAL follows `exposePartialArmScenarios` only |
 | `devicesSummaryDelay` | integer | 2000 | 500..10000 | Milliseconds to wait before the device summary is printed in the log |
 | `excludeZones` | array | [] | — | Zones to leave out, by numeric ID (`"5"` for `zone_5`; `5` and `"zone_5"` also work) |
@@ -600,7 +600,7 @@ Come vengono letti i valori:
 | `coverStepSize` | integer | 5 | 1..20 | Percentuale di movimento a ogni passo di animazione mentre una tapparella si muove in HomeKit. Solo HomeKit (HAP) |
 | `scenarioAutoOffDelay` | integer | 500 | 100..5000 | Millisecondi prima che l'interruttore di uno scenario, o un cancello, torni a Off dopo l'attivazione |
 | `exposePartialArmScenarios` | boolean | false | — | Espone gli scenari di inserimento parziale (categoria `PARTIAL`). Disattivato di default: non sono né esposti né eseguibili, come gli scenari ARM/DISARM, che non vengono mai esposti. Attivalo solo se accetti che chiunque possa azionare l'interruttore (assistenti vocali, scene, automazioni, MQTT) possa inserire parzialmente l'allarme senza che venga chiesto il PIN |
-| `exposeOutputs` | array | [] | — | Uscite di categoria non riconosciuta da esporre comunque: `[{ outputId, exposeAs }]`, `outputId` l'ID numerico dell'uscita, `exposeAs` solo `"light"` (il predefinito se omesso). Vedi [Politica di esposizione](#politica-di-esposizione-fail-closed) |
+| `exposeOutputs` | array | [] | — | Uscite di categoria non riconosciuta da esporre comunque: `[{ outputId, exposeAs }]`, `outputId` l'ID numerico dell'uscita, `exposeAs` solo `"light"` (ciò che significa un valore vuoto). Vedi [Politica di esposizione](#politica-di-esposizione-fail-closed) |
 | `exposeScenarios` | array | [] | — | Scenari di categoria sconosciuta da esporre comunque: `[{ scenarioId }]`. Non espone mai ARM/DISARM; PARTIAL segue solo `exposePartialArmScenarios` |
 | `devicesSummaryDelay` | integer | 2000 | 500..10000 | Millisecondi di attesa prima che il riepilogo dei dispositivi venga stampato nel log |
 | `excludeZones` | array | [] | — | Zone da escludere, per ID numerico (`"5"` per `zone_5`; funzionano anche `5` e `"zone_5"`) |
