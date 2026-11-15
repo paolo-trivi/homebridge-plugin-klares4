@@ -87,10 +87,19 @@ test('a scenario of unknown category is refused for what it is, and runs once li
     assert.equal(armed.sent.length, 0);
 });
 
+test('COMMS-10: a scenario with a harmless category that is not a discovered device is refused, nothing sent', async () => {
+    const { client, sent } = commandClient({ devices: ['scenario_1'] });
+    // Listed earlier as GEN, no longer a discovered device (removed on the panel).
+    client['state'].scenarioCategoryById.set('5', 'GEN');
+    await assert.rejects(client.triggerScenario('scenario_5'), (error) => error instanceof ValidationKlaresError
+        && /not a scenario discovered on the panel/.test(error.message));
+    assert.equal(sent.length, 0);
+});
+
 test('M58: a CMD_USR_RES without RESULT does not acknowledge a mutation', async () => {
     const { client } = commandClient({
         devices: ['gate_9', 'light_5'],
-        options: { commandTimeoutMs: 60 },
+        options: { commandTimeoutMs: 5000 },
         reply: (message, c) => setImmediate(() => c['commandDispatcher'].resolvePendingCommand({
             ID: message.ID, CMD: 'CMD_USR_RES', PAYLOAD_TYPE: 'REPLY', PAYLOAD: {},
         })),
@@ -101,7 +110,7 @@ test('M58: a CMD_USR_RES without RESULT does not acknowledge a mutation', async 
 
 test('M58: the sender requires a positive result for CMD_USR and WRITE_CFG whatever the caller asks', async () => {
     const { client } = commandClient({
-        options: { commandTimeoutMs: 60 },
+        options: { commandTimeoutMs: 5000 },
         reply: (message, c) => setImmediate(() => c['commandDispatcher'].resolvePendingCommand({
             ID: message.ID, CMD: 'CMD_USR_RES', PAYLOAD_TYPE: 'REPLY', PAYLOAD: {},
         })),
