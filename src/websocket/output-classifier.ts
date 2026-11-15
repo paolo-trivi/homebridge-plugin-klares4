@@ -104,13 +104,6 @@ export type OutputExposure =
     | { exposed: false; category: string; mode: string };
 
 /**
- * The type decided for one element of a discovery read, for `classifyOutput`
- * when the projector parses that same element right after. Keyed by the
- * element itself, so nothing outlives the read or crosses clients.
- */
-const decidedTypes = new WeakMap<KseniaOutputData, ProjectedOutputType>();
-
-/**
  * Fail-closed exposure of a discovered output: only recognized categories
  * (LIGHT, ROLL, GATE, thermostat) are exposed on their own; any other output
  * is exposed only when `exposeOutputs` lists its ID, as the type given there.
@@ -127,17 +120,15 @@ export function resolveOutputExposure(
     const exposure: OutputExposure = type ? { exposed: true, type, source: 'category' }
         : optIn ? { exposed: true, type: optIn, source: 'opt-in' }
             : { exposed: false, category: displayed(category), mode: displayed(outputData.MOD) };
-    if (exposure.exposed) decidedTypes.set(outputData, exposure.type);
     return exposure;
 }
 
 /**
- * Type of an output the exposure policy has let through: the one
- * `resolveOutputExposure` decided for this element, else its category (an
- * unrecognized one only gets here through `exposeOutputs`, whose type is `light`).
+ * Type of an output from its category alone, for a caller that has no
+ * exposure decision (discovery passes the type `resolveOutputExposure`
+ * decided); an unrecognized category reads as `light`, the `exposeOutputs` default.
  */
 export function classifyOutput(outputData: KseniaOutputData): ProjectedOutputType {
-    return decidedTypes.get(outputData)
-        ?? determineOutputType(outputCategory(outputData), outputData.MOD)
+    return determineOutputType(outputCategory(outputData), outputData.MOD)
         ?? 'light';
 }

@@ -148,7 +148,7 @@ export class KseniaWebSocketClient {
                 this.emitRawMessage('in', rawMessage);
             },
             onLoginCompleted: (): void => onLoginCompleted(),
-            failLogin: (error: Error): void => connection?.failLogin(error),
+            failLogin: (error, kind): void => connection?.failLogin(error, kind),
             abortSession: (reason: string): void => connection?.abortSession(reason),
             onSyncCompleted: (): void => connection?.syncCompleted(),
         });

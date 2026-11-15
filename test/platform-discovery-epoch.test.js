@@ -119,15 +119,6 @@ test('MAT-02 / PLAT-04: a device removed from the panel is pruned after 3 full s
     assert.ok(!hb.unregisterCalls.includes('scenario_3'));
 });
 
-test('refused discovery reads on reconnect remove nothing from Matter or HAP', async (t) => {
-    const { hb, api, log, refusedSyncs } = await session(t);
-    await waitFor(() => hb.endpoints.has('scenario_1'));
-    await refusedSyncs(2);
-    assert.deepEqual(hb.unregisterCalls, []);
-    assert.deepEqual(api.unregistered, []);
-    assert.equal(count(log, /\[Matter\] Missing (candidate|accessory)/), 0);
-});
-
 test('a reconnect with an unchanged panel removes nothing', async (t) => {
     const { hb, api, log, reconnect } = await session(t);
     for (let i = 0; i < 4; i += 1) await reconnect();

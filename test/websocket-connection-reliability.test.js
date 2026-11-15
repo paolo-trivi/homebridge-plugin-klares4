@@ -135,3 +135,33 @@ test('WS-14: a shutdown while connecting is not logged as an error and settles c
     assert.deepEqual(log.lines.filter((l) => l.startsWith('[error]')), []);
     assert.equal(client['state'].reconnectTimer, undefined);
 });
+
+test('COMMS-03: a non-ASCII frame whose CRC differs is accepted and reported once, with the matching encoding', async (t) => {
+    const { crc16OfBytes } = require('../dist/websocket-client/crc16.js');
+    const { panel, events, log, client } = await syncedSession(t);
+    // A panel that would compute the CRC over latin1 bytes instead of UTF-8.
+    const latin1Frame = (statusData) => {
+        const unsigned = JSON.stringify({
+            SENDER: 'panel', RECEIVER: '', CMD: 'READ_RES', ID: '77', PAYLOAD_TYPE: 'MULTI_TYPES', TIMESTAMP: '0',
+            PAYLOAD: { RESULT: 'OK', RESULT_DETAIL: 'READ_OK', ...statusData }, CRC_16: '0x0000',
+        });
+        const head = unsigned.slice(0, unsigned.lastIndexOf('"CRC_16"') + '"CRC_16"'.length);
+        return unsigned.replace('"CRC_16":"0x0000"', `"CRC_16":"${crc16OfBytes(Buffer.from(head, 'latin1'))}"`);
+    };
+    events.length = 0;
+    const outputs = [{ ID: '5', DES: 'Lampada Città', CAT: 'LIGHT', MOD: 'B' }, { ID: '7', DES: 'Shutter', CAT: 'ROLL', MOD: 'BDP' }];
+    panel.sendRaw(latin1Frame({ OUTPUTS: outputs }));
+    panel.sendRaw(latin1Frame({ OUTPUTS: outputs }));
+    panel.realtime({ STATUS_OUTPUTS: [{ ID: '5', STA: 'ON' }] });
+    await waitFor(() => events.some((e) => e.id === 'light_5'));
+    const reports = log.lines.filter((l) => /non-ASCII text/.test(l));
+    assert.equal(reports.length, 1, 'reported once');
+    assert.match(reports[0], /matching encoding: latin1/);
+    assert.equal(client.getAllDevices().find((d) => d.id === 'light_5').name, 'Lampada Città', 'the frame was applied');
+    assert.ok(!log.lines.some((l) => /wrong CRC_16: dropped/.test(l)));
+
+    // The same frame in ASCII with a wrong CRC is corrupted for sure: dropped.
+    panel.sendRaw(latin1Frame({ OUTPUTS: [{ ID: '5', DES: 'Lamp', CAT: 'LIGHT', MOD: 'B' }] }).replace(/"CRC_16":"0x[0-9a-f]{4}"/, '"CRC_16":"0x0001"'));
+    panel.realtime({ STATUS_OUTPUTS: [{ ID: '5', STA: 'OFF' }] });
+    await waitFor(() => log.lines.some((l) => /READ_RES\/MULTI_TYPES frame with a wrong CRC_16: dropped/.test(l)));
+});

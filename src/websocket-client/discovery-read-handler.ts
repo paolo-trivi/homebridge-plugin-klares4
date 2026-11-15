@@ -84,7 +84,7 @@ export class DiscoveryReadHandler {
             if (exposure.source === 'category' && optIns.has(panelId)) {
                 findings.ignoredOptIns.push(`exposeOutputs: output ${panelId} is exposed as ${exposure.type} without it`);
             }
-            const device = adoptDiscoveredDevice(this.deps.state.devices, parseOutputData(output));
+            const device = adoptDiscoveredDevice(this.deps.state.devices, parseOutputData(output, exposure.type));
             if (device.type === 'thermostat') this.deps.thermostats.applyOutputRole(device);
             this.deps.emitDeviceDiscovered(device);
             this.deps.statusUpdater.applyPendingOutputStatus(output.ID);

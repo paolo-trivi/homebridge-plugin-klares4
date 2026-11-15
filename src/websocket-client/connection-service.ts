@@ -6,7 +6,7 @@ import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { WsTransport } from '../websocket/ws-transport';
 import { connectionOptions, DEFAULT_MAX_PAYLOAD_BYTES, panelUrl } from './connection-setup';
 import { HeartbeatMonitor } from './heartbeat-monitor';
-import { recordLoginRejection, SUSPENDED_LOGIN_RETRY_MS } from './login-rejection-guard';
+import { type LoginFailureKind, recordLoginFailure, SUSPENDED_LOGIN_RETRY_MS } from './login-rejection-guard';
 import { ReconnectScheduler } from './reconnect-scheduler';
 import { tlsConfigurationHint } from './tls-error-hint';
 import type { WebSocketClientState } from './types';
@@ -222,8 +222,8 @@ export class ConnectionService {
     }
 
     /** The login was refused or invalid: counted, then the session is closed and retried. */
-    public failLogin(error: Error): void {
-        this.retireSocket(1000, 'Login failed', error);
+    public failLogin(error: Error, kind: LoginFailureKind): void {
+        this.retireSocket(1000, 'Login failed', error, kind);
     }
 
     /** The session cannot complete its sync: closed, then retried with the backoff. */
@@ -264,24 +264,24 @@ export class ConnectionService {
      * at once (disconnected event, pending commands rejected, reconnect). The
      * socket is closed in the background; its late events are ignored.
      */
-    private retireSocket(code: number, reason: string, error: Error): void {
+    private retireSocket(code: number, reason: string, error: Error, loginFailure: LoginFailureKind = 'unanswered'): void {
         const ws = this.deps.state.ws;
         this.deps.state.ws = undefined;
         if (ws) {
             this.deps.wsTransport.closeGracefully(ws, code, reason);
             this.deps.wsTransport.terminateIfNotClosed(ws, 3000);
         }
-        this.sessionLost(error, error);
+        this.sessionLost(error, error, loginFailure);
     }
 
-    private sessionLost(error: Error, loginError: Error): void {
+    private sessionLost(error: Error, loginError: Error, loginFailure: LoginFailureKind = 'unanswered'): void {
         this.heartbeat.stop();
         this.clearSyncWatchdog();
         this.deps.state.isConnected = false;
         this.deps.state.idLogin = undefined;
         this.deps.commandDispatcher.rejectAllPendingCommands(error);
         // Before the reconnect is scheduled: the guard decides its pace.
-        if (this.deps.state.pendingLogin) this.failPendingLogin(loginError);
+        if (this.deps.state.pendingLogin) this.failPendingLogin(loginError, loginFailure);
         this.deps.onDisconnected();
         if (!this.stopped) this.scheduleReconnect();
     }
@@ -291,12 +291,12 @@ export class ConnectionService {
     }
 
     /** A login attempt ends without success; it counts once the LOGIN frame was sent. */
-    private failPendingLogin(error: Error): void {
+    private failPendingLogin(error: Error, kind: LoginFailureKind = 'unanswered'): void {
         const pending = this.deps.state.pendingLogin;
         if (!pending) return;
         if (pending.messageId !== undefined && !this.stopped) {
             const retryMs = this.deps.options.suspendedLoginRetryMs ?? SUSPENDED_LOGIN_RETRY_MS;
-            recordLoginRejection(this.deps.state, this.deps.log, error.message, retryMs);
+            recordLoginFailure(this.deps.state, this.deps.log, kind, error.message, retryMs);
         }
         pending.reject(error);
     }
