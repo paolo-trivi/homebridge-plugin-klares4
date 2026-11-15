@@ -101,7 +101,7 @@ test('TH-07: an acknowledged write reaches the status channel at once (MAN setpo
     assert.equal(typeof ack.at, 'number');
 });
 
-test('TH-07: in AUTO an acknowledged setpoint is not shown as the live target', async () => {
+test('TH-07: in AUTO an acknowledged setpoint is not shown as the live target; the real state is republished', async () => {
     const sim = createThermostatPanel({
         thermostats: [{ out: '18', sensor: '1', cfg: '1' }],
         cfgs: [realisticCfg('1', { mode: 'AUTO', winTm: '20.0' })],
@@ -111,7 +111,8 @@ test('TH-07: in AUTO an acknowledged setpoint is not shown as the live target', 
     sim.realtime('1');
     sim.emitted.length = 0;
     await sim.service.setThermostatTemperature('thermostat_18', 25);
-    assert.deepEqual(sim.emitted, []);
+    assert.deepEqual(sim.emitted, [{ id: 'thermostat_18', mode: 'auto', target: 20 }]);
+    assert.ok(sim.log.lines.info.some((line) => /stored as the manual setpoint/.test(line)));
     assert.equal(sim.state.devices.get('thermostat_18').status.acknowledged.targetTemperature, 25);
 });
 
@@ -157,4 +158,24 @@ test('TD-DOC-06: thermostat reads and writes wait commandTimeoutMs like every co
     });
     await service.setThermostatTemperature('thermostat_18', 22);
     assert.deepEqual(timeouts, [4321, 4321]);
+});
+
+test('L4: a mode command arriving while the cfg is being re-read waits for that read: one READ', async () => {
+    const sim = createThermostatPanel({ thermostats: [{ out: '18', sensor: '1', cfg: '1' }], cfgs: [realisticCfg('1', { mode: 'OFF' })] });
+    sim.login();
+    sim.realtime('1');
+    let release;
+    sim.panel.readGate = new Promise((resolve) => { release = resolve; });
+    const setpoint = sim.service.setThermostatTemperature('thermostat_18', 22);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(sim.panel.reads.length, 1, 'the setpoint re-read is in flight');
+    const mode = sim.service.setThermostatMode('thermostat_18', 'heat');
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await Promise.all([setpoint, mode]);
+    assert.equal(sim.panel.reads.length, 1);
+    // The mode is routed once the read answers, after the setpoint was sealed: it follows in its own write.
+    assert.deepEqual(sim.panel.writes.map((w) => Object.keys(w)), [['ID', 'WIN'], ['ID', 'ACT_MODE']]);
+    const panel = sim.panel.cfg.get('1');
+    assert.deepEqual([panel.ACT_MODE, panel.WIN.TM], ['MAN', '22.0']);
 });

@@ -1,3 +1,5 @@
+import type { DegradedGuessVerdict } from './thermostat-degraded-guess';
+
 export interface DegradedThermostatRoute {
     outputId: string;
     /** DOMUS sensor the thermostat measures, when known. */
@@ -35,14 +37,14 @@ export interface ResolvedThermostatCommandId {
 interface ResolveThermostatCommandIdInput {
     outputThermostatId: string;
     hasProgramMapping: boolean;
-    /** A guess verified earlier against the realtime state. */
+    /** A guess verified earlier by a discriminating realtime match. */
     cachedCommandId?: string;
     manualCommandId?: string;
     programCommandId?: string;
     mappedDomusSensorId?: string;
     primeConfig: (candidateId: string) => Promise<boolean>;
-    /** Whether a guessed cfg matches what the thermostat shows in realtime. */
-    verifyGuess: (candidateId: string) => boolean;
+    /** Whether a guessed cfg may be used (see judgeDegradedGuess), and remembered. */
+    verifyGuess: (candidateId: string) => Promise<DegradedGuessVerdict>;
     rememberCommandId: (resolvedCommandId: string) => void;
     onResolvedAlias?: (resolvedCommandId: string) => void;
 }
@@ -102,13 +104,16 @@ export async function resolveThermostatCommandId(
     );
     for (const candidateId of candidates) {
         if (!await primeConfig(candidateId)) continue;
-        if (!input.verifyGuess(candidateId)) {
+        const verdict = await input.verifyGuess(candidateId);
+        if (!verdict.accepted) {
             throw new ThermostatRoutingError(
-                `thermostat_${outputId}: without PRG_THERMOSTATS the cfg id is guessed (${candidateId}), and cfg ${candidateId} `
-                + `does not match what this thermostat reports in realtime; write refused (${manualPairHint(outputId)})`,
+                `thermostat_${outputId}: without PRG_THERMOSTATS the cfg id is guessed (${candidateId}), and ${verdict.reason}; `
+                + `write refused (${manualPairHint(outputId)})`,
             );
         }
-        return remember(input, candidateId, 'degraded');
+        if (verdict.remember) return remember(input, candidateId, 'degraded');
+        if (candidateId !== outputId) input.onResolvedAlias?.(candidateId);
+        return { id: candidateId, source: 'degraded' };
     }
     throw new ThermostatRoutingError(
         `thermostat_${outputId}: no cfg could be read from the panel for this thermostat; write refused (${manualPairHint(outputId)})`,

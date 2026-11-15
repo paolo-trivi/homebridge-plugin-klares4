@@ -84,7 +84,7 @@ test('TH-04: a degraded guess coherent with the realtime is used', async () => {
 test('TH-04: a degraded guess without any realtime to check it against is refused', async () => {
     const sim = createThermostatPanel({ thermostats: [{ out: '20', sensor: '3' }], cfgs: [realisticCfg('3')], programs: false });
     sim.login();
-    await assert.rejects(() => sim.service.setThermostatTemperature('thermostat_20', 23), /does not match/);
+    await assert.rejects(() => sim.service.setThermostatTemperature('thermostat_20', 23), /no realtime state.*manualCommandPairs/);
     assert.deepEqual(sim.panel.writes, []);
 });
 

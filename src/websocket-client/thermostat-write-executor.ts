@@ -38,12 +38,34 @@ export interface ThermostatWriteExecutorDeps {
 /** Reads the cfg, builds the partial WRITE_CFG and, once acknowledged, propagates what the panel accepted. */
 export class ThermostatWriteExecutor {
     private readonly seasons = new ThermostatSeasonTracker();
+    /** Reads in flight per cfg id: a command arriving meanwhile waits for the same answer. */
+    private readonly reads = new Map<string, Promise<boolean>>();
 
     constructor(private readonly deps: ThermostatWriteExecutorDeps) {}
 
-    /** The cfg is in the cache, or has just been read from the panel. */
+    /** The cfg is in the cache, or has just been read from the panel (joining a read in progress). */
     public async primeConfig(cfgId: string): Promise<boolean> {
-        return this.deps.state.thermostatCfgById.has(cfgId) || this.readConfig(cfgId);
+        if (this.deps.state.thermostatCfgById.has(cfgId)) return true;
+        return this.reads.get(cfgId) ?? this.readConfig(cfgId);
+    }
+
+    /** READ CFG_THERMOSTATS ALL: every cfg of the panel, answered into the cache by the read handler. */
+    public async readAllConfigs(): Promise<boolean> {
+        try {
+            await this.deps.send('READ', 'CFG_THERMOSTATS', {
+                ID_LOGIN: 'true',
+                ID_READ: 'ALL',
+                ID_ITEMS_RANGE: ['ALL', 'ALL'],
+            }, {
+                awaitResponse: true,
+                responseCmds: ['READ_RES'],
+                responsePayloadTypes: ['CFG_THERMOSTATS'],
+            });
+            return true;
+        } catch (error: unknown) {
+            this.deps.log.warn(`Unable to read CFG_THERMOSTATS: ${error instanceof Error ? error.message : String(error)}`);
+            return false;
+        }
     }
 
     public async execute(batch: ThermostatWriteBatch): Promise<void> {
@@ -56,8 +78,9 @@ export class ThermostatWriteExecutor {
         batch.seal();
         const intent: ThermostatWriteIntent = { ...batch.intent };
         const cfg = this.deps.state.thermostatCfgById.get(cfgId);
-        const season = seasonOfMode(intent.mode) ?? this.seasons.resolve(cfgId, this.seasonObservations(cfgId, cfg));
-        const payload = buildThermostatWritePayload({ cfgId, intent, season, cfg });
+        const currentSeason = this.seasons.resolveKnown(cfgId, this.seasonObservations(cfgId, cfg));
+        const season = seasonOfMode(intent.mode) ?? currentSeason ?? 'WIN';
+        const payload = buildThermostatWritePayload({ cfgId, intent, season, cfg, currentSeason });
         await this.deps.send('WRITE_CFG', 'CFG_ALL', {
             ID_LOGIN: 'true',
             CFG_THERMOSTATS: [payload],
@@ -78,7 +101,15 @@ export class ThermostatWriteExecutor {
         return [...outputs];
     }
 
-    private async readConfig(cfgId: string): Promise<boolean> {
+    private readConfig(cfgId: string): Promise<boolean> {
+        const inFlight = this.reads.get(cfgId);
+        if (inFlight) return inFlight;
+        const read = this.readConfigFromPanel(cfgId).finally(() => this.reads.delete(cfgId));
+        this.reads.set(cfgId, read);
+        return read;
+    }
+
+    private async readConfigFromPanel(cfgId: string): Promise<boolean> {
         // Dropped first, so only the panel's answer to this read can satisfy the check below.
         this.deps.state.thermostatCfgById.delete(cfgId);
         try {
@@ -119,7 +150,7 @@ export class ThermostatWriteExecutor {
         const cached = applyAcknowledgedWrite(state.thermostatCfgById.get(cfgId), payload);
         if (cached) state.thermostatCfgById.set(cfgId, cached);
         recordOwnCfgWrite(state);
-        this.seasons.recordAcknowledged(cfgId, asSeason(payload.ACT_SEA));
+        this.seasons.recordAcknowledged(cfgId, asSeason(payload.ACT_SEA) ?? seasonOfMode(intent.mode));
         const at = Date.now();
         for (const outputId of this.outputsOfCfg(cfgId)) {
             const device = state.devices.get(`thermostat_${outputId}`);
@@ -136,7 +167,8 @@ export class ThermostatWriteExecutor {
      * The acknowledged values reach HomeKit, Matter and MQTT through the same
      * event as a realtime change. A setpoint is shown only when it is the live
      * one (MAN, written in the season of the mode): in AUTO or OFF the panel
-     * keeps its own target and the realtime would contradict it.
+     * keeps its own target, so the real state is published again, and the
+     * controllers that show the requested value go back to the panel's one.
      */
     private propagate(device: KseniaThermostat, intent: ThermostatWriteIntent, season: ThermostatSeason): void {
         const emit = this.deps.emitDeviceStatusUpdate;
@@ -148,6 +180,13 @@ export class ThermostatWriteExecutor {
             season: seasonOfMode(intent.mode),
             targetTemperature: live ? intent.temperature : undefined,
         });
-        if (changed) emit(device);
+        const notLive = intent.temperature !== undefined && !live;
+        if (notLive) {
+            this.deps.log.info(
+                `${device.name}: setpoint ${intent.temperature}°C stored as the manual setpoint; `
+                + `the thermostat is ${mode === 'auto' ? 'in AUTO, the program target' : 'off, the current state'} stays in use`,
+            );
+        }
+        if (changed || notLive) emit(device);
     }
 }

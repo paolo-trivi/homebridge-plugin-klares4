@@ -17,13 +17,16 @@ function makeService({ thermostats, cfgIds, manualCommandPairs = [] }) {
         });
         if (sensorId) state.thermostatToDomus.set(outputId, sensorId);
     }
-    const cfgOf = (id) => ({ ID: id, ACT_MODE: 'MAN', ACT_SEA: 'WIN', WIN: { TM: '21.0' }, SUM: { TM: '26.0' } });
+    // Distinct setpoints: a guess is accepted only when exactly one cfg matches the realtime (M2).
+    const tmOf = (id) => (18 + Number(id)).toFixed(1);
+    const cfgOf = (id) => ({ ID: id, ACT_MODE: 'MAN', ACT_SEA: 'WIN', WIN: { TM: tmOf(id) }, SUM: { TM: '26.0' } });
     for (const id of cfgIds) {
         state.thermostatCfgById.set(id, cfgOf(id));
     }
     // TH-04: a guessed cfg is used only if it matches the thermostat's realtime state.
     for (const [outputId, sensorId] of Object.entries(thermostats)) {
-        state.thermostatRealtimeSnapshotById.set(sensorId ?? outputId, { mode: 'heat', season: 'WIN', targetTemperature: 21, updatedAt: 0 });
+        const key = sensorId ?? outputId;
+        state.thermostatRealtimeSnapshotById.set(key, { mode: 'heat', season: 'WIN', targetTemperature: Number(tmOf(key)), updatedAt: 0 });
     }
     const errors = [];
     const log = { info() {}, warn() {}, debug() {}, error: (...args) => errors.push(args.join(' ')) };
