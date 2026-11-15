@@ -463,7 +463,7 @@ npm run test:coverage   # suite with coverage thresholds on src/
 npm run check:pack      # builds the tarball and checks its contents
 ```
 
-CI runs the suite on Node 22, 24 and 26 (and on the lower Node bound), the contract tests on Homebridge 2.4.x and 2.5.x, and the coverage and package checks. Publishing happens **only** from the `Release Publish` workflow, on a pushed `v*` tag, with npm provenance: a stable `X.Y.Z` requires a published `X.Y.Z-rc.N` with the same dependencies. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the module map and [`CHANGELOG.md`](CHANGELOG.md) for the history.
+CI runs the suite on Node 22, 24 and 26 (and on the lower Node bound), the contract tests on Homebridge 2.4.x and 2.5.x, and the coverage and package checks. Publishing happens **only** from the `Release Publish` workflow, on a pushed `v*` tag, with npm provenance: a stable `X.Y.Z` requires a published `X.Y.Z-rc.N`, built by that workflow from an ancestor commit, with the same dependencies. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the module map and [`CHANGELOG.md`](CHANGELOG.md) for the history.
 
 Contributions are welcome: fork, branch, commit, push and open a pull request.
 

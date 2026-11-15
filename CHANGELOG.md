@@ -70,7 +70,7 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 - MQTT setpoints outside `temperatureDefaults.min`/`max` are refused with a warning instead of being written to the panel (any value from 5 to 40 °C was accepted). A command carrying a mode and an out-of-range setpoint is refused as a whole.
 - Files created for the first time (debug capture, KSA cache, Matter stores, device list, room mapping example) are private (`0600`). Temporary files used for atomic writes are created exclusively under an unpredictable name, and leftover ones from a crash (for `config.json` they contained the PIN) are removed at startup once older than five minutes.
 - A `.ksa` backup is treated as untrusted input: IDs derived from it must be plain numbers, names are cut to 64 characters before they can reach `config.json`, and a file over 32 MB is refused.
-- The release pipeline builds and tests in a job without publish rights and publishes the resulting tarball from a second job behind a protected environment; the tagged commit must be on `main`; a stable release requires a published release candidate with the same dependencies; all actions are pinned by commit SHA; Dependabot auto-merges only development dependencies and actions.
+- The release pipeline builds the tarball in a job that runs no dependency code except the compiler, tests the same commit in a separate job, and publishes the tarball from a third job behind a protected environment; the tagged commit must be on `main`; a stable release requires a release candidate published by the same workflow from an ancestor commit, with the same dependencies; all actions are pinned by commit SHA; Dependabot auto-merges only patch and minor updates of development dependencies.
 
 ### Changed
 
