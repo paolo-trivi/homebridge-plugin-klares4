@@ -27,7 +27,7 @@ const sensor = (n, sensorType, value) => ({
 });
 
 async function registerOn(stack, accessory) {
-    await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [accessory]);
+    await stack.register([accessory]);
     const failures = stack.hbLines.filter((l) => /Failed to register/.test(l));
     assert.ok(stack.record(accessory.UUID), `${accessory.UUID} must register; Homebridge said: ${failures.join(' | ')}`);
 }

@@ -46,7 +46,7 @@ test('MAT-12: a name the map believes unique is the label Homebridge shows', { t
         const accessory = deviceToMatterAccessory(device, {
             api: stack.api, log: silentLog(), getWsClient: () => undefined, resolveDisplayName: (d) => entries.get(d.id).name,
         });
-        await stack.api.matter.registerPlatformAccessories('homebridge-plugin-klares4', 'Lares4Complete', [accessory]);
+        await stack.register([accessory]);
         assert.equal(stack.read(device.id, 'bridgedDeviceBasicInformation').nodeLabel, entries.get(device.id).name);
     }
     assert.deepEqual(stack.hbLines.filter((l) => /longer than the 32 characters/.test(l)), []);
