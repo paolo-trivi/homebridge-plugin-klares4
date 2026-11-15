@@ -1,6 +1,6 @@
 'use strict';
 
-// Effects of task C's connection and parsing changes on the other subsystems:
+// Effects of the connection and parsing changes on the other subsystems:
 // the login guard with the MQTT panel status (H), removed devices with the
 // command queue (B), out-of-range readings with the thermostat pipeline (D).
 
@@ -87,7 +87,7 @@ test('WS-13 + thermostats: out-of-range realtime and cfg values leave the thermo
     assert.equal(device().status.currentTemperature, 19.5);
 });
 
-// Hooks left by task D on the client facade (changes/D.md).
+// Hooks the thermostat write path uses on the client facade.
 function thermostatClient() {
     const c = new KseniaWebSocketClient('127.0.0.1', 443, true, 'x', '000000', silentLog(), {});
     const msg = (CMD, PAYLOAD_TYPE, PAYLOAD) => c['messageService'].handleMessage(signFrame({

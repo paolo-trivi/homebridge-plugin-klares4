@@ -85,11 +85,12 @@ export function logRegisterRequested(
     const nameAnnotation = matterName !== device.name
         ? ` -> "${matterName}" [${matterName.length}ch]`
         : ` [${matterName.length}ch]`;
-    log.info(
-        `[Matter] register requested: ${device.name}${nameAnnotation} `
+    const line = `[Matter] register requested: ${device.name}${nameAnnotation} `
         + `(${device.type}, uuid=${device.id})`
-        + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.reregister ? ` [${flags.reregister}]` : ''}`,
-    );
+        + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.reregister ? ` [${flags.reregister}]` : ''}`;
+    // The first registration of every device at every start is a debug line; a fallback or a replacement is an event.
+    if (flags.fallback || flags.reregister) log.info(line);
+    else log.debug(line);
 }
 
 export interface CachedEndpointLabel {

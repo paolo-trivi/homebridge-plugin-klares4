@@ -1,6 +1,6 @@
 {
     "name": "homebridge-plugin-klares4",
-    "version": "2.2.0",
+    "version": "2.3.0-rc.1",
     "displayName": "Klares4 - Ksenia Lares4",
     "description": "Homebridge plugin for Ksenia Lares4 alarm systems: zones, lights, covers, thermostats and sensors over HomeKit, Matter and MQTT, local only, no cloud, no telemetry",
     "main": "dist/index.js",

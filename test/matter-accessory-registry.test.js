@@ -207,7 +207,7 @@ test('stale matter.js endpoint: every recovery attempt unregisters before re-reg
 
 test('register log includes sanitised displayName + length when name was sanitised', async (t) => {
     const logs = [];
-    const log = { info: (m) => logs.push(m), warn: () => {}, debug: () => {}, error: () => {} };
+    const log = { info: (m) => logs.push(m), warn: () => {}, debug: (m) => logs.push(m), error: () => {} };
     const { api } = makeHbMatterApi();
     const registry = new MatterAccessoryRegistry({ api, log, getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory({
