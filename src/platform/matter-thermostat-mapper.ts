@@ -215,8 +215,9 @@ function pairedSetpoints(coolActive: boolean, targetC: number): { heat: number; 
 }
 
 /**
- * Build the Thermostat cluster state for a Lares4 thermostat, for the role
- * of its registered endpoint (`roleOverride`: the role to build a new one for).
+ * Build the Thermostat cluster state for a Lares4 thermostat, for the
+ * device's role or `roleOverride` (the role its live endpoint was registered
+ * for, when that differs).
  *
  * Homebridge 2.5 derives the cluster features from the attributes declared at
  * registration (`homebridge/dist/matter/serverHelpers.js:370-390`), so the

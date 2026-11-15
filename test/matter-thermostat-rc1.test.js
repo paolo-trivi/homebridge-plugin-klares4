@@ -28,8 +28,6 @@ const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
-const PLUGIN = 'homebridge-plugin-klares4';
-const PLATFORM = 'Lares4Complete';
 const FALLBACK_FILE = 'klares4-matter-fallback.json';
 const SLOW = { timeout: 120000 };
 
@@ -103,7 +101,7 @@ test('M-02: a 2.2.0 sensor fallback whose recovery fails comes back with its own
     const device = thermostat(3, { role: 'heating' });
 
     const boot1 = await session.start();
-    await boot1.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [
+    await boot1.register([
         mapThermostatAsTemperatureSensor(device, { api: boot1.api, log: recordingLog().log, getWsClient: () => undefined }),
     ]);
     const sensorId = boot1.read('thermostat_3', 'bridgedDeviceBasicInformation').uniqueId;

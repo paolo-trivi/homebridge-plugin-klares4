@@ -31,6 +31,8 @@
  * mode) so comparison is exact and unit-free.
  */
 
+import type { ThermostatOutputRole } from '../types';
+
 const DEFAULT_ECHO_TTL_MS = 10_000;
 /**
  * How long a value confirmed by the panel's ACK stands in for the realtime
@@ -38,9 +40,6 @@ const DEFAULT_ECHO_TTL_MS = 10_000;
  * matters when it never comes.
  */
 const DEFAULT_CONFIRMED_TTL_MS = 15_000;
-
-/** How long a just-started state push is given to be applied before a command returns. */
-const PUSH_SETTLE_MS = 50;
 
 type TrackedAttr = 'occupiedHeatingSetpoint' | 'occupiedCoolingSetpoint' | 'systemMode';
 
@@ -65,8 +64,7 @@ export class MatterThermostatEchoTracker {
     /** Per accessory and attribute: the values pushed (or intended) and not yet seen fired, oldest first. */
     private readonly entries = new Map<string, Entry[]>();
     private readonly confirmed = new Map<string, ConfirmedEntry>();
-    private readonly commandsInFlight = new Map<string, number>();
-    private readonly lastPushAt = new Map<string, number>();
+    private readonly roles = new Map<string, ThermostatOutputRole>();
 
     constructor(
         ttlMs = DEFAULT_ECHO_TTL_MS,
@@ -85,7 +83,6 @@ export class MatterThermostatEchoTracker {
      * cannot later swallow a controller write of that value.
      */
     recordPushed(uuid: string, attrs: Record<string, unknown>, current?: Record<string, unknown>): void {
-        this.lastPushAt.set(uuid, this.now());
         for (const attr of ['occupiedHeatingSetpoint', 'occupiedCoolingSetpoint', 'systemMode'] as TrackedAttr[]) {
             const v = attrs[attr];
             if (typeof v === 'number' && Number.isFinite(v) && current?.[attr] !== v) this.record(uuid, attr, v);
@@ -118,42 +115,6 @@ export class MatterThermostatEchoTracker {
     /** Drop every tracked value of the attribute (after a failed command, F33). */
     consume(uuid: string, attr: TrackedAttr): void {
         this.entries.delete(this.key(uuid, attr));
-    }
-
-    /**
-     * A Matter command handler for `uuid` is running. Homebridge runs the
-     * matter.js default of some commands right after the handler and that
-     * needs the endpoint's state lock synchronously (`setpointRaiseLower`:
-     * "Cannot lock … synchronously"); state pushes for the endpoint wait until
-     * the command is over (`isCommandInFlight`, read by the update queue).
-     */
-    beginCommand(uuid: string): void {
-        this.commandsInFlight.set(uuid, (this.commandsInFlight.get(uuid) ?? 0) + 1);
-    }
-
-    /** Ends a command one macrotask later: Homebridge's post-handler step runs in microtasks. */
-    endCommand(uuid: string): void {
-        setImmediate(() => {
-            const left = (this.commandsInFlight.get(uuid) ?? 1) - 1;
-            if (left > 0) this.commandsInFlight.set(uuid, left);
-            else this.commandsInFlight.delete(uuid);
-        });
-    }
-
-    /**
-     * Resolves once a state push started just before (or during) the command
-     * has had time to be applied. Homebridge applies a push in its own
-     * transaction on a later tick; a command that returns while it is still
-     * open makes Homebridge's synchronous lock fail.
-     */
-    async settlePushes(uuid: string): Promise<void> {
-        const since = this.now() - (this.lastPushAt.get(uuid) ?? Number.NEGATIVE_INFINITY);
-        if (since < PUSH_SETTLE_MS) await new Promise<void>((resolve) => setTimeout(resolve, PUSH_SETTLE_MS - since));
-        await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-
-    isCommandInFlight(uuid: string): boolean {
-        return (this.commandsInFlight.get(uuid) ?? 0) > 0;
     }
 
     private record(uuid: string, attr: TrackedAttr, value: number): void {
@@ -197,9 +158,24 @@ export class MatterThermostatEchoTracker {
         return typeof value === 'string' ? value as ThermostatModeValue : observed;
     }
 
+    /**
+     * The role a registered Thermostat endpoint was built for. State updates
+     * and command handling follow the live endpoint's attribute set, not a
+     * role learned later: matter.js rolls back an update that carries an
+     * attribute the endpoint does not have, and every value of that update is
+     * lost (rc.1 H1). A changed role is applied by replacing the endpoint.
+     */
+    registeredRole(uuid: string): ThermostatOutputRole | undefined {
+        return this.roles.get(uuid);
+    }
+
+    setRegisteredRole(uuid: string, role: ThermostatOutputRole | undefined): void {
+        if (role) this.roles.set(uuid, role);
+        else this.roles.delete(uuid);
+    }
+
     /** Clear all entries for an accessory (use on unregister / device removal). */
     clear(uuid: string): void {
-        this.commandsInFlight.delete(uuid);
         for (const map of [this.entries, this.confirmed] as Map<string, unknown>[]) {
             for (const k of Array.from(map.keys())) {
                 if (k.startsWith(`${uuid}::`)) map.delete(k);

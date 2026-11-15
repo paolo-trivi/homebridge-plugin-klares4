@@ -78,6 +78,8 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         return tracker ? tracker.effectiveTarget(uuid, observed, d.status?.observedAt) : observed;
     };
     const coolActive = (role: ThermostatOutputRole, d: KseniaThermostat): boolean => isCoolingSetpointActiveForRole(role, modeOf(d));
+    /** The role the live endpoint was registered for, else the device's. */
+    const roleOf = (d: KseniaThermostat): ThermostatOutputRole => tracker?.registeredRole(uuid) ?? thermostatRole(d);
     const client = (): KseniaWebSocketClient => {
         const ws = getWsClient();
         if (!ws) throw new Error('no connection to the panel');
@@ -111,7 +113,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
     const setpointChange = async (attr: SetpointAttr, centi: number): Promise<void> => {
         const cooling = attr === 'occupiedCoolingSetpoint';
         const current = latest();
-        const role = thermostatRole(current);
+        const role = roleOf(current);
         if (coolActive(role, current) !== cooling) {
             log.debug(`[Matter] ${device.name}: ${attr}=${fmt(centi)}°C not forwarded (not the active setpoint)`);
             return;
@@ -139,7 +141,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
 
     const setpointRaiseLower = async (args: { mode: number; amount: number }): Promise<void> => {
         const current = latest();
-        const role = thermostatRole(current);
+        const role = roleOf(current);
         const cooling = coolActive(role, current);
         // Only the active setpoint exists on the panel; `Both` adjusts it too.
         if ((args.mode === RAISE_LOWER_HEAT && cooling) || (args.mode === RAISE_LOWER_COOL && !cooling)) {
@@ -170,7 +172,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
             return;
         }
         const current = latest();
-        const role = thermostatRole(current);
+        const role = roleOf(current);
         const klares4Mode = matterSystemModeForRole(requestedMode, role);
         if (klares4Mode === null) {
             // matter.js already refuses most of these by conformance; this covers
@@ -200,34 +202,20 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         }
     };
 
-    /**
-     * Runs a handler as a command on the endpoint: state pushes wait until
-     * Homebridge has finished the command (see `beginCommand`).
-     */
-    const asCommand = <A>(fn: (args: A) => Promise<void>) => async (args: A): Promise<void> => {
-        tracker?.beginCommand(uuid);
-        try {
-            await fn(args);
-            await tracker?.settlePushes(uuid);
-        } finally {
-            tracker?.endCommand(uuid);
-        }
-    };
-
     return {
-        setpointRaiseLower: asCommand(setpointRaiseLower),
-        occupiedHeatingSetpointChange: asCommand(async (args: { occupiedHeatingSetpoint: number }) => {
+        setpointRaiseLower,
+        occupiedHeatingSetpointChange: async (args: { occupiedHeatingSetpoint: number }) => {
             await setpointChange('occupiedHeatingSetpoint', args.occupiedHeatingSetpoint);
-        }),
-        occupiedCoolingSetpointChange: asCommand(async (args: { occupiedCoolingSetpoint: number }) => {
+        },
+        occupiedCoolingSetpointChange: async (args: { occupiedCoolingSetpoint: number }) => {
             // Only the legacy payload declares a cooling setpoint on a heating
             // output; there it is read-only state and never a command.
-            if (thermostatRole(latest()) === 'heating') {
+            if (roleOf(latest()) === 'heating') {
                 log.debug(`[Matter] ${device.name}: cooling setpoint change ignored (heating output)`);
                 return;
             }
             await setpointChange('occupiedCoolingSetpoint', args.occupiedCoolingSetpoint);
-        }),
-        systemModeChange: asCommand(systemModeChange),
+        },
+        systemModeChange,
     };
 }

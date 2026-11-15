@@ -24,7 +24,7 @@ import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-track
 import { buildThermostatMatterState } from './matter-thermostat-mapper';
 import { derivedThermostatRole } from './matter-thermostat-role';
 import {
-    advanceThermostatShape, pinThermostatRole, resetThermostatShapes, startThermostatShapes, type ThermostatShape,
+    advanceThermostatShape, resetThermostatShapes, startThermostatShapes, type ThermostatShape,
 } from './matter-thermostat-shape';
 import { replaceEndpoint } from './matter-endpoint-replacement';
 import type { MatterTopologyCoordinator } from './matter-topology-coordinator';
@@ -57,21 +57,18 @@ export function startThermostatAttempts(uuid: string, remembered: ThermostatShap
 /** Back to the first attempt for `uuid` (after a fallback, or when the device goes away). */
 export function resetThermostatAttempts(uuid: string): void {
     resetThermostatShapes(uuid);
-    pinThermostatRole(uuid, undefined);
 }
 
 /**
- * Around the mapping of a native Thermostat registration: before it, the
- * device's current role must decide the attribute set (`unpin`); after it,
- * every update and command of the endpoint follows that role (`pin`).
+ * After the mapping of a native Thermostat registration (built for the
+ * device's current role): every update and command of the endpoint follows
+ * that role until the endpoint is replaced.
  */
-export function unpinRegisteredRole(device: KseniaDevice): void {
-    if (device.type === 'thermostat') pinThermostatRole(device.id, undefined);
-}
-
-export function pinRegisteredRole(device: KseniaDevice, accessory: MatterAccessory | undefined): void {
+export function pinRegisteredRole(
+    device: KseniaDevice, accessory: MatterAccessory | undefined, tracker: MatterThermostatEchoTracker,
+): void {
     if (device.type !== 'thermostat') return;
-    pinThermostatRole(device.id, accessory?.clusters?.thermostat ? derivedThermostatRole(device) : undefined);
+    tracker.setRegisteredRole(device.id, accessory?.clusters?.thermostat ? derivedThermostatRole(device) : undefined);
 }
 
 /**

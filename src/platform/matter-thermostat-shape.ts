@@ -25,8 +25,6 @@
  * only when the runtime refuses the current one (`advanceThermostatShape`).
  */
 
-import type { ThermostatOutputRole } from '../types';
-
 export type ThermostatShape = 'conformant' | 'legacy';
 
 /** Preferred order when nothing is remembered. */
@@ -68,24 +66,6 @@ export function advanceThermostatShape(uuid: string): ThermostatShape | undefine
 export function resetThermostatShapes(uuid: string): void {
     currentShapes.delete(uuid);
     triedShapes.delete(uuid);
-}
-
-/**
- * The role a registered Thermostat endpoint was built for. State updates and
- * command handling follow the live endpoint's attribute set, not a role
- * learned later: matter.js rolls back an update that carries an attribute the
- * endpoint does not have, and every value of that update is lost. A changed
- * role is applied by replacing the endpoint (`needsThermostatReshape`).
- */
-const registeredRoles = new Map<string, ThermostatOutputRole>();
-
-export function registeredThermostatRole(uuid: string): ThermostatOutputRole | undefined {
-    return registeredRoles.get(uuid);
-}
-
-export function pinThermostatRole(uuid: string, role: ThermostatOutputRole | undefined): void {
-    if (role) registeredRoles.set(uuid, role);
-    else registeredRoles.delete(uuid);
 }
 
 // PresetScenarioEnum (Matter spec §4.3.8.16)

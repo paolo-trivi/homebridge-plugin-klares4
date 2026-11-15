@@ -20,7 +20,7 @@ import type { MatterStateUpdateQueue } from './matter-state-update-queue';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { resolvePersistedThermostatFallback } from './matter-thermostat-recovery-request';
 import {
-    needsThermostatReshape, pinRegisteredRole, reshapeThermostatEndpoint, startThermostatAttempts, unpinRegisteredRole,
+    needsThermostatReshape, pinRegisteredRole, reshapeThermostatEndpoint, startThermostatAttempts,
 } from './matter-thermostat-attempts';
 import { forgetSensorIdentity } from './matter-thermostat-recovery-request';
 import { ThermostatRoleWait } from './matter-thermostat-role-wait';
@@ -125,9 +125,11 @@ export class MatterRegistrationFlow {
     }
 
     private mapShape(device: KseniaDevice, thermostatFallback: boolean): MatterAccessory | undefined {
-        return thermostatFallback
+        const accessory = thermostatFallback
             ? mapThermostatAsTemperatureSensor(device as KseniaThermostat, this.mapperDeps())
             : deviceToMatterAccessory(device, this.mapperDeps());
+        // Controller commands and state pushes on the endpoint run one after the other.
+        return accessory && this.ctx.stateUpdateQueue.commands.guard(accessory);
     }
 
     /** Which shape this device registers with: a persisted thermostat fallback stays a TemperatureSensor. */
@@ -156,9 +158,8 @@ export class MatterRegistrationFlow {
         const cached = ctx.cachedDevices.get(discovered.id);
         // Discovery placeholders must not overwrite the state Homebridge restored from its cache.
         const device = withCachedDimmable(hasObservedState(discovered) ? discovered : mergeKnownState(discovered, cached), cached);
-        unpinRegisteredRole(device);
         const { accessory: matterAccessory, fallback } = await this.resolveShape(device);
-        pinRegisteredRole(device, matterAccessory);
+        pinRegisteredRole(device, matterAccessory, ctx.thermostatEchoTracker);
         if (!matterAccessory) return;
 
         const reg: MatterRegistration = {
@@ -279,6 +280,11 @@ export class MatterRegistrationFlow {
             getLatestDevice: (id: string) => ctx.registrations.get(id)?.matterAccessory.context?.device as KseniaDevice | undefined,
             // Pushes the last observed state again, e.g. after the panel refused a Matter command.
             republishState: (id: string) => this.republishKnownState(id),
+            // A push from a handler goes through the queue: it must not land inside a command.
+            pushState: (id: string, cluster: string, attributes: Record<string, unknown>) => {
+                const reg = ctx.registrations.get(id);
+                if (reg) void ctx.stateUpdateQueue.pushOrQueue(reg, { clusterName: cluster, attributes });
+            },
         };
     }
 

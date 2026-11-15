@@ -6,6 +6,7 @@ import type { MatterRegistration } from './matter-registration-recovery';
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { mergeStateUpdates } from './matter-state-updates';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { currentThermostatAttributes } from './matter-thermostat-push';
 
 /**
  * The queue records every thermostat-cluster push so the mapper's
@@ -24,12 +25,12 @@ export function createStateUpdateQueue(
         log,
         registrations,
         (err) => (err instanceof Error ? err.message : String(err)),
-        (uuid, clusterName, attrs) => {
-            if (clusterName !== 'thermostat') return;
-            const live = registrations.get(uuid)?.matterAccessory.clusters?.thermostat as Record<string, unknown> | undefined;
-            tracker.recordPushed(uuid, attrs, live);
+        (reg, update) => {
+            if (update.clusterName !== 'thermostat') return update.attributes;
+            const attrs = currentThermostatAttributes(reg.matterAccessory.context?.device as KseniaDevice | undefined, update.attributes, tracker);
+            tracker.recordPushed(reg.uuid, attrs, reg.matterAccessory.clusters?.thermostat as Record<string, unknown> | undefined);
+            return attrs;
         },
-        (uuid) => tracker.isCommandInFlight(uuid),
     );
 }
 

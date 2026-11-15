@@ -22,6 +22,8 @@ export interface CommandContext<T> {
     getWsClient: () => KseniaWebSocketClient | undefined;
     latest: () => T;
     log?: Logger;
+    /** Sends a state through the registry's update queue (never inside a running command). */
+    pushState?: (attributes: Record<string, unknown>) => void;
 }
 
 // Matter spec: Status.UnsupportedCommand. Homebridge ships no named class for it.
@@ -147,6 +149,10 @@ function keepReportedPosition(device: KseniaCover, requested: number, ctx: Comma
             const movement = current === target ? MOVEMENT_STOPPED : current < target ? MOVEMENT_CLOSING : MOVEMENT_OPENING;
             attributes.currentPositionLiftPercent100ths = current;
             attributes.operationalStatus = { global: movement, lift: movement, tilt: MOVEMENT_STOPPED };
+        }
+        if (ctx.pushState) {
+            ctx.pushState(attributes);
+            return;
         }
         ctx.api.matter?.updateAccessoryState(device.id, 'windowCovering', attributes)
             .catch((err: unknown) => {

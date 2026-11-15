@@ -15,7 +15,6 @@
 
 import type { KseniaThermostat, ThermostatOutputRole } from '../types';
 import { nameSuggestsCooling } from '../thermostat-role';
-import { registeredThermostatRole } from './matter-thermostat-shape';
 
 // The derivation from the program data is domain code, shared with the WebSocket client.
 export { deriveThermostatOutputRole, nameSuggestsCooling, type ThermostatProgramOutputs } from '../thermostat-role';
@@ -25,19 +24,15 @@ export type ThermostatSeason = 'winter' | 'summer';
 /**
  * The role the device has now: `status.outputRole` (program data, or the
  * panel's own output name), else the 2.2.0 name heuristic on the name the
- * mapper receives.
+ * mapper receives. A registered endpoint keeps the role it was built for
+ * (`MatterThermostatEchoTracker.registeredRole`) until it is replaced.
  */
-export function derivedThermostatRole(device: KseniaThermostat): ThermostatOutputRole {
+export function thermostatRole(device: KseniaThermostat): ThermostatOutputRole {
     return device.status?.outputRole ?? (nameSuggestsCooling(device.name) ? 'heating-cooling' : 'heating');
 }
 
-/**
- * The role the Matter endpoint works with: the one its live endpoint was
- * registered for, else the device's current one.
- */
-export function thermostatRole(device: KseniaThermostat): ThermostatOutputRole {
-    return registeredThermostatRole(device.id) ?? derivedThermostatRole(device);
-}
+/** Same as `thermostatRole`; the name says it is the device's role, not the endpoint's. */
+export const derivedThermostatRole = thermostatRole;
 
 const modeOf = (d: KseniaThermostat): KseniaThermostat['mode'] | undefined => d.status?.mode ?? d.mode;
 
