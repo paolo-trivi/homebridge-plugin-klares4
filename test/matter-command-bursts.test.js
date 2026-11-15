@@ -33,6 +33,17 @@ function wsClient() {
 
 async function setup(t, device) {
     const stack = await realMatterStackSession(t).start();
+    // State pushes Homebridge is still applying (StateManager defers each one).
+    let inFlight = 0;
+    const apply = stack.server.updateAccessoryState.bind(stack.server);
+    t.mock.method(stack.server, 'updateAccessoryState', async (...args) => {
+        inFlight += 1;
+        try {
+            return await apply(...args);
+        } finally {
+            inFlight -= 1;
+        }
+    });
     const ws = wsClient();
     const registry = new MatterAccessoryRegistry({
         api: stack.api, log: silentLog(), getWsClient: () => ws, storagePath: tmpStorage(t, 'klares4-burst-'), timings: TIMINGS,
@@ -40,6 +51,9 @@ async function setup(t, device) {
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(device);
     await waitFor(() => registry.getStatus(device.id) === 'registered', 10000);
+    // The burst starts once the registration's own state pushes are done: a
+    // push in flight makes any command fail with "Cannot lock" (see NEW-1 above).
+    await waitFor(() => registry.getPendingCount(device.id) === 0 && inFlight === 0, 10000);
     return { stack, ws };
 }
 
