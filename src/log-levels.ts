@@ -6,22 +6,12 @@
  * - NORMAL (1): Standard operation logs, startup summary, commands
  * - DEBUG (2): Full verbose logging for troubleshooting
  */
+import { isCredentialKey } from './secret-keys';
+
 export enum LogLevel {
     MINIMAL = 0,
     NORMAL = 1,
     DEBUG = 2,
-}
-
-/**
- * Words that make a key a credential, whatever its case or prefix (`PIN`,
- * `USER_PIN`, `PIN_CODE`, `password`). Same family as the debug-file redaction,
- * kept here because that module builds on this one.
- */
-const SECRET_WORDS = new Set(['pin', 'pwd', 'passwd', 'password', 'passcode', 'secret', 'token']);
-
-function isSecretKey(key: string): boolean {
-    const lower = key.toLowerCase();
-    return lower === 'code' || lower.split('_').some((word) => SECRET_WORDS.has(word));
 }
 
 /** A JSON key, and the same key inside a JSON text carried as a string (`"PAYLOAD":"{\"PIN\":...}"`). */
@@ -46,7 +36,7 @@ function maskKeys(text: string, keyPattern: RegExp, quote: string): string {
     let cursor = 0;
     keyPattern.lastIndex = 0;
     for (let match = keyPattern.exec(text); match !== null; match = keyPattern.exec(text)) {
-        if (!isSecretKey(match[1])) continue;
+        if (!isCredentialKey(match[1])) continue;
         const valueEnd = endOfValue(text, keyPattern.lastIndex, quote);
         masked += `${text.slice(cursor, match.index)}${quote}${match[1]}${quote}:${quote}***${quote}`;
         cursor = valueEnd;

@@ -17,7 +17,7 @@ No key added.
 
 Nothing else in the schema changes. `debugCaptureDurationMs` keeps its 10000..1800000 limits (the plugin no longer clamps them a second time, the runtime config is the only place).
 
-No config key for the capture buffer limits: they are fixed (20,000 frames and 8 MiB of stored frames), far above the traffic of the longest allowed capture (about 4 MB in 15 minutes on a real installation).
+No config key for the capture buffer limits: they are fixed (5,000 frames and 2 MiB of stored frames, at most 60 interval snapshots). The frames of a real 10-15 minute capture weigh 0.15-0.3 MB, so the cap is about eight times the largest one seen; what made real files 3.7 MB were the device snapshots, now stored only when something changed.
 
 ## Changelog entries (2.3.0)
 
@@ -27,7 +27,9 @@ No config key for the capture buffer limits: they are fixed (20,000 frames and 8
 
 ### Changed
 - Debug file: names of devices and the state of the installation are still in the file (they are needed to diagnose a problem), so it must not be attached to a public issue: send it privately. The file names the masked values `***MASKED***`. (SP-01)
-- Debug capture keeps at most 20,000 frames and 8 MiB of traffic in memory; later frames are counted (`captureInfo.droppedMessages`), one warning is logged, and the capture still ends on time. (SP-23)
+- Debug capture keeps at most 5,000 frames and 2 MiB of traffic in memory; later frames are counted (`captureInfo.droppedMessages`), one warning is logged, and the capture still ends on time. The file is now a few MiB at most (a flood of large frames gives under 6 MiB): each frame is written once, as its JSON text in `rawMessages[].rawData` (the `parsed` copy is gone: parse `rawData`), and a device snapshot taken during the capture is stored only if the devices changed since the previous one (the first and the last are always stored, at most 60 in between). (SP-23)
+- The device snapshots in the debug file keep the position of covers and shutters (`status.position`): only the geographic position of the installation is masked.
+- The redaction of keys is by family, in any spelling (`userPin`, `PINCODE`, `PIN1`, `PIN-CODE`, `SERIAL_NUMBER`, `MAC`, `IMEI`, `ICCID`, `EMAIL`...), and the text fallback also masks `PIN 1234`, single-quoted pairs and nested JSON strings larger than 1 MiB. The log mask uses the same rule for credentials.
 - `telemetry` is no longer a setting: if it is in `config.json` the plugin logs one line ("error reporting was removed in 2.3.0; the `telemetry` key is ignored and can be deleted") and ignores it. (SP-08)
 - The install size drops: `@sentry/node` and its dependencies (23 packages, about 95 MB of `node_modules` and 5,600 files: 104 MB before, 11 MB after) are no longer installed.
 
@@ -40,9 +42,9 @@ Remove or rewrite:
 - `README.md` EN: config table row for `telemetry` (line ~226) and the whole `#### Telemetry` section (~382-396, with the `"telemetry": false` example and the anchor `#telemetry` linked from the table). README IT: same, row at ~634 and section ~790-804 (anchor `#telemetry-1`).
 - `README.md` EN ~380 and IT ~788 (the paragraph on `generateDebugFile`): the IT text says the file is "da allegare a una segnalazione", and the table rows (~227, ~635) say "PINs masked". Replace with: the file is confidential, written `0600`, holds device names and alarm state, PIN/account/serials/position are masked, it must be sent privately, never attached to a public issue.
 - `docs/en/config-and-ui.md` and `docs/it/configurazione-e-ui.md`: the whole `## Telemetry` section (lines ~94-104 in both).
-- `docs/en/operations-debug.md` line ~54 and `docs/it/operazioni-debug.md` line ~54: "with PINs masked" must become the confidentiality note above; add that the file is `0600`, that the buffer is capped, and that `captureInfo.droppedMessages` tells whether frames were left out.
+- `docs/en/operations-debug.md` line ~54 and `docs/it/operazioni-debug.md` line ~54: "with PINs masked" must become the confidentiality note above; add that the file is `0600`, that the buffer is capped, that `captureInfo.droppedMessages` tells whether frames were left out, that frames are in `rawMessages[].rawData` as JSON text (no `parsed` copy) and that `CRC_16` of a frame with masked values no longer matches its text.
 - `SECURITY.md`: there is no telemetry entry to remove, but the file says nothing about privacy. Add a short "Privacy" section: the plugin makes no connection to third parties; the only outbound connections are the panel (WebSocket) and the optional MQTT broker; the debug file is confidential. (Also noted in SP-20: the supported-versions table still says 1.1.x.)
-- `ARCHITECTURE.md`: no mention of telemetry exists. Add under the debug capture description: `debug-capture/redaction.ts` (key-based redaction, text fallback), `debug-capture/capture-buffer.ts` (caps), and that the file is written with mode `0600`. Remove `telemetry.ts` from any module list a later task adds.
+- `ARCHITECTURE.md`: no mention of telemetry exists. Add under the debug capture description: `debug-capture/redaction.ts` (key-based redaction, text fallback), `debug-capture/capture-buffer.ts` (caps), `secret-keys.ts` (the key families shared with the log mask), that each frame is written once (as `rawData`) and snapshots only when changed, and that the file is written with mode `0600`. Remove `telemetry.ts` from any module list a later task adds.
 - `CHANGELOG.md`: the 2.2.0 entries that describe Sentry (lines ~26, 35, 36, 45, 47, 196-225, 248, 307) are history; leave them. Do not describe the removal there.
 - Verified Plugins: with no telemetry the "No analytics or tracking" requirement is met (SP-20); worth one line in the release notes.
 
@@ -56,9 +58,10 @@ The debug-file privacy statement (to reuse): *"The debug file is confidential. I
 
 ## Key list used for the redaction (derived from real captures: names only were read)
 Masked by key, at any depth, whatever the value type (string, number, array, object):
-- credentials: any key with a segment `pin`, `pwd`, `passwd`, `password`, `passcode`, `secret`, `token`, and the key `code` (case-insensitive: `PIN`, `USER_PIN`, `4DIGIT_PIN`, `pin`). Exception: `PIN` inside `SCENARIOS[]` when it is one to three capital letters (the real flag `N`/`P`/`PR`).
-- position: `POSITION`, `LAT`, `LONG`, `LON`, `LNG`, `LATITUDE`, `LONGITUDE`, plus `DAWN` and `DUSK` of `STATUS_SYSTEM[].TIME` (sunrise and sunset times, with the date, give latitude and longitude; the plugin does not use them).
-- identity: `DESCRIPTION` (upper case, the account description of `LOGIN_RES`; the device snapshot's own `description` stays), `ID_ACCOUNT`, `SN` (also `LINK.SN`), `SERIAL`, and the top-level `SENDER` of incoming frames (a 12-character hexadecimal identifier of the panel; the plugin's own `SENDER` in outgoing frames, and `RECEIVER`, stay).
+- credentials, by family (`src/secret-keys.ts`; the key is split into words at separators, camelCase and digits, and a word glued to a modifier or suffix counts: `USERPIN`, `PINCODE`): `pin`, `pwd`, `passwd`, `password`, `passcode`, `pass`, `secret`, `token`, and `code` when it stands alone or follows `pin`, `pass`, `user`, `access`, `security`, `auth`, `unlock`, `master`, `installer`, `admin` (so `ERROR_CODE`, `RESULT_CODE`, `STATUS_CODE` stay readable). Not matched on mere containment: `PING`, `PINNED`, `MACHINE`, `COMPASS`, `PASSIVE`, `CODEC`. Exception: `PIN` inside `SCENARIOS[]` when it is one to three capital letters (the real flag `N`/`P`/`PR`).
+- identifiers, by family: `serial`, `mac`, `imei`, `iccid`, `email`, `sn` (`SN`, `SERIAL_NUMBER`, `macAddress`, `deviceMac`...).
+- position: `LAT`, `LONG`, `LON`, `LNG`, `LATITUDE`, `LONGITUDE`, `POSITION` (always in frames, where it is the login's `{LAT, LONG}`; in device snapshots only when its value is not a plain number, because a device's own `position` is the opening of a cover, which frames call `POS`), plus `DAWN` and `DUSK` of `STATUS_SYSTEM[].TIME` (sunrise and sunset times, with the date, give latitude and longitude; the plugin does not use them).
+- identity: `DESCRIPTION` (upper case, the account description of `LOGIN_RES`; the device snapshot's own `description` stays), `ID_ACCOUNT`, and the top-level `SENDER` of incoming frames (a 12-character hexadecimal identifier of the panel; the plugin's own `SENDER` in outgoing frames, and `RECEIVER`, stay).
 - kept on purpose: `DES` of zones, outputs, scenarios and bus devices (names), `ID_LOGIN`, `CRC_16`, `TIMESTAMP`, `VER_LITE`, firmware/hardware strings, every state field.
 
 ## Requests for other tasks
