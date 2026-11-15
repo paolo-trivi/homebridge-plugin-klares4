@@ -143,7 +143,12 @@ export interface WebSocketClientState {
      * changed. STATUS_TEMPERATURES is keyed by DOMUS sensor id, which can equal
      * another thermostat's cfg id, so the season is only looked up by output.
      */
-    thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number }>;
+    thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number; seq?: number }>;
+    /**
+     * Last number handed out by nextThermostatEventSeq: thermostat events (realtime
+     * observation, cfg read, ACK) are ordered by it, never by the clock.
+     */
+    thermostatEventSeq?: number;
     missingThermostatProgramWarningOutputIds: Set<string>;
     /** CFG_THERMOSTATS cache bookkeeping; created on first use (thermostat-cfg-freshness.ts). */
     thermostatCfgFreshness?: ThermostatCfgFreshness;
@@ -186,6 +191,8 @@ export interface ThermostatCfgFreshness {
     counter?: number;
     /** Own writes acknowledged since `counter` was learned. */
     ownWritesSinceCounter: number;
-    /** When each cfg id was last read from the panel (epoch ms). */
+    /** When each cfg id was last read from the panel (epoch ms, informative). */
     readAt: Map<string, number>;
+    /** Event sequence number (nextThermostatEventSeq) of each cfg id's last read: decides ordering. */
+    readSeq?: Map<string, number>;
 }

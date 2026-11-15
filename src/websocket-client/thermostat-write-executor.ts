@@ -9,6 +9,7 @@ import {
 } from './thermostat-command-payload';
 import { ThermostatRoutingError } from './thermostat-command-id-resolver';
 import { cfgFreshness, recordOwnCfgWrite } from './thermostat-cfg-freshness';
+import { nextThermostatEventSeq } from './thermostat-sequence';
 import type { ThermostatWriteBatch } from './thermostat-write-batcher';
 import {
     asSeason,
@@ -131,11 +132,11 @@ export class ThermostatWriteExecutor {
 
     private seasonObservations(cfgId: string, cfg: Record<string, unknown> | undefined): SeasonObservation[] {
         const observations: SeasonObservation[] = [];
-        const readAt = cfgFreshness(this.deps.state).readAt.get(cfgId);
-        if (readAt !== undefined) observations.push({ season: asSeason(cfg?.ACT_SEA), at: readAt });
+        const readSeq = cfgFreshness(this.deps.state).readSeq?.get(cfgId);
+        if (readSeq !== undefined) observations.push({ season: asSeason(cfg?.ACT_SEA), seq: readSeq });
         for (const outputId of this.outputsOfCfg(cfgId)) {
             const realtime = this.deps.state.thermostatRealtimeSeasonByOutputId.get(outputId);
-            if (realtime) observations.push({ season: realtime.season, at: realtime.updatedAt });
+            if (realtime?.seq !== undefined) observations.push({ season: realtime.season, seq: realtime.seq });
         }
         return observations;
     }
@@ -150,12 +151,13 @@ export class ThermostatWriteExecutor {
         const cached = applyAcknowledgedWrite(state.thermostatCfgById.get(cfgId), payload);
         if (cached) state.thermostatCfgById.set(cfgId, cached);
         recordOwnCfgWrite(state);
-        this.seasons.recordAcknowledged(cfgId, asSeason(payload.ACT_SEA) ?? seasonOfMode(intent.mode));
+        const seq = nextThermostatEventSeq(state);
+        this.seasons.recordAcknowledged(cfgId, asSeason(payload.ACT_SEA) ?? seasonOfMode(intent.mode), seq);
         const at = Date.now();
         for (const outputId of this.outputsOfCfg(cfgId)) {
             const device = state.devices.get(`thermostat_${outputId}`);
             if (!device || device.type !== 'thermostat') continue;
-            device.status.acknowledged = { mode: intent.mode, targetTemperature: intent.temperature, at };
+            device.status.acknowledged = { mode: intent.mode, targetTemperature: intent.temperature, at, seq };
             this.propagate(device, intent, season);
         }
         if (this.deps.logLevel >= LogLevel.DEBUG) {

@@ -1,7 +1,9 @@
+import { nextThermostatEventSeq } from './thermostat-sequence';
 import type { ThermostatCfgFreshness, WebSocketClientState } from './types';
 
 export function cfgFreshness(state: WebSocketClientState): ThermostatCfgFreshness {
     state.thermostatCfgFreshness ??= { ownWritesSinceCounter: 0, readAt: new Map() };
+    state.thermostatCfgFreshness.readSeq ??= new Map();
     return state.thermostatCfgFreshness;
 }
 
@@ -18,7 +20,11 @@ export function parseCfgCounter(prgCheck: unknown): number | undefined {
 export function recordCfgRead(state: WebSocketClientState, cfgIds: string[], prgCheck?: unknown): void {
     const freshness = cfgFreshness(state);
     const now = Date.now();
-    for (const id of cfgIds) freshness.readAt.set(id, now);
+    const seq = nextThermostatEventSeq(state);
+    for (const id of cfgIds) {
+        freshness.readAt.set(id, now);
+        freshness.readSeq?.set(id, seq);
+    }
     const counter = parseCfgCounter(prgCheck);
     if (counter !== undefined) {
         freshness.counter = counter;
@@ -49,6 +55,7 @@ export function handleCfgChangeNotification(state: WebSocketClientState, prgChec
     if (foreign) {
         state.thermostatCfgById.clear();
         freshness.readAt.clear();
+        freshness.readSeq?.clear();
         freshness.counter = counter;
         freshness.ownWritesSinceCounter = 0;
     } else if (counter === expected) {
