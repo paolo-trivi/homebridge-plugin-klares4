@@ -20,6 +20,7 @@ function fallbackCoordinator(unregister) {
         renameInPlace: async () => false,
         updateCachedRecord: async () => {},
         restoreUniqueId: async () => true,
+        inheritOnNextRegister: () => {},
         unregister,
     };
 }

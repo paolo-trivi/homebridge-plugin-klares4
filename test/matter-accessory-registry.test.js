@@ -167,9 +167,11 @@ test('thermostat: async missing registration falls back before state updates', a
     await waitFor(() => registry.getStatus('thermostat_async_missing') === 'registered');
     assert.equal(registry.getStatus('thermostat_async_missing'), 'registered');
     assert.deepEqual(registered.map((r) => r.deviceType), ['Thermostat', 'Thermostat', 'TemperatureSensor']);
-    assert.equal(updates.length, 1);
-    assert.equal(updates[0].cluster, 'temperatureMeasurement');
-    assert.equal(updates[0].attributes.measuredValue, 1950);
+    // State updates only: the second Thermostat endpoint also took the first one's uniqueId (identity, not state).
+    const stateUpdates = updates.filter((u) => u.cluster !== 'bridgedDeviceBasicInformation');
+    assert.equal(stateUpdates.length, 1);
+    assert.equal(stateUpdates[0].cluster, 'temperatureMeasurement');
+    assert.equal(stateUpdates[0].attributes.measuredValue, 1950);
 });
 
 test('stale matter.js endpoint: every recovery attempt unregisters before re-registering (UUID preserved)', async (t) => {

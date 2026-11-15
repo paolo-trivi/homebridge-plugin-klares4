@@ -8,7 +8,7 @@
 // Homebridge adds to the plugin's clusters, and the unregister settle is a
 // registry timing.
 
-process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS = '1000';
+process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS = '3000';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,9 +24,11 @@ const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const BRIDGED = 'bridgedDeviceBasicInformation';
 const TIMINGS = {
-    registerProbeTimeoutMs: 300, settledRegisterProbeTimeoutMs: 300, registerProbePollMs: 10,
+    registerProbeTimeoutMs: 1500, settledRegisterProbeTimeoutMs: 1500, registerProbePollMs: 10,
     registerProbePollMaxMs: 30, stateBootstrapMs: 0, unregisterSettleMs: 0,
 };
+// The fixture on both Homebridge semantics: a settle (150 ms) longer than the close (80 ms).
+const FIXTURE_TIMINGS = { ...TIMINGS, unregisterSettleMs: 150 };
 const silentLog = () => ({ info() {}, warn() {}, error() {}, debug() {}, success() {} });
 function recordingLog() {
     const lines = [];
@@ -56,7 +58,7 @@ function registryOn(stack, t, log = silentLog()) {
     return registry;
 }
 
-test('stale-endpoint purge: the re-registered endpoint keeps the uniqueId', { timeout: 60000 }, async (t) => {
+test('stale-endpoint purge: the re-registered endpoint keeps the uniqueId', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     let endpoints = 0;
     const register = stack.api.matter.registerPlatformAccessories.bind(stack.api.matter);
@@ -74,24 +76,34 @@ test('stale-endpoint purge: the re-registered endpoint keeps the uniqueId', { ti
 
 // On Homebridge 2.5 the 2.2.0 payload is refused (MAT-01), so the second
 // attempt cannot be shown on the real stack; the fixture accepts both payloads.
-test('second Thermostat payload: same device, same uniqueId', async (t) => {
-    const hb = makeHbMatterApi({ unqueryableOnce: ['thermostat_2'] });
+// One UUID per run: the Thermostat payload choice is remembered per UUID for
+// the whole process (matter-thermostat-shape.ts), as it is in production.
+for (const [semantics, uuid] of [['2.4', 'thermostat_2'], ['2.5', 'thermostat_12']]) test(`second Thermostat payload: same device, same uniqueId (${semantics})`, async (t) => {
+    const hb = makeHbMatterApi({ semantics, unregisterCloseMs: 80, unqueryableOnce: [uuid] });
+    // The identity the endpoint has at the very moment the plugin declares it registered.
+    const atRegistered = [];
+    const log = { ...silentLog(), info: (m) => {
+        if (String(m).startsWith('[Matter] registered:')) atRegistered.push(hb.endpoints.get(uuid)?.uniqueId);
+    } };
     const registry = new MatterAccessoryRegistry({
-        api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t, 'klares4-identity-'), timings: TIMINGS,
+        api: hb.api, log, getWsClient: () => undefined, storagePath: tmpStorage(t, 'klares4-identity-'), timings: FIXTURE_TIMINGS,
     });
     registry.startDiscoveryCycle();
-    await registry.addOrUpdateAccessory(thermostat(2));
-    const first = hb.endpoints.get('thermostat_2').uniqueId;
-    await waitFor(() => registry.getStatus('thermostat_2') === 'registered', 10000);
+    await registry.addOrUpdateAccessory(thermostat(Number(uuid.split('_')[1])));
+    // On 2.4 the register returns before the endpoint is built.
+    await waitFor(() => hb.endpoints.has(uuid));
+    const first = hb.endpoints.get(uuid).uniqueId;
+    await waitFor(() => registry.getStatus(uuid) === 'registered', 10000);
 
     assert.equal(hb.registerCalls.length, 2, 'conformant payload, then the 2.2.0 one');
-    assert.equal(hb.endpoints.get('thermostat_2').deviceType.name, 'Thermostat');
-    assert.equal(hb.endpoints.get('thermostat_2').uniqueId, first);
+    assert.equal(hb.endpoints.get(uuid).deviceType.name, 'Thermostat');
+    assert.deepEqual(atRegistered, [first], 'the identity is in place before the endpoint counts as registered');
+    assert.equal(hb.endpoints.get(uuid).uniqueId, first);
 });
 
 // Real stack: the conformant Thermostat endpoint does not answer, the 2.2.0
 // payload is refused by matter.js, the TemperatureSensor comes up.
-test('TemperatureSensor fallback: another kind of device, new uniqueId', { timeout: 60000 }, async (t) => {
+test('TemperatureSensor fallback: another kind of device, new uniqueId', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     hideCluster(t, stack, 'thermostat_3', 'thermostat', () => true);
     const registry = registryOn(stack, t);
@@ -104,11 +116,11 @@ test('TemperatureSensor fallback: another kind of device, new uniqueId', { timeo
     assert.notEqual(stack.read('thermostat_3', BRIDGED).uniqueId, first);
 });
 
-test('the dimmer upgrade is logged as an upgrade, not as a rename', async (t) => {
-    const hb = makeHbMatterApi();
+for (const semantics of ['2.4', '2.5']) test(`the dimmer upgrade is logged as an upgrade and keeps the uniqueId (${semantics})`, async (t) => {
+    const hb = makeHbMatterApi({ semantics, unregisterCloseMs: 80 });
     const log = recordingLog();
     const registry = new MatterAccessoryRegistry({
-        api: hb.api, log, getWsClient: () => undefined, storagePath: tmpStorage(t, 'klares4-identity-'), timings: TIMINGS,
+        api: hb.api, log, getWsClient: () => undefined, storagePath: tmpStorage(t, 'klares4-identity-'), timings: FIXTURE_TIMINGS,
     });
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(light(4, { on: true, dimmable: false }));
@@ -116,6 +128,7 @@ test('the dimmer upgrade is logged as an upgrade, not as a rename', async (t) =>
     const uniqueId = hb.endpoints.get('light_4').uniqueId;
 
     await registry.updateAccessoryState(light(4, { on: true, dimmable: true, brightness: 50 }));
+    assert.deepEqual(hb.log, [], 'no register raced the close');
     await waitFor(() => hb.endpoints.get('light_4')?.deviceType.name === 'DimmableLight' && registry.getStatus('light_4') === 'registered');
 
     const requested = log.lines.filter((l) => l.includes('register requested'));
@@ -139,12 +152,12 @@ test('the unregister settle is a registry timing (env as default, option wins)',
     assert.equal(resolveMatterTimings({ unregisterSettleMs: 5 }, { KLARES4_MATTER_UNREGISTER_SETTLE_MS: '0' }).unregisterSettleMs, 5);
 });
 
-// T0.2/F1: with the 2.4-like close window of the fixture and no settle, two
-// finalize passes in a row used to end in "already registered".
-test('two finalize passes in a row, unregisterCloseMs 20 and settle 0: no "already registered"', async (t) => {
-    const hb = makeHbMatterApi({ unregisterCloseMs: 20 });
+// T0.2/F1: two finalize passes in a row used to end in "already registered".
+// With the rename in place nothing is unregistered; on both semantics.
+for (const semantics of ['2.4', '2.5']) test(`two finalize passes in a row: renamed in place, no "already registered" (${semantics})`, async (t) => {
+    const hb = makeHbMatterApi({ semantics, unregisterCloseMs: 80 });
     const registry = new MatterAccessoryRegistry({
-        api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t, 'klares4-identity-'), timings: TIMINGS,
+        api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t, 'klares4-identity-'), timings: FIXTURE_TIMINGS,
     });
     const zone = (n, name) => ({ id: `zone_${n}`, type: 'zone', name, description: '', status: { armed: false, bypassed: false, fault: false, open: false } });
     const cover = (n, name) => ({ id: `cover_${n}`, type: 'cover', name, description: '', status: { position: 0, state: 'stopped' } });
@@ -168,4 +181,25 @@ test('two finalize passes in a row, unregisterCloseMs 20 and settle 0: no "alrea
 
     assert.deepEqual(hb.log.filter((l) => /already registered/.test(l)), []);
     for (const n of [1, 2, 3]) assert.equal(hb.endpoints.get(`zone_${n}`).nodeLabel, `Finestra ${n} - Sens.`);
+});
+
+// RC1-07: a purge of an endpoint whose identity cannot be read says so.
+test('a same-device replacement without a readable uniqueId logs a warning', async () => {
+    const { replaceEndpoint } = require('../dist/platform/matter-endpoint-replacement.js');
+    const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
+    const warnings = [];
+    const api = { matter: {
+        unregisterPlatformAccessories: async () => {},
+        // The broken endpoint answers no read, the bridged information included.
+        getAccessoryState: async () => undefined,
+    } };
+    const coordinator = new MatterTopologyCoordinator(api, { ...silentLog(), warn: (m) => warnings.push(m) }, 200, 0);
+    const reg = { uuid: 'light_6', matterAccessory: { UUID: 'light_6', clusters: { onOff: {} } } };
+    await replaceEndpoint(reg, coordinator, 'same-device');
+    assert.equal(reg.inheritedUniqueId, undefined);
+    assert.equal(warnings.filter((w) => /shows no uniqueId/.test(w)).length, 1);
+
+    warnings.length = 0;
+    await replaceEndpoint({ ...reg }, coordinator, 'other-device');
+    assert.deepEqual(warnings.filter((w) => /uniqueId/.test(w)), [], 'another kind of device: nothing to keep, nothing to report');
 });

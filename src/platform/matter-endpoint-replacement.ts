@@ -29,16 +29,24 @@ export interface ReplaceableRegistration {
  * Removes the endpoint of `reg` before a register of the same UUID: Homebridge
  * refuses a register of a UUID it still holds and only logs it, so the old
  * endpoint must be observed gone. Records the `uniqueId` the new endpoint
- * inherits (the registration flow gives it back once the endpoint answers);
- * across a chain of attempts the first endpoint's identity is the one kept.
+ * inherits: the coordinator applies it within the next register of the UUID,
+ * and the registration flow checks it again once the endpoint answers. Across
+ * a chain of attempts the first endpoint's identity is the one kept.
  */
 export async function replaceEndpoint(
     reg: ReplaceableRegistration,
     coordinator: MatterTopologyCoordinator,
     kind: ReplacementKind,
 ): Promise<void> {
-    if (kind === 'same-device') reg.inheritedUniqueId ??= await coordinator.readUniqueId(reg.uuid);
-    else reg.inheritedUniqueId = undefined;
+    if (kind === 'same-device') {
+        reg.inheritedUniqueId ??= await coordinator.readUniqueId(reg.uuid);
+        // Typical of a purge: the endpoint is replaced because it does not answer.
+        if (!reg.inheritedUniqueId) coordinator.reportIdentityUnavailable(reg.uuid);
+    } else {
+        reg.inheritedUniqueId = undefined;
+    }
     const removed = await coordinator.unregister(reg.uuid, registrationProbeCluster(reg.matterAccessory));
     if (!removed) throw new Error(`previous Matter endpoint for ${reg.uuid} is still present`);
+    // Applied by the register that follows, before anything can see the new endpoint.
+    coordinator.inheritOnNextRegister(reg.uuid, reg.inheritedUniqueId);
 }

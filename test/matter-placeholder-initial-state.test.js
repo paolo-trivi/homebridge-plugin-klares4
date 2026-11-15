@@ -100,5 +100,6 @@ test('a thermostat that falls back during recovery does not publish its placehol
     assert.equal(hb.endpoints.get('thermostat_6').deviceType.name, 'TemperatureSensor');
     assert.equal(reg.getStatus('thermostat_6'), 'registered');
     assert.equal(hb.endpoints.get('thermostat_6').clusters.temperatureMeasurement.measuredValue, null);
-    assert.deepEqual(hb.updates.filter((u) => u.uuid === 'thermostat_6'), []);
+    // Identity writes (uniqueId carried to the second Thermostat endpoint) are not state.
+    assert.deepEqual(hb.updates.filter((u) => u.uuid === 'thermostat_6' && u.cluster !== 'bridgedDeviceBasicInformation'), []);
 });

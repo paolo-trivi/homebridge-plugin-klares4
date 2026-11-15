@@ -66,6 +66,8 @@ export class MatterTopologyCoordinator {
     private readonly unregisterTimeoutMs: number;
 
     private readonly unregisterSettleMs: number;
+    /** `uniqueId` the next endpoint registered under a UUID takes over (see `inheritOnNextRegister`). */
+    private readonly pendingIdentities = new Map<string, string>();
 
     /**
      * `unregisterSettleMs`: the registry passes `MatterTimings.unregisterSettleMs`;
@@ -96,7 +98,26 @@ export class MatterTopologyCoordinator {
                 [accessory],
             );
             this.states.set(accessory.UUID, 'published-unverified');
+            const inherited = this.pendingIdentities.get(accessory.UUID);
+            this.pendingIdentities.delete(accessory.UUID);
+            // In the same queued operation as the register: nothing (probe,
+            // `registered`, state updates) can see the endpoint before its
+            // identity is the inherited one. A runtime whose register returns
+            // before the endpoint exists (2.4) is covered by the observation
+            // budget, and by the registration flow's own restore after the probe.
+            if (inherited) await this.applyUniqueId(accessory.UUID, inherited, false);
         });
+    }
+
+    /**
+     * The next endpoint registered under `uuid` replaces one that was observed
+     * gone and is the same device: it takes over `uniqueId` as part of its
+     * register. `undefined` cancels a pending one (the replacement is another
+     * kind of device).
+     */
+    public inheritOnNextRegister(uuid: string, uniqueId: string | undefined): void {
+        if (uniqueId) this.pendingIdentities.set(uuid, uniqueId);
+        else this.pendingIdentities.delete(uuid);
     }
 
     public unregister(uuid: string, probeCluster: string): Promise<boolean> {
@@ -189,17 +210,15 @@ export class MatterTopologyCoordinator {
      * write and persists it across restarts. Observed, not assumed.
      */
     public restoreUniqueId(uuid: string, uniqueId: string): Promise<boolean> {
-        return this.enqueue(uuid, async () => {
-            if ((await this.readUniqueId(uuid)) === uniqueId) return true;
-            try {
-                await this.api.matter!.updateAccessoryState(uuid, BRIDGED_INFO, { uniqueId });
-            } catch (error: unknown) {
-                this.log.debug(`[Matter] uniqueId update for ${uuid} threw, deferring to observation: ${errorText(error)}`);
-            }
-            const restored = await this.observe(async () => (await this.readUniqueId(uuid)) === uniqueId);
-            if (!restored) this.log.warn(`[Matter] ${uuid}: could not keep the previous uniqueId; controllers may see a new device`);
-            return restored;
-        });
+        return this.enqueue(uuid, () => this.applyUniqueId(uuid, uniqueId, true));
+    }
+
+    /** The endpoint about to be replaced has no readable `uniqueId`: the identity cannot be carried over. */
+    public reportIdentityUnavailable(uuid: string): void {
+        this.log.warn(
+            `[Matter] ${uuid}: the endpoint being replaced shows no uniqueId (absent or not answering), so the new one `
+            + 'gets a new identity; if controllers knew it, they may show it as a new device (rooms and automations to set again)',
+        );
     }
 
     public markLocallyPublished(uuid: string): void {
@@ -223,6 +242,27 @@ export class MatterTopologyCoordinator {
         return result;
     }
 
+    private async applyUniqueId(uuid: string, uniqueId: string, warnIfNotKept: boolean): Promise<boolean> {
+        // On 2.4 register returns before the endpoint exists: a write now would
+        // only be refused (and logged) by Homebridge. Wait for the endpoint.
+        const current = await this.observeValue(() => this.readUniqueId(uuid));
+        if (current === uniqueId) return true;
+        if (current === undefined) {
+            if (warnIfNotKept) this.log.warn(`[Matter] ${uuid}: could not keep the previous uniqueId; controllers may see a new device`);
+            return false;
+        }
+        try {
+            await this.api.matter!.updateAccessoryState(uuid, BRIDGED_INFO, { uniqueId });
+        } catch (error: unknown) {
+            this.log.debug(`[Matter] uniqueId update for ${uuid} threw, deferring to observation: ${errorText(error)}`);
+        }
+        const restored = await this.observe(async () => (await this.readUniqueId(uuid)) === uniqueId);
+        if (!restored && warnIfNotKept) {
+            this.log.warn(`[Matter] ${uuid}: could not keep the previous uniqueId; controllers may see a new device`);
+        }
+        return restored;
+    }
+
     private async readBridgedInfo(uuid: string): Promise<Record<string, unknown> | undefined> {
         try {
             const state: unknown = await this.api.matter!.getAccessoryState(uuid, BRIDGED_INFO);
@@ -230,6 +270,13 @@ export class MatterTopologyCoordinator {
         } catch {
             return undefined;
         }
+    }
+
+    /** Polls `read` until it gives a value or the budget is spent. */
+    private async observeValue<T>(read: () => Promise<T | undefined>): Promise<T | undefined> {
+        let value: T | undefined;
+        await this.observe(async () => (value = await read()) !== undefined);
+        return value;
     }
 
     /** Polls `check` with a growing delay until it holds or the budget is spent. */

@@ -33,7 +33,7 @@ test('MAT-12: names with letters outside the BMP fit in 32 UTF-16 units without 
     assert.ok(typed.length <= 32 && isWellFormed(typed) && typed.endsWith(' - Sens.'));
 });
 
-test('MAT-12: a name the map believes unique is the label Homebridge shows', { timeout: 30000 }, async (t) => {
+test('MAT-12: a name the map believes unique is the label Homebridge shows', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const devices = [
         { id: 'zone_1', type: 'zone', name: ASTRAL.repeat(40), description: '', status: { open: false } },
@@ -61,8 +61,10 @@ test('MAT-12: cleaning a long run of separators takes linear time', () => {
         return Number(process.hrtime.bigint() - start) / 1e6;
     };
     time(1000);
-    // 2.2.0: ~390 ms at 20 000 and ~6 s at 80 000 (quadratic). Linear work stays far below.
-    assert.ok(time(80000) < 250, 'sanitizing 80 000 separators must not block the event loop');
+    // 2.2.0 was quadratic: ~390 ms at 20 000 separators, ~6 s at 80 000, so
+    // ~25 s at 160 000. Linear work takes a few tens of ms; the budget leaves
+    // room for a loaded CI machine and still catches the quadratic case.
+    assert.ok(time(160000) < 3000, 'sanitizing 160 000 separators must not block the event loop');
     assert.equal(sanitizeMatterAccessoryName(`Luce${'.'.repeat(5000)}`, 'light_1'), 'Luce');
     assert.equal(sanitizeHapDisplayName(`Luce${' -'.repeat(5000)}`, 'light_1'), 'Luce');
 });

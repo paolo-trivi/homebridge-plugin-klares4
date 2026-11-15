@@ -141,10 +141,21 @@ const copyClusters = (clusters) => Object.fromEntries(
 // unregister, updatePlatformAccessories and updateAccessoryState reject
 // (assertMatterReady, MatterAPIImpl.js:216-224, :230, :315, :331, :384).
 // `unregisterCloseMs`: how long endpoint.close() takes.
+// `semantics`: which Homebridge the calls behave like, '2.5' (default, above)
+// or '2.4'. On 2.4 the API emits and does not wait for the bridge:
+// - registerPlatformAccessories resolves at once; the endpoint is built on a
+//   later turn (`registerBuildMs`), and a refusal is only logged then;
+// - unregisterPlatformAccessories resolves before endpoint.close() has
+//   finished: while it closes the endpoint answers no reads but its UUID is
+//   still held, so a register in that window is refused "already registered"
+//   (AccessoryManager.unregisterAccessory awaits close before deleting the UUID).
 function makeHbMatterApi({
     restored = [], unqueryableOnce = [], unqueryableTimes = {}, failRegistration = () => false,
     unregisterCloseMs = 0, serverStarting = false, matterReady = true,
+    semantics = '2.5', registerBuildMs = 5,
 } = {}) {
+    if (semantics !== '2.4' && semantics !== '2.5') throw new Error(`unknown semantics ${semantics}`);
+    const emitOnly = semantics === '2.4';
     let ready = matterReady;
     const assertMatterReady = (action) => {
         if (!ready) throw new Error(`${action} before Homebridge has finished launching.`);
@@ -250,12 +261,19 @@ function makeHbMatterApi({
                     + 'Register from your platform\'s \'didFinishLaunching\' event; if you already do, this is transient and the '
                     + 'accessories are restored from cache on the next start.');
             }
-            try {
-                for (const a of valid) await registerOne(a);
-            } catch (error) {
-                // ChildBridgeMatterManager logs it; the plugin's call resolves.
-                log.push(`register failed: ${error.message.split('\n')[0]}`);
+            const build = async () => {
+                try {
+                    for (const a of valid) await registerOne(a);
+                } catch (error) {
+                    // ChildBridgeMatterManager logs it; the plugin's call resolves.
+                    log.push(`register failed: ${error.message.split('\n')[0]}`);
+                }
+            };
+            if (!emitOnly) {
+                await build();
+                return;
             }
+            setTimeout(() => { void build(); }, registerBuildMs);
         },
         unregisterPlatformAccessories: async (plugin, _platform, accessories) => {
             if (accessories.length === 0) return;
@@ -266,7 +284,14 @@ function makeHbMatterApi({
             }
             for (const a of accessories) {
                 unregisterCalls.push(a.UUID);
-                await closeEndpoint(a.UUID);
+                const closing = closeEndpoint(a.UUID);
+                if (emitOnly) {
+                    // The endpoint already answers no reads; the call returns before the close.
+                    await tick();
+                    void closing;
+                } else {
+                    await closing;
+                }
             }
         },
         updatePlatformAccessories: async (accessories) => {

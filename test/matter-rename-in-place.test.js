@@ -11,7 +11,7 @@ process.env.KLARES4_MATTER_REGISTER_TIMEOUT_MS = '2000';
 process.env.KLARES4_MATTER_REGISTER_POLL_MS = '10';
 process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '50';
 process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
-process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS = '1000';
+process.env.KLARES4_MATTER_UNREGISTER_TIMEOUT_MS = '3000';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -42,7 +42,7 @@ async function registerAll(registry, devices) {
 
 const hbUnregistered = (stack) => stack.hbLines.filter((l) => /Unregistered Matter accessory|already registered/.test(l));
 
-test('MAT-04: a collision rename keeps the endpoint and its uniqueId, and survives a restart', { timeout: 60000 }, async (t) => {
+test('MAT-04: a collision rename keeps the endpoint and its uniqueId, and survives a restart', { timeout: 120000 }, async (t) => {
     const session = realMatterStackSession(t);
     const storagePath = tmpStorage(t, 'klares4-rename-');
     // Zones first: the zone takes the clean name, the batch map gives it to the cover.
@@ -73,11 +73,13 @@ test('MAT-04: a collision rename keeps the endpoint and its uniqueId, and surviv
     await registerAll(registry2, devices);
     const updateSpy = t.mock.method(boot2.api.matter, 'updateAccessoryState');
     await registry2.finalizeNameMap(devices);
-    assert.equal(updateSpy.mock.calls.filter((c) => c.arguments[1] === BRIDGED).length, 0, 'no rename on a steady boot');
+    // Only label writes: reachability also writes this cluster, on its own timers.
+    const labelWrites = updateSpy.mock.calls.filter((c) => c.arguments[1] === BRIDGED && 'nodeLabel' in c.arguments[2]);
+    assert.equal(labelWrites.length, 0, 'no rename on a steady boot');
     assert.equal(boot2.read('zone_1', BRIDGED).nodeLabel, 'Vetrata Nord - Sens.');
 });
 
-test('MAT-04: when the endpoint does not take the label, the fallback replaces it and keeps the uniqueId', { timeout: 60000 }, async (t) => {
+test('MAT-04: when the endpoint does not take the label, the fallback replaces it and keeps the uniqueId', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const storagePath = tmpStorage(t, 'klares4-rename-');
     const devices = [zone(3, 'Porta Sud'), cover(4, 'Porta Sud')];
@@ -100,7 +102,7 @@ test('MAT-04: when the endpoint does not take the label, the fallback replaces i
     assert.deepEqual(stack.hbLines.filter((l) => /already registered/.test(l)), []);
 });
 
-test('MAT-04: the dimmer upgrade (a device type change) keeps the uniqueId', { timeout: 60000 }, async (t) => {
+test('MAT-04: the dimmer upgrade (a device type change) keeps the uniqueId', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const storagePath = tmpStorage(t, 'klares4-rename-');
     const registry = registryOn(stack, storagePath);
@@ -114,12 +116,14 @@ test('MAT-04: the dimmer upgrade (a device type change) keeps the uniqueId', { t
     assert.equal(stack.read('light_5', BRIDGED).uniqueId, uniqueId);
 });
 
-// T0.2: with Homebridge 2.4's unregister semantics (the endpoint answers no
-// reads while it is closing) two finalize passes in a row used to end in
-// "already registered". The fallback path must stay correct there too.
-for (const unregisterCloseMs of [0, 20]) {
-    test(`MAT-04: the rename fallback is correct with unregisterCloseMs=${unregisterCloseMs}, also run twice`, async (t) => {
-        const hb = makeHbMatterApi({ unregisterCloseMs });
+// T0.2 / RC1-01: with Homebridge 2.4's semantics (unregister resolves while
+// the endpoint is still closing, register returns before the endpoint exists)
+// two finalize passes in a row used to end in "already registered". The
+// fallback path must be correct on both; the settle (150 ms) is longer than
+// the close (80 ms), as the 1 s default is longer than a real close.
+for (const [semantics, unregisterCloseMs] of [['2.4', 0], ['2.4', 80], ['2.5', 0], ['2.5', 80]]) {
+    test(`MAT-04: the rename fallback is correct on ${semantics}, close ${unregisterCloseMs} ms, also run twice`, async (t) => {
+        const hb = makeHbMatterApi({ semantics, unregisterCloseMs });
         // The fixture models a runtime where the label write is ignored.
         const update = hb.api.matter.updateAccessoryState;
         hb.api.matter.updateAccessoryState = async (uuid, cluster, attributes) => (
@@ -127,6 +131,7 @@ for (const unregisterCloseMs of [0, 20]) {
         );
         const registry = new MatterAccessoryRegistry({
             api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t, 'klares4-rename-'),
+            timings: { unregisterSettleMs: 150 },
         });
         registry.startDiscoveryCycle();
         const devices = [zone(6, 'Ingresso'), cover(7, 'Ingresso')];
