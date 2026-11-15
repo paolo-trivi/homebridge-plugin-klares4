@@ -39,7 +39,7 @@ import {
     DEFAULT_HEATING_SETPOINT_C, DEFAULT_COOLING_SETPOINT_C,
 } from './matter-thermostat-mapper';
 import { isRoleInSeason, thermostatRole } from './matter-thermostat-role';
-import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import type { MatterThermostatEchoTracker, RealtimeObservation } from './matter-thermostat-echo-tracker';
 
 export interface ThermostatHandlerDeps {
     device: KseniaThermostat;
@@ -69,13 +69,14 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
     const fmt = (centi: number): string => (centi / 100).toFixed(2);
     const latest = (): KseniaThermostat => deps.getDevice?.() ?? device;
     const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+    const observationOf = (d: KseniaThermostat): RealtimeObservation => ({ seq: d.status?.observedSeq, at: d.status?.observedAt });
     const modeOf = (d: KseniaThermostat): Mode | undefined => {
         const observed = d.status?.mode ?? d.mode;
-        return tracker ? tracker.effectiveMode(uuid, observed, d.status?.observedAt) : observed;
+        return tracker ? tracker.effectiveMode(uuid, observed, observationOf(d)) : observed;
     };
     const targetOf = (d: KseniaThermostat): number | undefined => {
         const observed = d.status?.targetTemperature ?? d.targetTemperature;
-        return tracker ? tracker.effectiveTarget(uuid, observed, d.status?.observedAt) : observed;
+        return tracker ? tracker.effectiveTarget(uuid, observed, observationOf(d)) : observed;
     };
     const coolActive = (role: ThermostatOutputRole, d: KseniaThermostat): boolean => isCoolingSetpointActiveForRole(role, modeOf(d));
     /** The role the live endpoint was registered for, else the device's. */
@@ -109,7 +110,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         try {
             const before = latest().status?.acknowledged;
             await client().setThermostatTemperature(device.id, value);
-            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'target', value);
+            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'target', value, latest().status?.observedSeq);
         } catch (err) {
             failed(attr, `setThermostatTemperature(${label}) failed: ${errMsg(err)}`);
         }
@@ -206,7 +207,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         try {
             const before = latest().status?.acknowledged;
             await client().setThermostatMode(device.id, klares4Mode);
-            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'mode', klares4Mode);
+            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'mode', klares4Mode, latest().status?.observedSeq);
         } catch (err) {
             failed('systemMode', `setThermostatMode failed: ${errMsg(err)}`);
         }

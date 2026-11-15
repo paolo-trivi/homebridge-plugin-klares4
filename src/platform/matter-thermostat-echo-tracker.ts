@@ -57,6 +57,17 @@ const normalize = (value: number | string): number | string => (typeof value ===
 interface ConfirmedEntry {
     value: number | string;
     at: number;
+    /** `status.observedSeq` when the ACK was seen: the last realtime observation it is newer than. */
+    afterSeq: number | undefined;
+}
+
+/**
+ * The device's latest realtime observation: `seq` is the client's event
+ * sequence number (`status.observedSeq`), `at` its time (`status.observedAt`).
+ */
+export interface RealtimeObservation {
+    seq?: number;
+    at?: number;
 }
 
 export class MatterThermostatEchoTracker {
@@ -138,23 +149,24 @@ export class MatterThermostatEchoTracker {
     /**
      * Record a target (°C) or mode the panel acknowledged for a Matter command
      * (TH-08). The device snapshot changes only with the realtime that follows
-     * the ACK; until then this is the newer truth.
+     * the ACK; until then this is the newer truth. `observedSeq` is the
+     * device's `status.observedSeq` at that moment.
      */
-    recordConfirmed(uuid: string, attr: 'target', value: number): void;
-    recordConfirmed(uuid: string, attr: 'mode', value: ThermostatModeValue): void;
-    recordConfirmed(uuid: string, attr: ConfirmedAttr, value: number | string): void {
-        this.confirmed.set(this.confirmedKey(uuid, attr), { value: normalize(value), at: this.now() });
+    recordConfirmed(uuid: string, attr: 'target', value: number, observedSeq?: number): void;
+    recordConfirmed(uuid: string, attr: 'mode', value: ThermostatModeValue, observedSeq?: number): void;
+    recordConfirmed(uuid: string, attr: ConfirmedAttr, value: number | string, observedSeq?: number): void {
+        this.confirmed.set(this.confirmedKey(uuid, attr), { value: normalize(value), at: this.now(), afterSeq: observedSeq });
     }
 
     /** The target to compare a new command against: see `effectiveValue`. */
-    effectiveTarget(uuid: string, observed: number | undefined, observedAt?: number): number | undefined {
-        const value = this.effectiveValue(uuid, 'target', observed, observedAt);
+    effectiveTarget(uuid: string, observed: number | undefined, observation: RealtimeObservation = {}): number | undefined {
+        const value = this.effectiveValue(uuid, 'target', observed, observation);
         return typeof value === 'number' ? value / 100 : observed;
     }
 
     /** The mode to compare a new command against: see `effectiveValue`. */
-    effectiveMode(uuid: string, observed: ThermostatModeValue | undefined, observedAt?: number): ThermostatModeValue | undefined {
-        const value = this.effectiveValue(uuid, 'mode', observed, observedAt);
+    effectiveMode(uuid: string, observed: ThermostatModeValue | undefined, observation: RealtimeObservation = {}): ThermostatModeValue | undefined {
+        const value = this.effectiveValue(uuid, 'mode', observed, observation);
         return typeof value === 'string' ? value as ThermostatModeValue : observed;
     }
 
@@ -186,20 +198,23 @@ export class MatterThermostatEchoTracker {
     /**
      * The acknowledged value while the realtime has not caught up with it, else
      * `observed` (normalized). The entry ends at the first realtime observation
-     * after the ACK (`observedAt`, epoch ms), whatever it reports: from then on
-     * the panel's own report is newer, also when another source (keypad,
-     * HomeKit) changed the value (M1). Without `observedAt`, when the realtime
-     * reports the acknowledged value; in any case after its TTL.
+     * after the ACK, whatever it reports: from then on the panel's own report
+     * is newer, also when another source (keypad, HomeKit) changed the value
+     * (M1). "After" is decided by the client's event sequence
+     * (`status.observedSeq`), never by the clock: an ACK and a realtime often
+     * share a millisecond. A state without sequence numbers (an older client,
+     * a hand-built state) falls back on `observedAt`; it also ends when the
+     * realtime reports the acknowledged value, and in any case after the TTL
+     * (an expiry, not an ordering).
      */
     private effectiveValue(
-        uuid: string, attr: ConfirmedAttr, observed: number | string | undefined, observedAt?: number,
+        uuid: string, attr: ConfirmedAttr, observed: number | string | undefined, observation: RealtimeObservation,
     ): number | string | undefined {
         const key = this.confirmedKey(uuid, attr);
         const entry = this.confirmed.get(key);
         const seen = observed === undefined ? undefined : normalize(observed);
         if (!entry) return seen;
-        if (this.now() - entry.at > this.confirmedTtlMs || seen === entry.value
-            || (observedAt !== undefined && observedAt > entry.at)) {
+        if (this.now() - entry.at > this.confirmedTtlMs || seen === entry.value || newerObservation(entry, observation)) {
             this.confirmed.delete(key);
             return seen;
         }
@@ -213,4 +228,10 @@ export class MatterThermostatEchoTracker {
     private key(uuid: string, attr: TrackedAttr): string {
         return `${uuid}::${attr}`;
     }
+}
+
+/** A realtime observation processed after the entry's ACK. */
+function newerObservation(entry: ConfirmedEntry, observation: RealtimeObservation): boolean {
+    if (observation.seq !== undefined) return entry.afterSeq === undefined || observation.seq > entry.afterSeq;
+    return observation.at !== undefined && observation.at > entry.at;
 }

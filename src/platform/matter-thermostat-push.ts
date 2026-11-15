@@ -20,8 +20,9 @@ export function currentThermostatAttributes(
     const status = device.status;
     const observedTarget = status?.targetTemperature ?? device.targetTemperature;
     const observedMode = status?.mode ?? device.mode;
-    const target = tracker.effectiveTarget(device.id, observedTarget, status?.observedAt) ?? observedTarget;
-    const mode = tracker.effectiveMode(device.id, observedMode, status?.observedAt) ?? observedMode;
+    const observation = { seq: status?.observedSeq, at: status?.observedAt };
+    const target = tracker.effectiveTarget(device.id, observedTarget, observation) ?? observedTarget;
+    const mode = tracker.effectiveMode(device.id, observedMode, observation) ?? observedMode;
     const view: KseniaThermostat = target === observedTarget && mode === observedMode
         ? device
         : { ...device, targetTemperature: target, mode, status: { ...status, targetTemperature: target, mode } };

@@ -125,13 +125,33 @@ test('M-02: a 2.2.0 sensor fallback whose recovery fails comes back with its own
 test('M1: an ACK-confirmed value ends at the first realtime after it, whatever it reports', () => {
     let now = 1000;
     const tracker = new MatterThermostatEchoTracker(10_000, () => now, 15_000);
+    // The event sequence decides the order (status.observedSeq).
+    tracker.recordConfirmed('t', 'target', 25, 7);
+    assert.equal(tracker.effectiveTarget('t', 24, { seq: 7 }), 25, 'the realtime known at the ACK does not end it');
+    assert.equal(tracker.effectiveTarget('t', 19, { seq: 8 }), 19, 'another source set 19 after the ACK');
+    assert.equal(tracker.effectiveTarget('t', 19, { seq: 8 }), 19, 'and the entry is gone');
+    tracker.recordConfirmed('t', 'mode', 'heat', 8);
+    assert.equal(tracker.effectiveMode('t', 'off', { seq: 9 }), 'off', 'Off from the keypad after the ACK');
+    // Without sequence numbers (older state): the observation time.
     tracker.recordConfirmed('t', 'target', 25);
-    assert.equal(tracker.effectiveTarget('t', 24, 900), 25, 'a realtime older than the ACK does not end it');
+    assert.equal(tracker.effectiveTarget('t', 24, { at: 900 }), 25);
     now = 2000;
-    assert.equal(tracker.effectiveTarget('t', 19, 1500), 19, 'another source set 19 after the ACK');
-    assert.equal(tracker.effectiveTarget('t', 19), 19, 'and the entry is gone');
-    tracker.recordConfirmed('t', 'mode', 'heat');
-    assert.equal(tracker.effectiveMode('t', 'off', 2500), 'off', 'Off from the keypad after the ACK');
+    assert.equal(tracker.effectiveTarget('t', 19, { at: 1500 }), 19);
+});
+
+test('M1 with the clock stopped: ACK then realtime in the same millisecond ends the entry; realtime then ACK keeps it', (t) => {
+    t.mock.method(Date, 'now', () => 5000);
+    const tracker = new MatterThermostatEchoTracker();
+    // Realtime (seq 3) processed, then the ACK: the ACK is newer.
+    const status = { targetTemperature: 21, observedAt: Date.now(), observedSeq: 3 };
+    tracker.recordConfirmed('a', 'target', 22, status.observedSeq);
+    assert.equal(tracker.effectiveTarget('a', status.targetTemperature, { seq: status.observedSeq, at: status.observedAt }), 22);
+    // Then a realtime in the same millisecond (seq 4), reporting another value: it is newer than the ACK.
+    status.targetTemperature = 19; status.observedSeq = 4; status.observedAt = Date.now();
+    assert.equal(tracker.effectiveTarget('a', status.targetTemperature, { seq: status.observedSeq, at: status.observedAt }), 19);
+    // The clock alone could not tell them apart.
+    tracker.recordConfirmed('b', 'mode', 'heat');
+    assert.equal(tracker.effectiveMode('b', 'off', { at: Date.now() }), 'heat', 'same millisecond, no sequence: the entry stays (prudent)');
 });
 
 test('M1 on the real stack: +1 after a change from another source starts from that change', SLOW, async (t) => {
@@ -144,7 +164,8 @@ test('M1 on the real stack: +1 after a change from another source starts from th
     assert.deepEqual(calls, [25]);
     // The keypad sets 19; the realtime (observedAt) reports it.
     updateThermostatStatus(device, { targetTemperature: 19 });
-    device.status.observedAt = Date.now() + 1;
+    device.status.observedAt = Date.now();
+    device.status.observedSeq = (device.status.observedSeq ?? 0) + 1;
     await b.registry.updateAccessoryState(device);
     await waitFor(() => thermo(b.stack, 'thermostat_4').occupiedHeatingSetpoint === 1900, 30000);
     await b.stack.invoke('thermostat_4', 'thermostat', 'setpointRaiseLower', { mode: 0, amount: 10 });
