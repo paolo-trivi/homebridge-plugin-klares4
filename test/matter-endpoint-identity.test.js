@@ -83,7 +83,7 @@ for (const [semantics, uuid] of [['2.4', 'thermostat_2'], ['2.5', 'thermostat_12
     const hb = makeHbMatterApi({ semantics, unregisterCloseMs: 80, unqueryableOnce: [uuid] });
     // The identity the endpoint has at the very moment the plugin declares it registered.
     const atRegistered = [];
-    const log = { ...silentLog(), info: (m) => {
+    const log = { ...silentLog(), debug: (m) => {
         if (String(m).startsWith('[Matter] registered:')) atRegistered.push(hb.endpoints.get(uuid)?.uniqueId);
     } };
     const registry = new MatterAccessoryRegistry({

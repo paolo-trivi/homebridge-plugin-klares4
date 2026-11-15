@@ -7,9 +7,9 @@
  * matter.js (as bundled with Homebridge 2 beta) re-fires attribute-change handlers
  * even for writes that originated from the plugin itself via `updateAccessoryState`.
  * Without an origin-tracking guard, every internal push becomes an "external"
- * setpoint/systemMode command which is forwarded to the Lares4 centrale, whose
+ * setpoint/systemMode command which is forwarded to the Lares4 panel, whose
  * subsequent CFG broadcast re-pushes the same attribute, which re-fires the
- * handler — a self-sustaining loop that hammers the centrale every ~2-3 s and
+ * handler — a self-sustaining loop that hammers the panel every ~2-3 s and
  * eventually times out WRITE_CFG (`Command timed out after 2500ms`).
  *
  * The previous closure-scoped `ThermostatEchoGuard` (matter-thermostat-mapper.ts)
@@ -102,7 +102,7 @@ export class MatterThermostatEchoTracker {
 
     /**
      * Record a single attribute a handler is about to send to Lares4, so the
-     * centrale's echo (and matter.js's re-fire of it) is suppressed.
+     * panel's echo (and matter.js's re-fire of it) is suppressed.
      */
     recordIntent(uuid: string, attr: TrackedAttr, value: number): void {
         this.record(uuid, attr, value);

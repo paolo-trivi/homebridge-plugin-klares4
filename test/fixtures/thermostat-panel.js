@@ -74,7 +74,7 @@ function createThermostatPanel({
     }
     const updater = new ThermostatStatusUpdater({ state, emitDeviceStatusUpdate, log });
     const reader = new ThermostatReadHandler({
-        state, log, logLevel: 1, debugEnabled: false, thermostatStatusUpdater: updater, emitDeviceStatusUpdate,
+        state, log, logLevel: 1, thermostatStatusUpdater: updater, emitDeviceStatusUpdate,
     });
     const prgCheck = () => ({ PRG: '0000000001', CFG: String(panel.counter).padStart(10, '0') });
     const dispatcher = new CommandDispatcher();

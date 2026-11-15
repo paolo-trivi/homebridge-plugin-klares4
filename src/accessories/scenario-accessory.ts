@@ -5,6 +5,7 @@ import type { KseniaScenario } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
 import { communicationFailure } from './communication-failure';
+import { toErrorMessage } from '../errors';
 
 /**
  * Scenario Accessory Handler
@@ -74,7 +75,7 @@ export class ScenarioAccessory {
             } catch (error: unknown) {
                 this.platform.log.error(
                     `Scenario execution error ${this.device.name}:`,
-                    error instanceof Error ? error.message : String(error),
+                    toErrorMessage(error),
                 );
                 throw communicationFailure(this.platform.api, error);
             }

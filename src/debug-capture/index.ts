@@ -6,6 +6,7 @@ import { captureRawMessage } from './raw-message-capture';
 import { redactSnapshot } from './redaction';
 import type { DeviceSnapshot } from './types';
 import type { KseniaWebSocketClient, RawMessageDirection } from '../websocket-client';
+import { toErrorMessage } from '../errors';
 
 const MAX_INTERVAL_SNAPSHOTS = 60;
 
@@ -165,7 +166,7 @@ export class DebugCaptureManager {
         } catch (error: unknown) {
             this.log.error(
                 'Failed to hook WebSocket:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }
@@ -180,7 +181,7 @@ export class DebugCaptureManager {
         } catch (error: unknown) {
             this.log.error(
                 'Failed to unhook WebSocket listener:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         } finally {
             this.rawMessageUnsubscribe = undefined;
@@ -202,7 +203,7 @@ export class DebugCaptureManager {
         } catch (error: unknown) {
             this.log.error(
                 'Failed to capture message:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }

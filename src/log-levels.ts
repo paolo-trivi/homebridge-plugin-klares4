@@ -1,10 +1,12 @@
 /**
  * Log level definitions for the Ksenia Lares4 plugin
  * 
- * Levels:
- * - MINIMAL (0): Only errors, warnings, and critical events (zone alarms)
- * - NORMAL (1): Standard operation logs, startup summary, commands
- * - DEBUG (2): Full verbose logging for troubleshooting
+ * Levels (applied by `leveled-logger.ts`):
+ * - MINIMAL (0): warnings and errors only
+ * - NORMAL (1): connection and synchronization, startup summary, commands,
+ *   accessories added and removed
+ * - DEBUG (2): everything else too (each state change reported by the panel,
+ *   per-device discovery lines, masked frames), without Homebridge's `-D`
  */
 import { isCredentialKey } from './secret-keys';
 
@@ -92,21 +94,19 @@ function endOfString(text: string, from: number, quote: string): number {
 }
 
 /**
- * Get effective log level from configuration
- * Maintains backward compatibility with `debug: true`
+ * The log level in force. The legacy `debug: true` switch is the same as
+ * level 2 and wins over `logLevel`: the settings form always writes a
+ * `logLevel`, so a switch that yielded to it would do nothing.
  * @param logLevel The configured logLevel (0, 1, or 2)
  * @param debug The legacy debug flag
  * @returns The effective log level
  */
 export function getEffectiveLogLevel(logLevel?: number, debug?: boolean): LogLevel {
-    // If logLevel is explicitly set, use it
-    if (typeof logLevel === 'number' && logLevel >= 0 && logLevel <= 2) {
-        return logLevel as LogLevel;
-    }
-    // Backward compatibility: debug: true = DEBUG level
     if (debug === true) {
         return LogLevel.DEBUG;
     }
-    // Default to NORMAL
+    if (typeof logLevel === 'number' && logLevel >= 0 && logLevel <= 2) {
+        return logLevel as LogLevel;
+    }
     return LogLevel.NORMAL;
 }

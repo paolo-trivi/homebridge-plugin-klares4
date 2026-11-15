@@ -5,6 +5,7 @@ import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
 import { hasObservedState } from '../device-observation';
 import { communicationFailure } from './communication-failure';
+import { toErrorMessage } from '../errors';
 
 /**
  * Cover Accessory Handler
@@ -128,7 +129,7 @@ export class CoverAccessory {
         } catch (error: unknown) {
             this.platform.log.error(
                 `Cover control error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             // The command did not take effect: do not leave HomeKit showing a
             // movement toward a target the panel never accepted.

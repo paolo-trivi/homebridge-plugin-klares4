@@ -234,11 +234,13 @@ test('the port defaults to 443 with https and 80 without; an invalid port falls 
     assert.equal(resolve({ port: 'abc' }).runtime.port, 443);
 });
 
-test('logLevel: an explicit level wins, debug raises the default, anything else is NORMAL', () => {
+test('logLevel: the level applies, the legacy debug switch is level 2 whatever logLevel says, anything else is NORMAL', () => {
     assert.equal(resolve({ logLevel: 0 }).runtime.logLevel, 0);
     assert.equal(resolve({ logLevel: 2, debug: false }).runtime.logLevel, 2);
     assert.equal(resolve({ debug: true }).runtime.logLevel, 2);
-    assert.equal(resolve({ debug: true, logLevel: 1 }).runtime.logLevel, 1);
+    // The settings form always writes logLevel: a switch that yielded to it would do nothing.
+    assert.equal(resolve({ debug: true, logLevel: 1 }).runtime.logLevel, 2);
+    assert.equal(resolve({ debug: true, logLevel: 0 }).runtime.logLevel, 2);
     assert.equal(resolve({ logLevel: 5 }).runtime.logLevel, 1);
 });
 
@@ -381,7 +383,8 @@ test('compatibility: a full, valid, non-default config is carried over untouched
     for (const [key, value] of Object.entries(expected)) {
         assert.deepEqual(view[key], value, key);
     }
-    assert.equal(view.logLevel, 0);
+    // The legacy debug switch is level 2, whatever logLevel says.
+    assert.equal(view.logLevel, 2);
     assert.equal(view.debug, true);
     assert.deepEqual(view.matterOverrides, [{ deviceId: 'zone_18', name: 'Study contact', exposed: false }]);
     assert.deepEqual(view.matterRecoveryRequests, [{ deviceId: 'thermostat_18', generation: 2 }]);

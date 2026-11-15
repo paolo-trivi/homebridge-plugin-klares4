@@ -4,6 +4,7 @@ import type { Logger } from 'homebridge';
 import { writeJsonAtomicSync } from '../atomic-file';
 import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { THERMOSTAT_SHAPE_REVISION, type ThermostatShape } from './matter-thermostat-shape';
+import { toErrorMessage } from '../errors';
 
 const STORE_FILENAME = 'klares4-matter-fallback.json';
 const STORE_VERSION = 2;
@@ -48,7 +49,7 @@ function classify(raw: string): Loaded {
     try {
         parsed = JSON.parse(raw);
     } catch (error: unknown) {
-        return { kind: 'unreadable', why: error instanceof Error ? error.message : String(error) };
+        return { kind: 'unreadable', why: toErrorMessage(error) };
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'unreadable', why: 'not a JSON object' };
     const obj = parsed as Record<string, unknown>;
@@ -211,7 +212,7 @@ export class MatterFallbackStore {
             raw = fs.readFileSync(this.filePath, 'utf8');
         } catch (error: unknown) {
             this.readOnly = true;
-            this.log.warn(`[Matter] Could not read fallback store (${this.filePath}): ${error instanceof Error ? error.message : String(error)}; it will not be modified.`);
+            this.log.warn(`[Matter] Could not read fallback store (${this.filePath}): ${toErrorMessage(error)}; it will not be modified.`);
             return [];
         }
         const loaded = classify(raw);
@@ -248,7 +249,7 @@ export class MatterFallbackStore {
             this.log.warn(`[Matter] Fallback store ${this.filePath} is unreadable (${why}); a copy is kept in ${backup} and the store starts empty.`);
         } catch (error: unknown) {
             this.readOnly = true;
-            this.log.warn(`[Matter] Fallback store ${this.filePath} is unreadable (${why}) and could not be copied aside; it will not be modified: ${error instanceof Error ? error.message : String(error)}`);
+            this.log.warn(`[Matter] Fallback store ${this.filePath} is unreadable (${why}) and could not be copied aside; it will not be modified: ${toErrorMessage(error)}`);
         }
     }
 
@@ -266,7 +267,7 @@ export class MatterFallbackStore {
             };
             writeJsonAtomicSync(this.filePath, payload, 2);
         } catch (error: unknown) {
-            this.log.warn(`[Matter] Could not write fallback store (${this.filePath}): ${error instanceof Error ? error.message : String(error)}`);
+            this.log.warn(`[Matter] Could not write fallback store (${this.filePath}): ${toErrorMessage(error)}`);
         }
     }
 }

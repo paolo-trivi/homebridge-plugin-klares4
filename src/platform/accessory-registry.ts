@@ -47,7 +47,7 @@ export class AccessoryRegistry {
      * throw here would stop the restore of the whole cache at every start.
      */
     public configureAccessory(accessory: PlatformAccessory): void {
-        this.options.log.info('Loading accessory from cache:', accessory.displayName);
+        this.options.log.debug('Loading accessory from cache:', accessory.displayName);
         this.options.accessories.set(accessory.UUID, accessory);
 
         // Matter-readiness: the Matter bridge inspects accessories immediately at startup,
@@ -86,7 +86,7 @@ export class AccessoryRegistry {
         const existingAccessory = this.options.accessories.get(uuid);
 
         if (existingAccessory) {
-            this.options.log.info('Restoring existing accessory from cache:', device.name);
+            this.options.log.debug('Restoring existing accessory from cache:', device.name);
             // Discovery placeholders must not overwrite the state cached from the last session.
             if (!hasObservedState(device)) device = mergeKnownState(device, existingAccessory.context.device as KseniaDevice);
             existingAccessory.context.device = device;

@@ -32,10 +32,9 @@ function makePipeline() {
         },
         log,
         logLevel: 1,
-        debugEnabled: false,
-        statusUpdater: new StatusUpdater({ state, log, logLevel: 1, debugEnabled: false, emitDeviceStatusUpdate: emitStatus }),
+        statusUpdater: new StatusUpdater({ state, log, logLevel: 1, emitDeviceStatusUpdate: emitStatus }),
         systemTemperatureUpdater: new SystemTemperatureUpdater({
-            state, log, logLevel: 1, debugEnabled: false, emitDeviceDiscovered: () => undefined, emitDeviceStatusUpdate: emitStatus,
+            state, log, logLevel: 1, emitDeviceDiscovered: () => undefined, emitDeviceStatusUpdate: emitStatus,
         }),
         thermostatStatusUpdater: new ThermostatStatusUpdater({ state, emitDeviceStatusUpdate: emitStatus }),
         commandService: { requestSystemData: async () => undefined },

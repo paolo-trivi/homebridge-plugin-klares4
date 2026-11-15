@@ -12,7 +12,7 @@
  *   - forward only what the output's role allows: a heating output never takes
  *     Cool or Auto, a cooling output never Heat or Auto, and neither takes a
  *     setpoint or a mode while the program runs in the other season (TH-05),
- *   - swallow WS errors so a centrale timeout doesn't leave a matter.js reactor
+ *   - swallow WS errors so a panel timeout doesn't leave a matter.js reactor
  *     in an Unhandled-retry state, and re-publish the known state instead, so
  *     Matter does not keep showing a value the panel refused (F15). A refused
  *     command, a missing client included, is reported the same way.
@@ -40,6 +40,7 @@ import {
 } from './matter-thermostat-mapper';
 import { isRoleInSeason, thermostatRole } from './matter-thermostat-role';
 import type { MatterThermostatEchoTracker, RealtimeObservation } from './matter-thermostat-echo-tracker';
+import { toErrorMessage } from '../errors';
 
 export interface ThermostatHandlerDeps {
     device: KseniaThermostat;
@@ -68,7 +69,6 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
     const uuid = device.id;
     const fmt = (centi: number): string => (centi / 100).toFixed(2);
     const latest = (): KseniaThermostat => deps.getDevice?.() ?? device;
-    const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
     const observationOf = (d: KseniaThermostat): RealtimeObservation => ({ seq: d.status?.observedSeq, at: d.status?.observedAt });
     const modeOf = (d: KseniaThermostat): Mode | undefined => {
         const observed = d.status?.mode ?? d.mode;
@@ -112,7 +112,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
             await client().setThermostatTemperature(device.id, value);
             if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'target', value, latest().status?.observedSeq);
         } catch (err) {
-            failed(attr, `setThermostatTemperature(${label}) failed: ${errMsg(err)}`);
+            failed(attr, `setThermostatTemperature(${label}) failed: ${toErrorMessage(err)}`);
         }
     };
 
@@ -138,7 +138,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         }
         const value = normalize(cooling, centi);
         // Idempotency: if Lares4 already holds the requested setpoint, do not
-        // enqueue a WRITE_CFG — re-sending it triggers a centrale broadcast
+        // enqueue a WRITE_CFG — re-sending it triggers a panel broadcast
         // which re-fires this handler and (worst case) restarts the loop.
         const target = targetOf(current);
         if (typeof target === 'number' && Math.abs(target - value) < 0.05) {
@@ -209,7 +209,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
             await client().setThermostatMode(device.id, klares4Mode);
             if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'mode', klares4Mode, latest().status?.observedSeq);
         } catch (err) {
-            failed('systemMode', `setThermostatMode failed: ${errMsg(err)}`);
+            failed('systemMode', `setThermostatMode failed: ${toErrorMessage(err)}`);
         }
     };
 

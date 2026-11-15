@@ -26,6 +26,7 @@ import { forgetSensorIdentity } from './matter-thermostat-recovery-request';
 import { ThermostatRoleWait } from './matter-thermostat-role-wait';
 import { thermostatShapeOf } from './matter-thermostat-shape';
 import type { MatterTopologyCoordinator } from './matter-topology-coordinator';
+import { toErrorMessage } from '../errors';
 
 const MATTER_THERMOSTAT_FALLBACK_TO_TEMPERATURE_SENSOR = true;
 
@@ -230,7 +231,7 @@ export class MatterRegistrationFlow {
         reg.registeredAt = Date.now();
         this.onRegistered(reg);
         ctx.stateUpdateQueue.markReadyAfterBootstrap(reg, timings.stateBootstrapMs);
-        ctx.log.info(`[Matter] registered: ${reg.displayName}`);
+        ctx.log.debug(`[Matter] registered: ${reg.displayName}`);
         ctx.stateUpdateQueue.scheduleFlush(uuid);
         ctx.reachability.onRegistered(uuid);
         // A level reported while the registration was pending was only queued.
@@ -312,5 +313,5 @@ export class MatterRegistrationFlow {
 }
 
 export function fmtErr(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
+    return toErrorMessage(err);
 }

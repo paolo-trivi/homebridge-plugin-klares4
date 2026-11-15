@@ -19,6 +19,7 @@ import {
     type ThermostatSeason,
 } from './thermostat-write-payload';
 import type { KseniaCommandPayload, SendCommandOptions, WebSocketClientState } from './types';
+import { toErrorMessage } from '../errors';
 
 export type SendKseniaCommand = (
     cmd: string,
@@ -64,7 +65,7 @@ export class ThermostatWriteExecutor {
             });
             return true;
         } catch (error: unknown) {
-            this.deps.log.warn(`Unable to read CFG_THERMOSTATS: ${error instanceof Error ? error.message : String(error)}`);
+            this.deps.log.warn(`Unable to read CFG_THERMOSTATS: ${toErrorMessage(error)}`);
             return false;
         }
     }
@@ -124,7 +125,7 @@ export class ThermostatWriteExecutor {
                 responsePayloadTypes: ['CFG_THERMOSTATS'],
             });
         } catch (error: unknown) {
-            this.deps.log.warn(`Unable to read CFG_THERMOSTATS ${cfgId}: ${error instanceof Error ? error.message : String(error)}`);
+            this.deps.log.warn(`Unable to read CFG_THERMOSTATS ${cfgId}: ${toErrorMessage(error)}`);
             return false;
         }
         return this.deps.state.thermostatCfgById.has(cfgId);

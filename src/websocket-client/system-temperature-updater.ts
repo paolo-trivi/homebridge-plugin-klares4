@@ -11,7 +11,6 @@ interface SystemTemperatureUpdaterDeps {
     state: WebSocketClientState;
     log: Logger;
     logLevel: LogLevel;
-    debugEnabled: boolean;
     emitDeviceDiscovered: (device: KseniaDevice) => void;
     emitDeviceStatusUpdate: (device: KseniaDevice) => void;
 }
@@ -21,7 +20,7 @@ export class SystemTemperatureUpdater {
 
     public updateSystemTemperatures(systemData: SystemTemperatureData[]): void {
         forEachIsolated(this.deps.log, 'STATUS_SYSTEM entry', systemData, (system: SystemTemperatureData): void => {
-            if (this.deps.debugEnabled) {
+            if (this.deps.logLevel >= LogLevel.DEBUG) {
                 this.deps.log.debug(`System data ${system.ID}: ${JSON.stringify(system)}`);
             }
 

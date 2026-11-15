@@ -108,14 +108,14 @@ export class DiscoveryService {
 
         const id = this.getNormalizedId(device.id);
         if (this.isHiddenByExposurePolicy(device)) {
-            this.log.info(`Not exposed by the exposure policy: ${device.name} (${device.id})`);
+            this.log.debug(`Not exposed by the exposure policy: ${device.name} (${device.id})`);
             return true;
         }
         const label = device.type === 'zone' ? 'Zone'
             : isOutputLikeDevice(device) ? 'Output'
                 : device.type === 'sensor' ? 'Sensor'
                     : 'Scenario';
-        this.log.info(`${label} excluded: ${device.name} (ID: ${id})`);
+        this.log.debug(`${label} excluded: ${device.name} (ID: ${id})`);
         return true;
     }
 

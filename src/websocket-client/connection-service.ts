@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 
+import { getEffectiveLogLevel } from '../log-levels';
 import type { KseniaWebSocketOptions } from '../types';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { WsTransport } from '../websocket/ws-transport';
@@ -42,7 +43,7 @@ export class ConnectionService {
             state: deps.state,
             log: deps.log,
             intervalMs: deps.options.heartbeatInterval ?? 30000,
-            debug: deps.options.debug ?? false,
+            logLevel: getEffectiveLogLevel(deps.options.logLevel, deps.options.debug),
             wsTransport: deps.wsTransport,
             onTimeout: (silentMs): void => {
                 this.deps.log.warn(

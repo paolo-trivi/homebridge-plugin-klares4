@@ -20,7 +20,6 @@ export interface ThermostatReadHandlerDeps {
     state: WebSocketClientState;
     log: Logger;
     logLevel: LogLevel;
-    debugEnabled: boolean;
     thermostatStatusUpdater: ThermostatStatusUpdater;
     emitDeviceStatusUpdate: (device: KseniaDevice) => void;
 }
@@ -39,7 +38,7 @@ export class ThermostatReadHandler {
         const type = determineOutputType(outputCategory(output), output.MOD);
         if (type !== 'thermostat') return;
         this.deps.state.thermostatOutputs.set(output.ID, output);
-        if (this.deps.debugEnabled) {
+        if (this.deps.logLevel >= LogLevel.DEBUG) {
             this.deps.log.debug(
                 `Thermostat found - ID: ${output.ID}, DES: ${output.DES}, TYPE: ${output.TYPE}, CAT: ${output.CAT}`,
             );
@@ -119,7 +118,7 @@ export class ThermostatReadHandler {
 
     /** Debug trace of the initial STATUS_OUTPUTS entries that belong to a thermostat. */
     public logInitialThermostatStates(outputs: KseniaOutputStatusRaw[]): void {
-        if (!this.deps.debugEnabled) return;
+        if (this.deps.logLevel < LogLevel.DEBUG) return;
         outputs.forEach((output: KseniaOutputStatusRaw): void => {
             const thermostatDevice = this.deps.state.devices.get(`thermostat_${output.ID}`);
             if (thermostatDevice) {

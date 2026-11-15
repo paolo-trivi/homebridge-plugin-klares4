@@ -1,3 +1,4 @@
+import { toErrorMessage } from '../errors';
 /**
  * Turns the TLS failures a Lares4 panel typically causes into an actionable
  * hint. Both cases are fixed by configuration (`allowInsecureTls`), not by
@@ -26,10 +27,6 @@ function errorCode(error: unknown): string | undefined {
     return typeof code === 'string' ? code : undefined;
 }
 
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * Returns a log hint when `error` is a TLS failure that `allowInsecureTls`
  * resolves, or undefined when it is anything else (including the same failure
@@ -39,7 +36,7 @@ export function tlsConfigurationHint(error: unknown, context: TlsHintContext): s
     if (!context.useHttps || context.allowInsecureTls) {
         return undefined;
     }
-    if (LEGACY_RENEGOTIATION.test(errorMessage(error))) {
+    if (LEGACY_RENEGOTIATION.test(toErrorMessage(error))) {
         return 'The panel requires TLS legacy renegotiation, which Node.js refuses by default. '
             + 'On a trusted local network enable "allowInsecureTls" in the plugin settings and restart Homebridge.';
     }

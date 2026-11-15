@@ -135,8 +135,8 @@ How values are read:
 | `sender` | string | "homebridge" | — | Name that identifies this connection on the panel (letters, digits, `-`, `_`) |
 | `pin` | string | required | — | User PIN allowed to use the WebSocket API (4-8 digits). Stored in clear text in `config.json` |
 | `showAdvanced` | boolean | false | — | Settings form only: unlocks the advanced parameters; the plugin ignores it |
-| `debug` | boolean | false | — | Legacy switch. Adds a few detail lines (thermostat discovery, heartbeat, status updates) written at Homebridge's debug level, so they appear only when Homebridge runs in debug mode (`-D`). Independent of `logLevel`; it stands in for `logLevel: 2` only when `logLevel` is absent |
-| `logLevel` | integer | 1 | 0, 1, 2 | `2` turns on the detailed trace (commands sent to the panel, discovery and thermostat details), written at Homebridge's debug level: it appears only when Homebridge runs in debug mode (`-D`). `0` and `1` currently behave the same |
+| `debug` | boolean | false | — | Legacy switch, the same as `logLevel: 2`: when it is on, the level is 2 whatever `logLevel` says |
+| `logLevel` | integer | 1 | 0, 1, 2 | `0` writes warnings and errors only; `1` (default) adds connection and synchronization, the startup device summary, commands, accessories added and removed; `2` adds everything else (each state change reported by the panel, per-device discovery lines, masked frames), written at info level and marked `[debug]`, so Homebridge does not have to run in debug mode (`-D`) |
 | `maxSeconds` | integer | 30 | 5..300 | Seconds a cover needs to open or close completely. HomeKit (HAP) only |
 | `reconnectInterval` | integer | 5000 | 1000..60000 | Milliseconds before the first reconnection attempt; doubles at every failed attempt and restarts after a complete synchronization |
 | `heartbeatInterval` | integer | 30000 | 10000..300000 | Milliseconds between the keep-alive pings that detect a dead connection |
@@ -449,7 +449,7 @@ Details: [`docs/en/privacy-and-debug-file.md`](docs/en/privacy-and-debug-file.md
 
 #### Logging
 
-Set **Log Level** to `2` (Advanced) for the detailed trace. Those lines are written at Homebridge's debug level, so they appear only when Homebridge runs in debug mode (`-D`; in Homebridge UI, the debug-mode switch in its settings). Levels `0` and `1` currently behave the same. The legacy `debug` switch only adds a few detail lines at the same level and does not depend on `logLevel`.
+Set **Log Level** to `2` (Advanced) for the detailed trace: every state change the panel reports, the per-device discovery lines and the masked frames, written at info level and marked `[debug]`, without running Homebridge in debug mode. Level `1` (default) logs connection and synchronization, the startup device summary, commands and accessories added or removed; level `0` only warnings and errors. The legacy `debug` switch is the same as level `2`.
 
 For a bug report, use the [debug file](#privacy-and-the-debug-file) and send it privately. More in [`docs/en/operations-debug.md`](docs/en/operations-debug.md).
 
@@ -593,8 +593,8 @@ Come vengono letti i valori:
 | `sender` | string | "homebridge" | — | Nome che identifica questa connessione sulla centrale (lettere, cifre, `-`, `_`) |
 | `pin` | string | obbligatorio | — | PIN utente abilitato all'API WebSocket (4-8 cifre). Salvato in chiaro in `config.json` |
 | `showAdvanced` | boolean | false | — | Solo modulo delle impostazioni: sblocca i parametri avanzati; il plugin lo ignora |
-| `debug` | boolean | false | — | Interruttore legacy. Aggiunge alcune righe di dettaglio (scoperta termostati, heartbeat, aggiornamenti di stato) scritte al livello debug di Homebridge, quindi visibili solo quando Homebridge gira in modalità debug (`-D`). Indipendente da `logLevel`; sostituisce `logLevel: 2` solo se `logLevel` manca |
-| `logLevel` | integer | 1 | 0, 1, 2 | `2` attiva la traccia dettagliata (comandi inviati alla centrale, scoperta e dettagli dei termostati), scritta al livello debug di Homebridge: compare solo quando Homebridge gira in modalità debug (`-D`). `0` e `1` oggi si comportano allo stesso modo |
+| `debug` | boolean | false | — | Interruttore legacy, equivale a `logLevel: 2`: quando è attivo il livello è 2 qualunque cosa dica `logLevel` |
+| `logLevel` | integer | 1 | 0, 1, 2 | `0` scrive solo avvisi ed errori; `1` (predefinito) aggiunge connessione e sincronizzazione, il riepilogo dei dispositivi all'avvio, i comandi, gli accessori aggiunti e rimossi; `2` aggiunge tutto il resto (ogni cambio di stato riportato dalla centrale, le righe di discovery per dispositivo, i frame mascherati), scritto a livello info e marcato `[debug]`, quindi Homebridge non deve girare in modalità debug (`-D`) |
 | `maxSeconds` | integer | 30 | 5..300 | Secondi necessari a una tapparella per aprirsi o chiudersi del tutto. Solo HomeKit (HAP) |
 | `reconnectInterval` | integer | 5000 | 1000..60000 | Millisecondi prima del primo tentativo di riconnessione; raddoppia a ogni tentativo fallito e riparte dopo una sincronizzazione completa |
 | `heartbeatInterval` | integer | 30000 | 10000..300000 | Millisecondi tra i ping keep-alive che rilevano una connessione morta |
@@ -907,7 +907,7 @@ Dettagli: [`docs/it/privacy-e-file-di-debug.md`](docs/it/privacy-e-file-di-debug
 
 #### Log
 
-Imposta **Livello Log** a `2` (Avanzate) per la traccia dettagliata. Quelle righe sono scritte al livello debug di Homebridge, quindi compaiono solo quando Homebridge gira in modalità debug (`-D`; in Homebridge UI, l'interruttore della modalità debug nelle sue impostazioni). I livelli `0` e `1` oggi si comportano allo stesso modo. L'interruttore legacy `debug` aggiunge solo alcune righe di dettaglio allo stesso livello e non dipende da `logLevel`.
+Imposta **Log Level** a `2` (Advanced) per la traccia dettagliata: ogni cambio di stato riportato dalla centrale, le righe di discovery per dispositivo e i frame mascherati, scritti a livello info e marcati `[debug]`, senza eseguire Homebridge in modalità debug. Il livello `1` (predefinito) registra connessione e sincronizzazione, il riepilogo dei dispositivi all'avvio, i comandi e gli accessori aggiunti o rimossi; il livello `0` solo avvisi ed errori. L'interruttore legacy `debug` equivale al livello `2`.
 
 Per una segnalazione di bug usa il [file di debug](#privacy-e-file-di-debug) e invialo in privato. Altro in [`docs/it/operazioni-debug.md`](docs/it/operazioni-debug.md).
 

@@ -1,5 +1,6 @@
 import type { Logger } from 'homebridge';
 import type { WebSocketClientState } from './types';
+import { toErrorMessage } from '../errors';
 
 interface ReconnectSchedulerDeps {
     state: WebSocketClientState;
@@ -47,7 +48,7 @@ export class ReconnectScheduler {
                     if (this.deps.isStopped()) return;
                     this.deps.log.error(
                         'Reconnection failed:',
-                        err instanceof Error ? err.message : String(err),
+                        toErrorMessage(err),
                     );
                     this.schedule();
                 });

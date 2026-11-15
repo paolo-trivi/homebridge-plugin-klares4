@@ -6,6 +6,7 @@ import type { AccessoryRegistry } from './accessory-registry';
 import type { DeviceListService } from './device-list-service';
 import type { DiscoveryService } from './discovery-service';
 import type { MatterAccessoryRegistry } from './matter-accessory-registry';
+import { toErrorMessage } from '../errors';
 
 export interface DeviceEventRouterDeps {
     log: Logger;
@@ -63,7 +64,7 @@ export class DeviceEventRouter {
         });
 
         if (discoveryService.shouldExcludeDevice(device)) {
-            log.info(`Device excluded: ${device.type} - ${device.name}`);
+            log.debug(`Device excluded: ${device.type} - ${device.name}`);
             return false;
         }
         const names = this.deriveNames(device);
@@ -71,12 +72,12 @@ export class DeviceEventRouter {
         const { sharedDevice, matterDevice } = names;
         this.matterDevices.set(device.id, matterDevice);
         this.reportedThisSync.add(device.id);
-        log.info(`Device discovered: ${sharedDevice.type} - ${sharedDevice.name}`);
+        log.debug(`Device discovered: ${sharedDevice.type} - ${sharedDevice.name}`);
 
         this.isolate(device, 'HAP', () => this.addToHap(sharedDevice));
         this.isolate(device, 'Matter', () => {
             this.deps.matterRegistry.addOrUpdateAccessory(matterDevice).catch((err: unknown) => {
-                log.warn(`[Matter] Registration error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
+                log.warn(`[Matter] Registration error for ${matterDevice.name}:`, toErrorMessage(err));
             });
         });
         return true;
@@ -99,7 +100,7 @@ export class DeviceEventRouter {
         this.isolate(device, 'MQTT', () => this.deps.getMqttBridge()?.publishDeviceState(sharedDevice));
         this.isolate(device, 'Matter', () => {
             this.deps.matterRegistry.updateAccessoryState(matterDevice).catch((err: unknown) => {
-                log.debug(`[Matter] State update error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
+                log.warn(`[Matter] State update error for ${matterDevice.name}:`, toErrorMessage(err));
             });
         });
         return true;

@@ -124,7 +124,7 @@ export class ZoneAccessory {
         );
 
         if (this.lastOpen !== newOpen) {
-            this.platform.log.info(
+            this.platform.log.debug(
                 `${this.device.name}: ${newOpen ? 'Open' : 'Closed'}`,
             );
         }
@@ -135,7 +135,7 @@ export class ZoneAccessory {
         );
 
         if (this.lastActive !== newActive) {
-            this.platform.log.info(
+            this.platform.log.debug(
                 `${this.device.name}: ${newActive ? 'Active' : 'Inactive'}`,
             );
         }

@@ -112,5 +112,5 @@ test('PLAT-06: a list replaced after construction (KSA import) is read again', (
 test('PLAT-06: excluded devices keep the "excluded" message and a quiet check', () => {
     const { discovery, log } = service({ excludeOutputs: [5] });
     assert.equal(discovery.shouldExcludeDevice(gate5), true);
-    assert.ok(log.lines.some((l) => l.level === 'info' && /Output excluded/.test(l.text)));
+    assert.ok(log.lines.some((l) => l.level === 'debug' && /Output excluded/.test(l.text)));
 });

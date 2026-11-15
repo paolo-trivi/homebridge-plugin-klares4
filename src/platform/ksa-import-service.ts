@@ -9,6 +9,7 @@ import type { PlatformBlockSelector, PlatformConfigFileService } from './config-
 import type { Lares4Config } from './types';
 import { mergeCustomNames, type CustomNamesConfig } from './custom-names-config';
 import { existingRows, planPairMerge, resolveKsaRoomMapping, type PairMergePlan } from './ksa-config-merge';
+import { toErrorMessage } from '../errors';
 
 export class KsaImportService {
     private readonly cacheService: KsaCacheService;
@@ -47,7 +48,7 @@ export class KsaImportService {
             }
             return result.cache;
         } catch (error: unknown) {
-            this.log.error(`KSA import failed (${filePath}): ${error instanceof Error ? error.message : String(error)}`);
+            this.log.error(`KSA import failed (${filePath}): ${toErrorMessage(error)}`);
             return this.cacheService.load();
         }
     }

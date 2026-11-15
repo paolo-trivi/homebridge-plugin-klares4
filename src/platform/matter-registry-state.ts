@@ -7,6 +7,7 @@ import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { mergeStateUpdates } from './matter-state-updates';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { currentThermostatAttributes } from './matter-thermostat-push';
+import { toErrorMessage } from '../errors';
 
 /**
  * The queue records every thermostat-cluster push so the mapper's
@@ -24,7 +25,7 @@ export function createStateUpdateQueue(
         api,
         log,
         registrations,
-        (err) => (err instanceof Error ? err.message : String(err)),
+        toErrorMessage,
         (reg, update) => {
             if (update.clusterName !== 'thermostat') return update.attributes;
             const attrs = currentThermostatAttributes(reg.matterAccessory.context?.device as KseniaDevice | undefined, update.attributes, tracker);

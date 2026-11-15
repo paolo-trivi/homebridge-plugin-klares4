@@ -7,6 +7,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { CommandExecutor } = require('../dist/mqtt-bridge/command-executor.js');
+const { ValidationKlaresError } = require('../dist/errors.js');
+const { ThermostatRoutingError } = require('../dist/websocket-client/thermostat-command-id-resolver.js');
 const { recordingLog } = require('./fixtures/fake-mqtt.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
@@ -179,8 +181,9 @@ function failingLight(error) {
 
 test('a command refused by the panel queue or by validation is a readable warning, not an error', async () => {
   const queueRefusal = Object.assign(new Error('Command for light_1 not sent'), { name: 'CommandQueueRejectedError', reason: 'superseded' });
-  const unknownDevice = Object.assign(new Error('Command refused: 1 is not a light discovered on the panel'), { name: 'ValidationKlaresError' });
-  for (const [error, text] of [[queueRefusal, 'newer command'], [unknownDevice, 'not a light discovered']]) {
+  const unknownDevice = new ValidationKlaresError('Command refused: 1 is not a light discovered on the panel');
+  const routing = new ThermostatRoutingError('Thermostat cfg 7 could not be read from the panel before the write; write refused');
+  for (const [error, text] of [[queueRefusal, 'newer command'], [unknownDevice, 'not a light discovered'], [routing, 'write refused']]) {
     const { executor, log } = executorFor(failingLight(error));
     executor.executeCommand('light', 'light_1', '{"on":true}');
     await waitFor(() => log.lines.warn.length === 1);

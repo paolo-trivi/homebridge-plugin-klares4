@@ -1,4 +1,5 @@
 import type { API, Logger } from 'homebridge';
+import { toErrorMessage } from '../errors';
 
 /**
  * Mirrors the panel connection on BridgedDeviceBasicInformation.reachable of
@@ -56,7 +57,7 @@ export class MatterReachability {
     private push(uuid: string, reachable: boolean): void {
         this.api.matter?.updateAccessoryState(uuid, 'bridgedDeviceBasicInformation', { reachable })
             .catch((err: unknown) => {
-                this.log.debug(`[Matter] reachable=${reachable} update failed for ${uuid}: ${err instanceof Error ? err.message : String(err)}`);
+                this.log.debug(`[Matter] reachable=${reachable} update failed for ${uuid}: ${toErrorMessage(err)}`);
             });
     }
 }

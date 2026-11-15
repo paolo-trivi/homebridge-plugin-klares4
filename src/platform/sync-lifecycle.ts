@@ -6,6 +6,7 @@ import type { AccessoryRegistry } from './accessory-registry';
 import type { DeviceEventRouter } from './device-event-router';
 import type { MatterAccessoryRegistry } from './matter-accessory-registry';
 import { familiesOf, type SyncOutcome } from './prune-policy';
+import { toErrorMessage } from '../errors';
 
 export interface SyncLifecycleDeps {
     log: Logger;
@@ -134,7 +135,7 @@ export class SyncLifecycle {
         try {
             await matterRegistry.finalizeNameMap(this.completedMatterDevices);
         } catch (err: unknown) {
-            log.warn('[Matter] Name-map finalize error:', err instanceof Error ? err.message : String(err));
+            log.warn('[Matter] Name-map finalize error:', toErrorMessage(err));
         }
         if (!sync || sync.epoch !== this.epoch || sync.epoch === this.prunedEpoch) {
             log.debug('[Matter] Prune skipped: the sync it belonged to was superseded or already pruned');
@@ -144,7 +145,7 @@ export class SyncLifecycle {
         try {
             await matterRegistry.pruneStaleAccessories(sync);
         } catch (err: unknown) {
-            log.warn('[Matter] Prune error:', err instanceof Error ? err.message : String(err));
+            log.warn('[Matter] Prune error:', toErrorMessage(err));
         }
     }
 }

@@ -83,7 +83,6 @@ export class KseniaWebSocketClient {
             state: this.state,
             log: this.log,
             logLevel: this.logLevel,
-            debugEnabled: this.options.debug ?? false,
             emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
             observeOutputStatus: (status): void => {
                 this.outputConfirmation.observe(status);
@@ -94,7 +93,6 @@ export class KseniaWebSocketClient {
             state: this.state,
             log: this.log,
             logLevel: this.logLevel,
-            debugEnabled: this.options.debug ?? false,
             emitDeviceDiscovered: (device: KseniaDevice): void => this.emitDiscovered(device),
             emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
         });
@@ -135,7 +133,6 @@ export class KseniaWebSocketClient {
             },
             log: this.log,
             logLevel: this.logLevel,
-            debugEnabled: this.options.debug ?? false,
             exposePartialArmScenarios: this.options.exposePartialArmScenarios ?? false,
             exposeOutputs: this.options.exposeOutputs,
             exposeScenarios: this.options.exposeScenarios,
@@ -170,12 +167,12 @@ export class KseniaWebSocketClient {
                 this.messageService.handleStatusUpdate(message);
             },
             onPing: (): void => {
-                if (this.options.debug) {
+                if (this.logLevel >= LogLevel.DEBUG) {
                     this.log.debug('PING received from system');
                 }
             },
             onUnhandled: (message): void => {
-                if (this.options.debug) {
+                if (this.logLevel >= LogLevel.DEBUG) {
                     this.log.debug(`Unhandled message: ${message.CMD}`);
                 }
             },

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Logger } from 'homebridge';
 import { writeJsonAtomicSync } from '../atomic-file';
+import { toErrorMessage } from '../errors';
 
 const COUNTER_STORE_FILENAME = 'klares4-matter-prune.json';
 
@@ -65,7 +66,7 @@ export class MatterPruneCounters {
             };
             writeJsonAtomicSync(this.filePath, payload, 2);
         } catch (err) {
-            this.log.warn(`[Matter] Could not write prune-counter store (${this.filePath}): ${err instanceof Error ? err.message : String(err)}`);
+            this.log.warn(`[Matter] Could not write prune-counter store (${this.filePath}): ${toErrorMessage(err)}`);
         }
     }
 
@@ -89,7 +90,7 @@ export class MatterPruneCounters {
                 }
             }
         } catch (err) {
-            this.log.warn(`[Matter] Could not load prune-counter store (${this.filePath}): ${err instanceof Error ? err.message : String(err)}`);
+            this.log.warn(`[Matter] Could not load prune-counter store (${this.filePath}): ${toErrorMessage(err)}`);
         }
     }
 }

@@ -1,5 +1,6 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import { PLUGIN_NAME, PLATFORM_NAME } from '../settings';
+import { toErrorMessage } from '../errors';
 
 export type MatterPublicationState =
     | 'requested'
@@ -48,10 +49,6 @@ function resolveTimeout(configured?: number): number {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve): void => { setTimeout(resolve, ms); });
-
-function errorText(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
 
 export class MatterTopologyCoordinator {
     private tail: Promise<void> = Promise.resolve();
@@ -136,7 +133,7 @@ export class MatterTopologyCoordinator {
                 // decides. With the accessory object Homebridge registered, a
                 // rejection is an anomaly worth seeing; with the bare stub it is
                 // the expected TypeError (MatterAPIImpl.js:48-50, :335-342).
-                const message = `[Matter] unregister call for ${uuid} threw, deferring to observation: ${errorText(error)}`;
+                const message = `[Matter] unregister call for ${uuid} threw, deferring to observation: ${toErrorMessage(error)}`;
                 if (known) this.log.warn(message);
                 else this.log.debug(message);
             }
@@ -165,7 +162,7 @@ export class MatterTopologyCoordinator {
             try {
                 await this.api.matter!.updateAccessoryState(uuid, BRIDGED_INFO, { nodeLabel: name });
             } catch (error: unknown) {
-                this.log.debug(`[Matter] nodeLabel update for ${uuid} threw, deferring to observation: ${errorText(error)}`);
+                this.log.debug(`[Matter] nodeLabel update for ${uuid} threw, deferring to observation: ${toErrorMessage(error)}`);
             }
             const renamed = await this.observe(async () => (await this.readNodeLabel(uuid)) === name);
             if (renamed) await this.updateCachedRecord({ ...accessory, displayName: name });
@@ -184,7 +181,7 @@ export class MatterTopologyCoordinator {
         try {
             await this.api.matter!.updatePlatformAccessories([accessory]);
         } catch (error: unknown) {
-            this.log.debug(`[Matter] cache update for ${accessory.UUID} failed: ${errorText(error)}`);
+            this.log.debug(`[Matter] cache update for ${accessory.UUID} failed: ${toErrorMessage(error)}`);
         }
     }
 
@@ -237,7 +234,7 @@ export class MatterTopologyCoordinator {
         const result = this.tail.catch((): void => undefined).then(operation);
         this.tail = result.then((): void => undefined, (error: unknown): void => {
             this.states.set(uuid, 'failed');
-            this.log.warn(`[Matter] topology operation failed for ${uuid}: ${errorText(error)}`);
+            this.log.warn(`[Matter] topology operation failed for ${uuid}: ${toErrorMessage(error)}`);
         });
         return result;
     }
@@ -254,7 +251,7 @@ export class MatterTopologyCoordinator {
         try {
             await this.api.matter!.updateAccessoryState(uuid, BRIDGED_INFO, { uniqueId });
         } catch (error: unknown) {
-            this.log.debug(`[Matter] uniqueId update for ${uuid} threw, deferring to observation: ${errorText(error)}`);
+            this.log.debug(`[Matter] uniqueId update for ${uuid} threw, deferring to observation: ${toErrorMessage(error)}`);
         }
         const restored = await this.observe(async () => (await this.readUniqueId(uuid)) === uniqueId);
         if (!restored && warnIfNotKept) {

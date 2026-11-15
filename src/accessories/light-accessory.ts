@@ -4,6 +4,7 @@ import type { KseniaLight } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
 import { communicationFailure } from './communication-failure';
+import { toErrorMessage } from '../errors';
 
 /**
  * Light Accessory Handler
@@ -74,7 +75,7 @@ export class LightAccessory {
         } catch (error: unknown) {
             this.platform.log.error(
                 `Light control error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             throw communicationFailure(this.platform.api, error);
         }
@@ -112,7 +113,7 @@ export class LightAccessory {
         } catch (error: unknown) {
             this.platform.log.error(
                 `Dimmer error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             throw communicationFailure(this.platform.api, error);
         }

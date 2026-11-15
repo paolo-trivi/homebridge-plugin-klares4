@@ -9,6 +9,7 @@ import type { DiscoveryService } from './discovery-service';
 import type { PlatformLifecycleService } from './platform-lifecycle-service';
 import { buildRoomMappingExample } from './room-mapping-example';
 import type { DeviceListItem, DevicesList, Lares4Config } from './types';
+import { toErrorMessage } from '../errors';
 
 interface DeviceListServiceOptions {
     log: Logger;
@@ -67,7 +68,7 @@ export class DeviceListService {
         } catch (error: unknown) {
             this.options.log.error(
                 'Error saving devices list:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }
@@ -91,7 +92,7 @@ export class DeviceListService {
         } catch (error: unknown) {
             this.options.log.error(
                 'Error saving devices list:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }
@@ -118,7 +119,7 @@ export class DeviceListService {
                 this.latestSignature = undefined;
                 this.options.log.error(
                     'Error saving devices list:',
-                    error instanceof Error ? error.message : String(error),
+                    toErrorMessage(error),
                 );
             });
     }
@@ -208,7 +209,7 @@ export class DeviceListService {
                 log.info(`Room mapping example ${existing === undefined ? 'created' : 'updated'}: ${examplePath}`);
             })
             .catch((error: unknown): void => {
-                log.error('Error creating example file:', error instanceof Error ? error.message : String(error));
+                log.error('Error creating example file:', toErrorMessage(error));
             });
     }
 }

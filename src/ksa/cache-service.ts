@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { Logger } from 'homebridge';
 import { writeJsonAtomic } from '../atomic-file';
 import type { KsaSanitizedCache } from '../types';
+import { toErrorMessage } from '../errors';
 
 const CACHE_FILE_NAME = 'klares4-ksa-cache.json';
 
@@ -66,7 +67,7 @@ export class KsaCacheService {
             }
             return parsed as KsaSanitizedCache;
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = toErrorMessage(error);
             if (!message.includes('ENOENT')) {
                 this.log.warn(`Unable to load KSA cache: ${message}`);
             }

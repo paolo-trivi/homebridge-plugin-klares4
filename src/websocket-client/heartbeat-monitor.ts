@@ -1,4 +1,5 @@
 import type { Logger } from 'homebridge';
+import { LogLevel } from '../log-levels';
 import type { WsTransport } from '../websocket/ws-transport';
 import type { WebSocketClientState } from './types';
 
@@ -6,7 +7,7 @@ interface HeartbeatMonitorDeps {
     state: WebSocketClientState;
     log: Logger;
     intervalMs: number;
-    debug: boolean;
+    logLevel: LogLevel;
     wsTransport: WsTransport;
     /** No PONG for two intervals: the connection is dead (half-open). */
     onTimeout: (silentMs: number) => void;
@@ -33,7 +34,7 @@ export class HeartbeatMonitor {
             }
             state.heartbeatPending = true;
             this.deps.wsTransport.ping(state.ws);
-            if (this.deps.debug) {
+            if (this.deps.logLevel >= LogLevel.DEBUG) {
                 this.deps.log.debug('Native WebSocket PING sent');
             }
         }, this.deps.intervalMs);
@@ -51,7 +52,7 @@ export class HeartbeatMonitor {
     public pongReceived(): void {
         this.deps.state.heartbeatPending = false;
         this.deps.state.lastPongReceived = Date.now();
-        if (this.deps.debug) {
+        if (this.deps.logLevel >= LogLevel.DEBUG) {
             this.deps.log.debug('Native WebSocket PONG received - connection healthy');
         }
     }

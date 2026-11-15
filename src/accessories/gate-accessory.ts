@@ -4,6 +4,7 @@ import type { KseniaGate } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
 import { communicationFailure } from './communication-failure';
+import { toErrorMessage } from '../errors';
 
 /**
  * Gate Accessory Handler
@@ -81,7 +82,7 @@ export class GateAccessory {
         } catch (error: unknown) {
             this.platform.log.error(
                 `Gate control error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             // Reset to OFF on error
             this.service.updateCharacteristic(this.platform.Characteristic.On, false);

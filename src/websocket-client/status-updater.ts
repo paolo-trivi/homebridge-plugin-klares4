@@ -31,7 +31,6 @@ interface StatusUpdaterDeps {
     state: WebSocketClientState;
     log: Logger;
     logLevel: LogLevel;
-    debugEnabled: boolean;
     emitDeviceStatusUpdate: (device: KseniaDevice) => void;
     observeOutputStatus?: (status: KseniaOutputStatusRaw) => void;
 }
@@ -78,7 +77,7 @@ export class StatusUpdater {
                             currentTemperature: newCurrentTemp,
                         });
                         if (oldCurrentTemp !== newCurrentTemp) {
-                            this.deps.log.info(`${thermostatDevice.name}: Current temperature ${newCurrentTemp}C`);
+                            this.deps.log.debug(`${thermostatDevice.name}: Current temperature ${newCurrentTemp}C`);
                             updated = true;
                         }
                     }
@@ -92,7 +91,7 @@ export class StatusUpdater {
                             targetTemperature: newTargetTemp,
                         });
                         if (oldTargetTemp !== newTargetTemp) {
-                            this.deps.log.info(`${thermostatDevice.name}: Target temperature ${newTargetTemp}C`);
+                            this.deps.log.debug(`${thermostatDevice.name}: Target temperature ${newTargetTemp}C`);
                             updated = true;
                         }
                     }
@@ -106,14 +105,14 @@ export class StatusUpdater {
                         mode: newMode,
                     });
                     if (oldMode !== newMode) {
-                        this.deps.log.info(`${thermostatDevice.name}: Mode ${newMode}`);
+                        this.deps.log.debug(`${thermostatDevice.name}: Mode ${newMode}`);
                         updated = true;
                     }
                 }
 
                 if (updated) {
                     this.deps.emitDeviceStatusUpdate(thermostatDevice);
-                } else if (this.deps.debugEnabled) {
+                } else if (this.deps.logLevel >= LogLevel.DEBUG) {
                     this.deps.log.debug(`Debug thermostat ${output.ID}: ${JSON.stringify(output)}`);
                 }
             }
@@ -222,7 +221,7 @@ export class StatusUpdater {
         }
         if (on !== undefined) {
             if (lightStatus.on !== on) {
-                this.deps.log.info(`Light ${lightDevice.name} (Output ${output.ID}): ${on ? 'ON' : 'OFF'}`);
+                this.deps.log.debug(`Light ${lightDevice.name} (Output ${output.ID}): ${on ? 'ON' : 'OFF'}`);
             }
             lightStatus.on = on;
         }
@@ -241,7 +240,7 @@ export class StatusUpdater {
             return;
         }
         if (coverStatus.position !== newPosition) {
-            this.deps.log.info(`Cover ${coverDevice.name} (Output ${output.ID}): ${output.STA} position ${newPosition}%`);
+            this.deps.log.debug(`Cover ${coverDevice.name} (Output ${output.ID}): ${output.STA} position ${newPosition}%`);
         }
         coverStatus.position = newPosition;
         coverStatus.targetPosition = parseIntegerInRange(output.TPOS, 0, 100) ?? newPosition;

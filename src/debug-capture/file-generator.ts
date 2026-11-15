@@ -6,6 +6,7 @@ import { writeFileAtomic, writeFileAtomicSync } from '../atomic-file';
 import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { analyzeMessages, countByCommand, extractCommands, getUniquePayloadTypes } from './analysis';
 import type { DeviceSnapshot, RawMessage } from './types';
+import { toErrorMessage } from '../errors';
 
 /** The file names the devices and the state of the alarm system: readable by its owner only. */
 const FILE_OPTIONS = { mode: 0o600 };
@@ -108,13 +109,13 @@ export class DebugFileGenerator {
                 .catch((error: unknown): void => {
                     this.log.error(
                         'Error generating debug file:',
-                        error instanceof Error ? error.message : String(error),
+                        toErrorMessage(error),
                     );
                 });
         } catch (error: unknown) {
             this.log.error(
                 'Error generating debug file:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }

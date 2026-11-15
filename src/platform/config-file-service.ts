@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { Logger } from 'homebridge';
 import { removeOrphanedTemporaryFiles, writeFileAtomic, type AtomicFileSystem } from '../atomic-file';
 import { PLUGIN_NAME } from '../settings';
+import { toErrorMessage } from '../errors';
 
 type PlatformBlock = Record<string, unknown> & { platform?: string; name?: unknown; ip?: unknown };
 
@@ -135,7 +136,7 @@ export class PlatformConfigFileService {
             });
             return { status: 'written', method: result.method };
         } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = toErrorMessage(error);
             this.log.error('Failed to update config.json:', message);
             return { status: 'failed', error: message };
         }

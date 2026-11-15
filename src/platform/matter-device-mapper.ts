@@ -21,6 +21,7 @@ import { buildCoverHandlers, buildLightHandlers, buildMomentaryHandlers, require
 import {
     coverLift, finiteNumber, humidityMeasuredValue, MAX_LEVEL, MIN_LEVEL, illuminanceMeasuredValue, levelFromBrightness, temperatureMeasuredValue,
 } from './matter-value-guards';
+import { toErrorMessage } from '../errors';
 
 const matterNameRegistry = new MatterNameRegistry();
 
@@ -100,7 +101,7 @@ function scheduleMomentaryAutoOff(uuid: string, deps: MapperDeps): void {
         }
         deps.api.matter?.updateAccessoryState(uuid, 'onOff', { onOff: false })
             .catch((err: unknown) => {
-                deps.log.debug(`[Matter] momentary auto-off failed for ${uuid}: ${err instanceof Error ? err.message : String(err)}`);
+                deps.log.warn(`[Matter] momentary auto-off failed for ${uuid}: ${toErrorMessage(err)}`);
             });
     }, delay);
 }
@@ -298,7 +299,7 @@ export function deviceToMatterAccessory(device: KseniaDevice, deps: MapperDeps):
             default:           return undefined;
         }
     } catch (err) {
-        deps.log.warn(`[Matter] Mapper error for ${(device as KseniaDevice).name}: ${err instanceof Error ? err.message : String(err)}`);
+        deps.log.warn(`[Matter] Mapper error for ${(device as KseniaDevice).name}: ${toErrorMessage(err)}`);
         return undefined;
     }
 }

@@ -1,3 +1,4 @@
+import { ValidationKlaresError } from '../errors';
 import type { DegradedGuessVerdict } from './thermostat-degraded-guess';
 
 export interface DegradedThermostatRoute {
@@ -50,7 +51,7 @@ interface ResolveThermostatCommandIdInput {
 }
 
 /** The thermostat's cfg id cannot be used: the write is refused, nothing is sent. */
-export class ThermostatRoutingError extends Error {
+export class ThermostatRoutingError extends ValidationKlaresError {
     constructor(message: string) {
         super(message);
         this.name = 'ThermostatRoutingError';

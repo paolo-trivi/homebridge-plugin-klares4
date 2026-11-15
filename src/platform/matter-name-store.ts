@@ -4,6 +4,7 @@ import type { Logger } from 'homebridge';
 import { writeJsonAtomicSync } from '../atomic-file';
 import type { MatterNameMapEntry } from './matter-name-map';
 import { isValidMatterAccessoryName, priorityOf } from './matter-name-sanitizer';
+import { toErrorMessage } from '../errors';
 
 const STORE_FILENAME = 'klares4-matter-names.json';
 const STORE_VERSION = 2;
@@ -71,7 +72,7 @@ export class MatterNameStore {
             this.rememberDiskLastSeen(entries);
             return entries;
         } catch (err) {
-            this.log.warn(`[Matter] Could not load name-map store (${this.filePath}): ${err instanceof Error ? err.message : String(err)}`);
+            this.log.warn(`[Matter] Could not load name-map store (${this.filePath}): ${toErrorMessage(err)}`);
             return [];
         }
     }
@@ -96,7 +97,7 @@ export class MatterNameStore {
             this.rememberDiskLastSeen(validEntries);
             return changed;
         } catch (err) {
-            this.log.warn(`[Matter] Could not write name-map store (${this.filePath}): ${err instanceof Error ? err.message : String(err)}`);
+            this.log.warn(`[Matter] Could not write name-map store (${this.filePath}): ${toErrorMessage(err)}`);
             return false;
         }
     }

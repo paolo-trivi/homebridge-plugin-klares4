@@ -2,7 +2,7 @@
 
 ## Checklist di validazione rapida
 
-1. Imposta **Log Level** su `2` ed esegui Homebridge in modalità debug (`-D`): le righe dettagliate vengono scritte al livello debug di Homebridge, quindi Homebridge le mostra solo in modalità debug. I livelli `0` e `1` per ora si comportano allo stesso modo.
+1. Imposta **Log Level** su `2`: le righe dettagliate vengono scritte a livello info, marcate `[debug]`, quindi Homebridge non deve girare in modalità debug (`-D`). Poi rimettilo a `1`: al livello 2 ogni cambio di stato riportato dalla centrale è una riga di log.
 2. Riavvia Homebridge e verifica:
    - `Response received: MULTI_TYPES`
    - `Response received: STATUS_OUTPUTS`

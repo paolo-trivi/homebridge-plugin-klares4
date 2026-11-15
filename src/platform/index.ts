@@ -8,6 +8,7 @@ import type {
     Service,
 } from 'homebridge';
 
+import { createLeveledLogger } from '../leveled-logger';
 import { MqttBridge } from '../mqtt-bridge';
 import { PLATFORM_NAME, PLUGIN_NAME } from '../settings';
 import type { KseniaDevice } from '../types';
@@ -28,6 +29,7 @@ import { PlatformLifecycleService } from './platform-lifecycle-service';
 import { refreshKsaSections, reportDeprecatedKeys, resolveRuntimeConfig, toPlatformConfig, type RuntimeConfig } from './runtime-config';
 import { SyncLifecycle } from './sync-lifecycle';
 import type { AccessoryHandler, Lares4Config, RawLares4Config } from './types';
+import { toErrorMessage } from '../errors';
 
 export type { AccessoryHandler, Lares4Config, MatterExposureConfig, DeviceListItem, DevicesList, RawLares4Config } from './types';
 export type { RuntimeConfig } from './runtime-config';
@@ -59,15 +61,19 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     /** Set at shutdown: an initialization still in progress must not connect afterwards. */
     private shuttingDown = false;
 
+    /** Homebridge's logger held to the configured `logLevel`: every service logs through it. */
+    public readonly log: Logger;
+
     constructor(
-        public readonly log: Logger,
+        log: Logger,
         config: RawLares4Config,
         public readonly api: API,
     ) {
         this.Service = api.hap.Service;
         this.Characteristic = api.hap.Characteristic;
         // The only place the raw config is interpreted: problems are logged here, once.
-        this.runtime = resolveRuntimeConfig(config, this.log);
+        this.runtime = resolveRuntimeConfig(config, log);
+        this.log = createLeveledLogger(log, this.runtime.logLevel);
         reportDeprecatedKeys(config, this.log);
         this.config = toPlatformConfig(config, this.runtime);
         this.discoveryService = new DiscoveryService(this.config, this.log, this.runtime);
@@ -132,7 +138,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
         this.api.on('didFinishLaunching', (): void => {
             this.log.debug('didFinishLaunching callback executed');
             this.initializeLares4().catch((error: unknown): void => {
-                this.log.error('Failed to initialize Lares4:', error instanceof Error ? error.message : String(error));
+                this.log.error('Failed to initialize Lares4:', toErrorMessage(error));
             });
         });
         this.api.on('shutdown', (): void => {
@@ -197,7 +203,7 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
             this.log.info('Ksenia Lares4 initialized successfully');
         } catch (error: unknown) {
-            this.log.error('Lares4 initialization error:', error instanceof Error ? error.message : String(error));
+            this.log.error('Lares4 initialization error:', toErrorMessage(error));
         }
     }
 

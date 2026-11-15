@@ -38,7 +38,6 @@ function createStatusUpdater(state, updates = []) {
     state,
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     emitDeviceStatusUpdate: (device) => updates.push(device.id),
   });
 }
@@ -48,7 +47,6 @@ function createSystemTemperatureUpdater(state, updates = []) {
     state,
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: true,
     emitDeviceDiscovered: () => undefined,
     emitDeviceStatusUpdate: (device) => updates.push(device.id),
   });
@@ -170,7 +168,6 @@ test('integration sequence MULTI_TYPES -> STATUS_BUS_HA_SENSORS -> STATUS_SYSTEM
     callbacks: {},
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
     thermostatStatusUpdater,
@@ -251,7 +248,6 @@ test('integration normalizes DOMUS ids between BUS_HAS and STATUS_BUS_HA_SENSORS
     callbacks: {},
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
     thermostatStatusUpdater,

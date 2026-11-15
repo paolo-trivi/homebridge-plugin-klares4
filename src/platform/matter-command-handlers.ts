@@ -15,6 +15,7 @@ import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaCover, KseniaLight } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import { hasObservedState } from '../device-observation';
+import { toErrorMessage } from '../errors';
 
 type Handlers = NonNullable<MatterAccessory['handlers']>;
 
@@ -164,7 +165,7 @@ function keepReportedPosition(device: KseniaCover, requested: number, ctx: Comma
         }
         ctx.api.matter?.updateAccessoryState(device.id, 'windowCovering', attributes)
             .catch((err: unknown) => {
-                ctx.log?.debug(`[Matter] cover position refresh failed for ${device.id}: ${err instanceof Error ? err.message : String(err)}`);
+                ctx.log?.debug(`[Matter] cover position refresh failed for ${device.id}: ${toErrorMessage(err)}`);
             });
     }, 0);
 }

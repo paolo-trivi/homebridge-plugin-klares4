@@ -2,7 +2,7 @@
 
 ## Fast Validation Checklist
 
-1. Set **Log Level** to `2` and run Homebridge in debug mode (`-D`): the detailed lines are written at Homebridge's debug level, so Homebridge shows them only in debug mode. Levels `0` and `1` currently behave the same.
+1. Set **Log Level** to `2`: the detailed lines are written at info level, marked `[debug]`, so Homebridge does not have to run in debug mode (`-D`). Put it back to `1` afterwards: at level 2 every state change the panel reports is a log line.
 2. Restart Homebridge and verify:
    - `Response received: MULTI_TYPES`
    - `Response received: STATUS_OUTPUTS`

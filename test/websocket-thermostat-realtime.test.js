@@ -46,7 +46,6 @@ function createStatusUpdater(state, updates = []) {
     state,
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     emitDeviceStatusUpdate: (device) => updates.push(device.id),
   });
 }
@@ -56,7 +55,6 @@ function createSystemTemperatureUpdater(state, updates = []) {
     state,
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     emitDeviceDiscovered: () => undefined,
     emitDeviceStatusUpdate: (device) => updates.push(device.id),
   });
@@ -188,7 +186,6 @@ test('message pipeline applies STATUS_TEMPERATURES from realtime snapshots and c
     callbacks: {},
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
     thermostatStatusUpdater: thermostatUpdater,
@@ -301,7 +298,6 @@ test('STATUS_TEMPERATURES.ID is the DOMUS sensor id (4 for Foresteria), patch go
     callbacks: {},
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
     thermostatStatusUpdater: thermostatUpdater,
@@ -414,7 +410,6 @@ test('STATUS_TEMPERATURES regression: crossed (cfg,sensor) pairs do NOT cross-po
     callbacks: {},
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
     thermostatStatusUpdater: thermostatUpdater,

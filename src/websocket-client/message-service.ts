@@ -20,13 +20,13 @@ import type {
     SystemTemperatureData,
     WebSocketClientState,
 } from './types';
+import { toErrorMessage } from '../errors';
 
 interface MessageServiceDeps {
     state: WebSocketClientState;
     callbacks: CallbackRegistry;
     log: Logger;
     logLevel: LogLevel;
-    debugEnabled: boolean;
     exposePartialArmScenarios?: boolean;
     exposeOutputs?: readonly OutputOptIn[];
     exposeScenarios?: readonly ScenarioOptIn[];
@@ -62,7 +62,6 @@ export class MessageService {
             state: deps.state,
             log: deps.log,
             logLevel: deps.logLevel,
-            debugEnabled: deps.debugEnabled,
             thermostatStatusUpdater: deps.thermostatStatusUpdater,
             emitDeviceStatusUpdate: (device): void => this.deps.callbacks.onDeviceStatusUpdate?.(device),
         });
@@ -146,7 +145,7 @@ export class MessageService {
         this.deps.commandService.requestSystemData().catch((error: unknown): void => {
             this.deps.log.error(
                 'Error requesting system data:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         });
     }
@@ -164,7 +163,7 @@ export class MessageService {
             return;
         }
         this.readRefusals.accepted(message.PAYLOAD_TYPE);
-        this.deps.log.info(`Response received: ${message.PAYLOAD_TYPE}`);
+        this.deps.log.debug(`Response received: ${message.PAYLOAD_TYPE}`);
 
         if (message.PAYLOAD_TYPE === 'ZONES') {
             const zones = payload.ZONES;
@@ -191,19 +190,19 @@ export class MessageService {
 
         const initialStatus: RealtimeStatusData = {};
         if (message.PAYLOAD_TYPE === 'STATUS_OUTPUTS' && payload.STATUS_OUTPUTS) {
-            this.deps.log.info(`Initial states for ${payload.STATUS_OUTPUTS.length} outputs`);
+            this.deps.log.debug(`Initial states for ${payload.STATUS_OUTPUTS.length} outputs`);
             this.thermostats.logInitialThermostatStates(payload.STATUS_OUTPUTS);
             initialStatus.STATUS_OUTPUTS = payload.STATUS_OUTPUTS;
         }
         if (message.PAYLOAD_TYPE === 'STATUS_BUS_HA_SENSORS' && payload.STATUS_BUS_HA_SENSORS) {
-            this.deps.log.info(`Initial states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
+            this.deps.log.debug(`Initial states for ${payload.STATUS_BUS_HA_SENSORS.length} sensors`);
             initialStatus.STATUS_BUS_HA_SENSORS = payload.STATUS_BUS_HA_SENSORS;
         }
         if (message.PAYLOAD_TYPE === 'STATUS_TEMPERATURES' && payload.STATUS_TEMPERATURES) {
             initialStatus.STATUS_TEMPERATURES = payload.STATUS_TEMPERATURES;
         }
         if (message.PAYLOAD_TYPE === 'STATUS_SYSTEM' && payload.STATUS_SYSTEM) {
-            this.deps.log.info('Initial system temperatures');
+            this.deps.log.debug('Initial system temperatures');
             initialStatus.STATUS_SYSTEM = realtimeStatusOf(payload).STATUS_SYSTEM;
         }
         this.applyStatusGroups(frame, initialStatus);

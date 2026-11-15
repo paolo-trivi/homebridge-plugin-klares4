@@ -73,7 +73,7 @@
                 "title": "Debug Mode (legacy)",
                 "type": "boolean",
                 "default": false,
-                "description": "Legacy switch. It adds a few detail lines (thermostat discovery, heartbeat, status updates) that are written at Homebridge's debug level, so they appear only when Homebridge itself runs in debug mode (-D). It does not depend on Log Level. It also stands in for Log Level 2 when Log Level is absent from config.json."
+                "description": "Legacy switch, the same as Log Level 2: when it is on, the level is 2 whatever Log Level says."
             },
             "logLevel": {
                 "title": "Log Level",
@@ -93,7 +93,7 @@
                         "const": 2
                     }
                 ],
-                "description": "Level 2 turns on the detailed trace of the plugin (commands sent to the panel, discovery and thermostat details). Those lines are written at Homebridge's debug level, so they appear only when Homebridge itself runs in debug mode (-D). Levels 0 and 1 currently behave the same."
+                "description": "0: warnings and errors only. 1: connection and synchronization, the startup device summary, commands, accessories added and removed. 2: everything else too (each state change reported by the panel, per-device discovery lines, masked frames), written at info level and marked [debug], so Homebridge does not have to run in debug mode (-D)."
             },
             "maxSeconds": {
                 "title": "Cover Travel Time",
@@ -1403,7 +1403,7 @@
                                 {
                                     "key": "logLevel",
                                     "flex": "1 1 220px",
-                                    "description": "0 minimal, 1 normal, 2 detailed trace (shown only when Homebridge runs in debug mode)"
+                                    "description": "0 warnings and errors only, 1 normal, 2 detailed trace (no Homebridge debug mode needed)"
                                 },
                                 {
                                     "key": "debug",

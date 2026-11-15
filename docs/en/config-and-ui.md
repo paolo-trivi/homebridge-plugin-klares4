@@ -37,7 +37,7 @@ The startup summary prints, for every device, both its ID and the value to use i
 - `reconnectInterval` is the base of an exponential backoff (ceiling 60 s, with jitter). It restarts after a complete synchronization.
 - `heartbeatInterval` sets the keep-alive ping; a connection with no answer for two intervals is dropped and pending commands fail at once.
 - `commandTimeoutMs` is the maximum wait for the panel's answer to a command, thermostats included. A command still queued after this time is refused.
-- `logLevel` and `debug`: level `2` turns on the detailed trace of the plugin (commands sent to the panel, discovery and thermostat details). Those lines are written at Homebridge's **debug** level, so you see them only when Homebridge runs in debug mode (`-D`). Levels `0` and `1` currently behave the same. `debug` is a legacy switch that adds a few detail lines at the same level; it stands in for `logLevel: 2` only when `logLevel` is absent from `config.json`, which the settings UI never leaves.
+- `logLevel` and `debug`: `0` writes warnings and errors only; `1` (default) adds connection and synchronization, the startup device summary, commands, accessories added and removed; `2` adds everything else (each state change reported by the panel, per-device discovery lines, masked frames), written at info level and marked `[debug]`, so Homebridge does not have to run in debug mode (`-D`). Below level `2` the plugin's debug lines still go to Homebridge's debug level, so `-D` shows them as before. `debug` is a legacy switch equal to level `2`: when it is on, the level is 2 whatever `logLevel` says (the settings form always writes a `logLevel`, so a switch that yielded to it would do nothing).
 
 ## Exposure and Selection
 

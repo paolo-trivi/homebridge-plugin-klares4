@@ -49,6 +49,7 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 - **The Matter name list no longer expires 30 days after its last write**; names of devices still on the panel never expire, and the name of a device deleted on the panel stays reserved for 30 days after the panel last listed it.
 - **Sensors the panel has not reported** (an offline DOMUS, for example) show "No Response" on HomeKit instead of 0 °C, 50 %, 100 lux or "no motion". Out-of-range or unreadable panel values are discarded instead of being moved to the nearest limit.
 - **Files the plugin creates for the first time are private (`0600`);** existing files keep their permissions.
+- **The log is quieter at the default level, and `logLevel` now does what it says.** Level `1` no longer writes a line for every state change the panel reports (a zone opening, a light switching, a thermostat reading) nor four lines per device at every start; those are level `2`, which now shows them without running Homebridge in debug mode (`-D`), marked `[debug]`. Level `0` writes warnings and errors only. If you read zone openings in the Homebridge log, set `logLevel` to `2`. The legacy `debug` switch is the same as level `2`.
 - **Requirements.** Node.js 22.12 or later (22, 24 and 26 are tested). Homebridge 2.5.x is the verified version, 2.4.x is covered by a CI contract job, and Homebridge 1.x is allowed by the package but **not tested**. The npm package no longer ships source maps.
 
 ### Security
@@ -86,6 +87,7 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 - Debug capture keeps at most 5,000 frames and 2 MiB of traffic in memory; later frames are counted (`captureInfo.droppedMessages`), one warning is logged, and the capture still ends on time. The file is a few MiB at most: each frame is written once (`rawMessages[].rawData`), and a device snapshot taken during the capture is stored only if the devices changed since the previous one. The opening of covers (`status.position`) is kept in the snapshots; only the geographic position is masked.
 - MQTT: the plugin schedules the reconnections itself (backoff from 5 s up to 60 s); `{"on":true,"brightness":40}` runs its two steps one after the other.
 - A panel setpoint outside `temperatureDefaults.min`/`max` is shown on HomeKit at the nearest limit.
+- Logging: the plugin logs through one logger held to `logLevel` (0: warnings and errors; 1: connection, synchronization, device summary, commands; 2: everything, at info level and marked `[debug]`). `debug: true` is level 2 whatever `logLevel` says. A thermostat whose temperature is missing is reported once, when it goes missing, not at every read by a controller; a Matter state update or a momentary auto-off that fails is a warning instead of a debug line.
 - Compiled for ES2022 (Node 22 and later, as before). The npm package no longer ships source maps (269 files and 254 kB instead of 521 files and 346 kB), and install size drops by about 95 MB of dependencies.
 - CI runs on Node 22, 24 and 26, runs contract tests against the real Homebridge Matter stack on Homebridge 2.4.x and 2.5.x, enforces coverage thresholds and checks the package contents. Tests now run against the real Homebridge Matter stack, and the test device list is fully synthetic.
 
@@ -140,6 +142,7 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 - A reconnection no longer replays the thermostat configuration of the previous session over the live state (no more spurious heat → off transitions or AUTO targets jumping to the manual setpoint at every reconnect). In AUTO the target shown is always the program's.
 - A thermostat's current temperature is no longer replaced by the panel's internal board temperature when the room temperature simply stays the same for more than 5 minutes, and is no longer published for a moment at every start.
 - A temperature or mode changed from HomeKit (or MQTT) now reaches Matter and the MQTT state topic as soon as the panel acknowledges it. HomeKit "Current Heating/Cooling State" in AUTO follows the season. A mode and a temperature sent together become one panel write, applied in the right order; two accessories sharing one panel thermostat no longer overwrite each other. An acknowledged "cool" that the panel never confirmed no longer moves later setpoints to the summer season. A realtime mode the plugin does not know is no longer shown as a frozen mode.
+- A thermostat status without a temperature is no longer pushed to HomeKit as an invalid number (hap-nodejs printed a warning for each); HomeKit keeps the last value.
 - A temperature set from HomeKit, Matter or MQTT while the thermostat is in Auto or Off is stored as its manual setpoint and does not switch it on; HomeKit, Matter and MQTT then show again the target the panel is really using, with a line in the log, instead of the value requested.
 
 **Matter**
@@ -163,7 +166,8 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 - After a refused connection (wrong password, broker restarting) the bridge keeps retrying instead of stopping until Homebridge restarts; a broker that is down no longer writes two log lines every 5 seconds. At a Homebridge shutdown after a broker interruption the bridge closes within 2 seconds instead of waiting for messages the broker never confirmed.
 - Two devices whose names give the same topic, or a name without letters or digits, no longer overwrite each other's retained state.
 - Invalid MQTT commands are refused with a warning that says what is expected; topic levels and payloads in the log are quoted and cut to 80 characters, so a client cannot inject fake log lines; a QoS 1 retransmission of the same command is not executed twice; a `topicPrefix` containing `+` or `#` is refused at startup.
-- A command refused by validation or the panel queue is logged as a readable warning instead of a generic error.
+- A command refused by validation or the panel queue, or a thermostat write refused because its panel thermostat cannot be established, is logged as a readable warning instead of a generic error.
+- A connection error that groups several attempts (IPv4 and IPv6) is logged with the reason of each attempt instead of an empty message.
 
 ### Added
 

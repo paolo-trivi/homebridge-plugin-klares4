@@ -9,6 +9,8 @@ import {
     homeKitTargetToDomainMode,
 } from '../thermostat-mode';
 import { syncThermostatTopLevelFromStatus } from '../thermostat-state';
+import { MissingValueWarning } from './missing-value-warning';
+import { toErrorMessage } from '../errors';
 
 /**
  * Thermostat Accessory Handler
@@ -19,6 +21,8 @@ export class ThermostatAccessory {
     public device: KseniaThermostat;
     private readonly tempMin: number;
     private readonly tempMax: number;
+    private readonly missingCurrent = new MissingValueWarning();
+    private readonly missingTarget = new MissingValueWarning();
 
     constructor(
         private readonly platform: Lares4Platform,
@@ -116,7 +120,7 @@ export class ThermostatAccessory {
         } catch (error: unknown) {
             this.platform.log.error(
                 `Thermostat control error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             throw new this.platform.api.hap.HapStatusError(
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
@@ -132,11 +136,12 @@ export class ThermostatAccessory {
             // Use last persisted value from cache to avoid showing 0°C to Matter at startup.
             const lastKnown = this.accessory.context.lastKnownTemp as number | undefined;
             const fallback = lastKnown ?? 21;
-            this.platform.log.warn(
-                `${this.device.name}: Current temperature not available, using ${fallback}C`,
-            );
+            if (this.missingCurrent.shouldWarn(true)) {
+                this.platform.log.warn(`${this.device.name}: Current temperature not available, using ${fallback}C`);
+            }
             return Math.max(-270, Math.min(100, fallback));
         }
+        this.missingCurrent.shouldWarn(false);
         return Math.max(-270, Math.min(100, this.device.currentTemperature));
     }
 
@@ -149,11 +154,12 @@ export class ThermostatAccessory {
                 (this.platform.config as Lares4Config).temperatureDefaults?.target ?? 21;
             // Clamp the default to the configured bounds so Matter bounds validation passes.
             const defaultTemp = Math.max(this.tempMin, Math.min(this.tempMax, configTarget));
-            this.platform.log.warn(
-                `${this.device.name}: Target temperature not available, using ${defaultTemp}C as default`,
-            );
+            if (this.missingTarget.shouldWarn(true)) {
+                this.platform.log.warn(`${this.device.name}: Target temperature not available, using ${defaultTemp}C as default`);
+            }
             return defaultTemp;
         }
+        this.missingTarget.shouldWarn(false);
         return this.clampTarget(this.device.targetTemperature);
     }
 
@@ -193,7 +199,7 @@ export class ThermostatAccessory {
         } catch (error: unknown) {
             this.platform.log.error(
                 `Thermostat temperature error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             throw new this.platform.api.hap.HapStatusError(
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
@@ -272,18 +278,22 @@ export class ThermostatAccessory {
     public updateStatus(newDevice: KseniaThermostat): void {
         syncThermostatTopLevelFromStatus(newDevice);
         this.device = newDevice;
-        // Persist so the next cold-start can return a realistic fallback from cache.
-        if (newDevice.currentTemperature !== undefined && newDevice.currentTemperature !== null) {
+        // A temperature the panel has not reported is not pushed: HomeKit keeps the last value
+        // (the getters answer with the fallback) instead of being handed a NaN.
+        if (Number.isFinite(newDevice.currentTemperature)) {
+            // Persist so the next cold-start can return a realistic fallback from cache.
             this.accessory.context.lastKnownTemp = newDevice.currentTemperature;
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.CurrentTemperature,
+                Math.max(-270, Math.min(100, newDevice.currentTemperature)),
+            );
         }
-        this.service.updateCharacteristic(
-            this.platform.Characteristic.CurrentTemperature,
-            Math.max(-270, Math.min(100, newDevice.currentTemperature)),
-        );
-        this.service.updateCharacteristic(
-            this.platform.Characteristic.TargetTemperature,
-            this.clampTarget(newDevice.targetTemperature),
-        );
+        if (Number.isFinite(newDevice.targetTemperature)) {
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.TargetTemperature,
+                this.clampTarget(newDevice.targetTemperature),
+            );
+        }
         this.service.updateCharacteristic(
             this.platform.Characteristic.TargetHeatingCoolingState,
             domainModeToHomeKitTarget(newDevice.mode),
