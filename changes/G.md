@@ -30,12 +30,16 @@ One key is retired:
 - With more than one `Lares4Complete` block in `config.json`, the one that belongs to the running instance is updated (matched by `name`, then `ip`); if it cannot be told apart nothing is written and a warning explains how to fix it. (PLAT-07)
 - HomeKit: a temperature, humidity, light, motion or contact sensor the panel has never reported (typical for an offline DOMUS) shows "No Response" instead of 0 °C, 50 %, 100 lux or "no motion", which could satisfy automation conditions. (PLAT-11)
 - HomeKit: setting the brightness of a light that is not dimmable is an error instead of a silent success. A cover whose position the panel has not reported yet (or whose position was only simulated) now always sends the command, also when the requested position equals the one HomeKit believes. (PLAT-12)
+- HomeKit and Matter: a DOMUS sensor (or a cover position) the panel has never reported no longer comes back as 0 °C, 50 %, 100 lux or position 0 after a Homebridge restart. "Reported by the panel" is now stored with the accessory in the Homebridge cache, next to the value, and written only when a real status arrives. (PLAT-11)
+- A leftover temporary file next to the destination of a symlinked `config.json` is cleaned at startup too. In the KSA import, custom-name rows that are not objects are dropped instead of being rewritten as `{}`. (PLAT-07, PLAT-17)
 - A scenario renamed on the panel is updated in its HomeKit handler (the MQTT command by the new name works without a restart). The HomeKit gate auto-off uses `scenarioAutoOffDelay`, like the Matter gate and the scenarios, instead of a fixed 500 ms. (PLAT-15)
 
 ## Migration notes
 - KSA import: if you relied on the backup overwriting your thermostat pairs, delete the pair you want replaced from the plugin settings (or set `applyDomusMappings` to `false` and manage the pairs by hand); the backup fills in the ones that are missing.
 - `ksaImport.applyExclusionSuggestions` can be deleted from the config; leaving it does no harm.
 - No change to persisted data, UUIDs, topics or other config keys. Files that already exist keep their permissions; only new ones are `0600`.
+
+- Upgrading from 2.2.0: the cache written by 2.2.0 has no "reported" marker, so the cached value of every sensor and every cover position is treated as a placeholder until the panel reports it (normally within seconds of the first synchronization). Until then HomeKit shows "No Response" for the sensors and Matter shows an unknown measurement. Lights, zones, gates, scenarios and thermostats are not affected: their cached state is kept. A sensor that is really offline stays "No Response" instead of showing 0 °C, as intended.
 
 ## Documentation notes
 - Troubleshooting, new log lines:
@@ -47,6 +51,7 @@ One key is retired:
   - "Removed N leftover temporary file(s) from the Homebridge storage directory" (info).
   - "ksaImport.applyExclusionSuggestions is ignored: ..." (info).
 - README / docs (EN and IT): `applyDomusMappings` description becomes "adds the thermostat mappings of the backup that are missing; the pairs you configured are never replaced"; drop `applyExclusionSuggestions` from the KSA tables; HomeKit sensors show "No Response" until the panel reports a value; the summary of devices is printed once per change of the list.
+- ARCHITECTURE: observed state. `device-observation.ts` keeps one notion of "observed" for HAP, Matter and MQTT: in memory a WeakSet of placeholder statuses, persisted as `context.panelReported = 1` (versioned) next to `context.device` in the HAP cache (`AccessoryRegistry`) and the Matter cache (`MatterAccessoryRegistry`, `matter-registry-state.ts`, mapper `context`); `adoptCachedState` classifies a restored device (sensors and covers only), `recordObservation` keeps the marker in step. MQTT only publishes the live state of the session, never the cache.
 - ARCHITECTURE: `atomic-file.ts` (`writeFileAtomic` returns `{ method, path }`; options `mode`, `onInPlaceFallback`, `fileSystem`; `removeOrphanedTemporaryFiles`), `PlatformConfigFileService.updatePlatformConfig` returns a `ConfigUpdateOutcome` (`written | unchanged | no-platform-block | ambiguous | failed`), `platform/room-mapping-example.ts`, `ksa/parser.ts` `MAX_KSA_FILE_BYTES`.
 
 ## Integration done in `platform/index.ts`

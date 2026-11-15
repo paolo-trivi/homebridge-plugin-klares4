@@ -11,7 +11,7 @@ import type {
     KseniaZone,
 } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
-import { hasObservedState } from '../device-observation';
+import { contextWithObservation, hasObservedState } from '../device-observation';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import { buildThermostatMatterState, toMatterTemperatureCelsius, thermostatSupportsCooling } from './matter-thermostat-mapper';
 import { sanitizeMatterAccessoryName, MatterNameRegistry } from './matter-name-sanitizer';
@@ -110,7 +110,7 @@ function baseFields(
         manufacturer: 'Ksenia',
         model: `Lares4 ${device.type}`,
         firmwareRevision: PLUGIN_VERSION,
-        context: { device },
+        context: contextWithObservation(device),
     };
 }
 

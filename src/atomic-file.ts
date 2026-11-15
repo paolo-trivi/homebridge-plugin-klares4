@@ -235,7 +235,18 @@ export function writeJsonAtomicSync(filePath: string, value: unknown, indent: nu
  */
 const TEMPORARY_FILE = /^(config\.json|klares4-[A-Za-z0-9._-]+?)\.\d+\.(?:[0-9a-f]{12}|\d+)\.tmp$/;
 
+function isTemporaryFileOf(baseName: string, entry: string): boolean {
+    const prefix = `${baseName}.`;
+    return entry.startsWith(prefix) && /^\d+\.(?:[0-9a-f]{12}|\d+)\.tmp$/.test(entry.slice(prefix.length));
+}
+
 export interface OrphanCleanupOptions {
+    /**
+     * Clean only temporary files of these exact file names (for a symlinked file the
+     * temporary file is created next to its destination, in another directory).
+     * Default: the plugin's own file names.
+     */
+    baseNames?: readonly string[];
     /** Only files untouched for this long are removed: a write in progress is never that old. Default 5 minutes. */
     minAgeMs?: number;
     now?: () => number;
@@ -252,7 +263,11 @@ export async function removeOrphanedTemporaryFiles(directory: string, options: O
     } catch {
         return removed;
     }
-    for (const name of names.filter((entry) => TEMPORARY_FILE.test(entry))) {
+    const { baseNames } = options;
+    const isOurs = baseNames
+        ? (entry: string): boolean => baseNames.some((base) => isTemporaryFileOf(base, entry))
+        : (entry: string): boolean => TEMPORARY_FILE.test(entry);
+    for (const name of names.filter(isOurs)) {
         const target = path.join(directory, name);
         try {
             const stats = await fs.promises.lstat(target);

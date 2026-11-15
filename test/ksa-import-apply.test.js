@@ -130,3 +130,9 @@ test('KSA custom names: a legacy map is kept and converted, the user name still 
         assert.equal(byId.output_1, 'Luce Sala Panel');
     }
 });
+
+test('KSA custom names: rows that are not objects are dropped, never rewritten in an altered form', () => {
+    const { mergeCustomNames } = require('../dist/platform/custom-names-config.js');
+    const merged = mergeCustomNames([null, 'abc', 5, ['x'], { deviceId: 'light_1', name: 'Mia' }], { zones: { 3: 'Zona Panel' } });
+    assert.deepEqual(merged, [{ deviceId: 'light_1', name: 'Mia' }, { deviceId: 'zone_3', name: 'Zona Panel' }]);
+});

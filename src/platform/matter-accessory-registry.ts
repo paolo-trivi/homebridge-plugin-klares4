@@ -10,6 +10,7 @@ import { MatterFallbackStore } from './matter-fallback-store';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { MatterPruneTracker } from './matter-prune-tracker';
 import { MatterNameService } from './matter-name-service';
+import { adoptCachedState } from '../device-observation';
 import { finalizeMatterNameMap } from './matter-name-finalizer';
 import { MatterTopologyCoordinator } from './matter-topology-coordinator';
 import { fmtErr, MatterRegistrationFlow } from './matter-registration-flow';
@@ -97,7 +98,10 @@ export class MatterAccessoryRegistry {
         this.cachedLabels.set(accessory.UUID, { displayName: accessory.displayName, deviceTypeName: accessory.deviceType?.name });
         this.topologyCoordinator.remember(accessory);
         const device = accessory.context?.device as KseniaDevice | undefined;
-        if (device?.id && device.type) this.cachedDevices.set(accessory.UUID, device);
+        if (device?.id && device.type) {
+            adoptCachedState(accessory.context, device);
+            this.cachedDevices.set(accessory.UUID, device);
+        }
         this.log.debug(`[Matter] Cached accessory: ${accessory.displayName} (${accessory.UUID})`);
     }
 
