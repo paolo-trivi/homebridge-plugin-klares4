@@ -226,7 +226,8 @@ test('npmRegistry reads versions, dist-tags, deprecation and provenance from the
     // An attestation URL outside the registry is not followed.
     assert.deepEqual(await reg.release('2.2.0-rc.1'), { deprecated: 'old', provenance: null });
     assert.equal(await reg.release('9.9.9'), null);
-    assert.ok(!calls.includes('https://evil.example/att'));
+    // Every request went to the registry host: nothing else was fetched.
+    assert.deepEqual(calls.filter((url) => new URL(url).hostname !== 'registry.npmjs.org'), []);
 
     const unknown = await npmRegistry('not-published', fetchImpl);
     assert.deepEqual([unknown.versions, unknown.distTags], [[], {}]);
