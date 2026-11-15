@@ -7,7 +7,7 @@ The bridge publishes the state of every exposed device, publishes its own availa
 | Key | Notes |
 |---|---|
 | `mqtt.enabled` | Turns the bridge on |
-| `mqtt.commands` | Default `true`. `false`: the bridge never subscribes to the `.../set` topics, so nothing published on the broker can operate a device |
+| `mqtt.commands` | Default `true`. `false`: the bridge never subscribes to the `.../set` topics, so nothing published on the broker can operate a device. A value that is neither `true` nor `false` (`"false"` typed by hand, for example) also turns commands off, with a warning at startup |
 | `mqtt.broker` | URL with a scheme: `mqtt://`, `mqtts://`, `ws://`, `wss://` (`tcp://`, `tls://`, `ssl://` also work). A URL that mqtt.js would read as another host (no scheme, `mqtt:/host`, an unescaped `/` or `#` in the password) is refused with an error instead of connecting somewhere else |
 | `mqtt.port` | Overrides the port of the URL. Empty: the URL's port, or the protocol default (1883, 8883) |
 | `mqtt.username`, `mqtt.password` | Preferred to credentials in the URL, which take precedence when both are set. A password with `/`, `#`, `?` or `@` must be percent-encoded in the URL |
@@ -44,10 +44,10 @@ Every payload carries `id`, `name`, `type` and an ISO `timestamp`, plus:
 | cover | `position` (0-100), `state` (`opening`, `closing`, `stopped`) |
 | thermostat | `currentTemperature`, `targetTemperature`, `mode` (`off`, `heat`, `cool`, `auto`), `humidity` when known |
 | sensor | `sensorType`, `value`, `unit` |
-| zone | `open`, `armed`, `fault`, `bypassed` |
+| zone | `open`, `armed`, `fault`, `bypassed`, `tampered` |
 | scenario | `active` |
 
-A gate publishes the generic shape `{"active": false}`, which is not a real state. The tamper flag of a zone is shown on HomeKit only.
+A gate publishes the generic shape `{"active": false}`, which is not a real state. `tampered` (added in 2.3.0, after `bypassed`; every earlier field keeps its name, value and order) is the tamper flag of the zone; like the other zone flags it is `false` until the panel reports it.
 
 ## Availability: `<prefix>/status`
 
@@ -114,4 +114,4 @@ topic read homebridge/klares4/#
 
 With commands on, add `topic read` for `homebridge/klares4/+/+/set` and `homebridge/klares4/+/+/+/set` for the plugin's user, and `topic write homebridge/klares4/<room>/+/+/set` for each client that may command that room.
 
-**The plugin's user must be able to write `<prefix>/status`.** Mosquitto 2 may refuse a CONNECT whose last-will topic the user cannot write (`Not authorized`). The bridge then reconnects without the last will, logs one warning that explains the ACL line to add, and keeps publishing state; only the crash detection is lost.
+**The plugin's user must be able to write `<prefix>/status`.** Mosquitto 2 may refuse a CONNECT whose last-will topic the user cannot write (`Not authorized`). When a CONNECT with the last will is refused as `Not authorized` and the CONNECT sent right after without it is accepted, the bridge runs without the last will, logs one warning that says exactly that, and keeps publishing state; only the crash detection is lost. The last will is tried again every 30 minutes, so it comes back without a restart once the ACL allows it. If the CONNECT without the last will is refused too, the cause is the credentials and the last will stays in place.

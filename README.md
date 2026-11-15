@@ -59,6 +59,7 @@ If you already run Home Assistant, both options are valid; this plugin is the si
 - **Node.js 22.12 or later.** Node 22, 24 and 26 are tested in CI.
 - **Homebridge**: the package accepts `^1.6.0 || ^2.0.0-beta.0`. Homebridge **2.5.x** is the verified version (contract tests against the real Homebridge Matter stack, and a real installation); **2.4.x** is covered by a CI contract job; **1.x is not tested** and may work for HomeKit only. **Matter requires Homebridge 2.x.**
 - **HomeKit limit**: one Homebridge bridge accepts at most **149 accessories**. Beyond that the plugin logs one warning (`HomeKit (HAP) limit reached`) and the other devices stay available on Matter and MQTT. Use the exclusion lists or a child bridge to stay under the limit.
+- **One panel per Homebridge instance**: device IDs (`light_1`, `zone_3`) are not namespaced per panel, so two `Lares4Complete` blocks in the same Homebridge instance would collide on accessory identities, on the plugin's files in the storage folder and on MQTT topics. For a second panel run a second Homebridge instance with its own storage folder and a different `mqtt.topicPrefix`.
 
 ### Installation
 
@@ -176,7 +177,7 @@ How values are read:
 | `ksaImport.applyRoomMapping` | boolean | true | — | Use the panel's room names for MQTT topics when you defined no rooms; never turns `roomMapping` on |
 | `ksaImport.applyCustomNames` | boolean | false | — | Add the panel's names for devices you have not named yourself |
 | `mqtt.enabled` | boolean | false | — | Turn the MQTT bridge on |
-| `mqtt.commands` | boolean | true | — | Accept commands over MQTT. Off: state and availability only, no `.../set` subscription. See [MQTT security](#mqtt-security) |
+| `mqtt.commands` | boolean | true | — | Accept commands over MQTT. Off: state and availability only, no `.../set` subscription. A value that is neither `true` nor `false` also turns commands off. See [MQTT security](#mqtt-security) |
 | `mqtt.broker` | string | — | — | Broker URL with its scheme (`mqtt://host:1883`, `mqtts://host:8883`) |
 | `mqtt.port` | integer | — | 1..65535 | Overrides the port in the broker URL. Empty: the URL's port, or the protocol default (1883 for `mqtt://`, 8883 for `mqtts://`) |
 | `mqtt.username` | string | — | — | Broker user (optional) |
@@ -254,8 +255,8 @@ Irrigation (`IRR`), indicators and status LEDs (`GEN`, mode `S`), sirens (`GEN`,
 
 ### Thermostats
 
-- **Partial writes.** The plugin writes only what a command changes, like the official Ksenia web app. A mode change sends only the mode (and the season for Heat/Cool). A temperature change re-reads that thermostat's configuration right before writing and sends only the active season's block with the new setpoint. Nothing else is written back: weekly programs, comfort temperatures and changes made on the keypad survive.
-- **A setpoint never changes the mode.** With the thermostat Off it stays Off; in Auto the program stays active. The new temperature is stored as the manual setpoint of the active season.
+- **Partial writes.** The plugin writes only what a command changes, like the official Ksenia web app. A mode change sends only the mode (and the season, only when Heat or Cool needs the other one). A temperature change re-reads that thermostat's configuration right before writing and sends only the active season's block with the new setpoint. Nothing else is written back: weekly programs, comfort temperatures and changes made on the keypad survive.
+- **A setpoint never changes the mode.** With the thermostat Off it stays Off; in Auto the program stays active. The new temperature is stored as the manual setpoint of the active season; in Auto or Off, HomeKit, Matter and MQTT then show again the target the panel is really using.
 - **Mode and temperature together** (a HomeKit scene "Heat at 21 °C") become one panel write, applied in the right order.
 - **Routing is fail-closed.** A write goes to the panel thermostat found, in this order, in `domusThermostat.manualCommandPairs`, in the panel's thermostat programs, or in a verified guess. If none can be established, or the configuration cannot be read, the write is refused with an error and nothing is sent. The error shows the exact `manualCommandPairs` line to add.
 - **The role of the output.** One Ksenia program can have a heating output and a cooling output. On Matter they appear as two thermostats, heating-only and cooling-only; each shows Off out of its season and refuses commands there. On HomeKit nothing changes in this release.
@@ -270,9 +271,9 @@ Details: [`docs/en/domus-thermostats.md`](docs/en/domus-thermostats.md).
 With **Homebridge 2.x** every accessory of this plugin is also exposed over Matter: the same lights, covers, thermostats and sensors that appear in Apple Home work in **Alexa**, **Google Home** and **SmartThings**, over the local network. No extra configuration is needed: turn on Matter in Homebridge and pair the bridge with your ecosystem.
 
 - **Native Thermostats.** Thermostats register as real Matter Thermostats with only the capabilities of the output (heating-only has no cooling and no Auto). If a Homebridge version refuses that, the plugin retries once with the payload of earlier versions before falling back to a read-only temperature sensor. A thermostat an earlier version saved as a temperature sensor gets one automatic attempt at the first start; `matterRecoveryRequests` allows one more.
-- **Identity.** A rename (a name changed on the panel, `matterOverrides`, a collision resolved at the end of a sync) changes the name on the live accessory: it keeps its identity, so controllers keep rooms, favourites and automations. A light that turns out to be a dimmer is replaced once and keeps its identity. **Thermostat ↔ temperature sensor changes the identity on purpose** (a controller must not keep scenes that set a temperature on a read-only sensor): your controller shows it as a new accessory.
+- **Identity.** A rename (a name changed on the panel, `matterOverrides`, a collision resolved at the end of a sync) changes the name on the live accessory: it keeps its identity, so controllers keep rooms, favourites and automations. A light that turns out to be a dimmer is replaced once and keeps its identity. **Thermostat ↔ temperature sensor changes the identity on purpose** (a controller must not keep scenes that set a temperature on a read-only sensor): your controller shows it as a new accessory. A sensor whose recovery fails comes back as the same sensor, with its identity.
 - **Removal.** A device deleted on the panel leaves Matter after three complete synchronizations, restarts included, without restarting Homebridge. The last device of a family (the only scenario, for example) is not removed automatically: use the matching `exclude*` list. The panel's own temperature probes are never removed.
-- **Reachability.** When the panel is unreachable every Matter accessory is marked "not responding" after 15 seconds, including those Homebridge restored from its cache.
+- **Reachability.** When the panel is unreachable every Matter accessory is marked "not responding" after 15 seconds, including those Homebridge restored from its cache. They return when a synchronization with the panel has completed, not at the login.
 - **Names.** Names come from the panel and are the source of truth; the plugin cleans them and resolves collisions deterministically (see [Voice assistants](#voice-assistants-names-rooms-and-aliases)).
 
 Troubleshooting and details: [`docs/en/matter.md`](docs/en/matter.md).
@@ -376,7 +377,7 @@ user living_room_panel
 topic write homebridge/klares4/living_room/+/+/set
 ```
 
-**The ACL must let the plugin's user write `<prefix>/status`.** Mosquitto 2 may refuse a CONNECT whose last-will topic the user cannot write: the bridge then reconnects without the last will, logs one warning that names the ACL line to add, and keeps publishing state (only the crash detection is lost).
+**The ACL must let the plugin's user write `<prefix>/status`.** Mosquitto 2 may refuse a CONNECT whose last-will topic the user cannot write: when that CONNECT is refused and the one sent right after without the last will is accepted, the bridge runs without it, says so in one warning, keeps publishing state (only the crash detection is lost) and tries the last will again every 30 minutes.
 
 #### Topics
 
@@ -422,7 +423,7 @@ Behavior worth knowing: nothing is queued while the broker is unreachable (the l
 
 - **No telemetry.** The plugin sends nothing to any third party. Its only connections are to your panel and, if you enable it, to your MQTT broker.
 - **The PIN lives in `config.json`** in clear text. It is never written to the log, to MQTT or to the debug file.
-- **The debug file is confidential.** `generateDebugFile: true` records the raw WebSocket traffic at the next start (for `debugCaptureDurationMs`) and writes `klares4-debug-<timestamp>.json` in the Homebridge storage folder, readable by its owner only (`0600`); the flag switches itself off. The file contains the names of your devices and the state of your alarm system. PIN, account data, panel serial numbers and the home position (including sunrise and sunset times) are masked. **Do not attach it to a public issue: send it privately.** It holds at most 20,000 frames and 8 MiB; if frames were left out, `captureInfo.droppedMessages` says how many.
+- **The debug file is confidential.** `generateDebugFile: true` records the raw WebSocket traffic at the next start (for `debugCaptureDurationMs`) and writes `klares4-debug-<timestamp>.json` in the Homebridge storage folder, readable by its owner only (`0600`); the flag switches itself off. The file contains the names of your devices and the state of your alarm system. PIN, account data, panel serial numbers and the home position (including sunrise and sunset times) are masked. **Do not attach it to a public issue: send it privately.** It holds at most 5,000 frames and 2 MiB of traffic; if frames were left out, `captureInfo.droppedMessages` says how many.
 - Files the plugin creates for the first time are private (`0600`); existing files keep their permissions.
 
 Details: [`docs/en/privacy-and-debug-file.md`](docs/en/privacy-and-debug-file.md) and [`SECURITY.md`](SECURITY.md).
@@ -434,7 +435,7 @@ Details: [`docs/en/privacy-and-debug-file.md`](docs/en/privacy-and-debug-file.md
 1. Check the IP address and the PIN (a user enabled for the WebSocket API).
 2. Check that the panel accepts WebSocket connections on 443 (HTTPS) or 80 (HTTP). With `https: false` leave `port` empty or set it to 80.
 3. If the log mentions a self-signed certificate or `unsafe legacy renegotiation disabled`, turn on `allowInsecureTls` (trusted LAN only) and restart Homebridge.
-4. After 3 failed logins in a row the plugin tries again once an hour (and logs what to check). Fix the PIN and restart Homebridge to reconnect at once.
+4. After the panel refuses the login 3 times in a row the plugin tries again once an hour (and logs what to check). Fix the PIN and restart Homebridge to reconnect at once. Logins the panel does not answer (a restart, too many open sessions, the network) never trigger this pace: they are retried with the normal backoff.
 
 #### Startup messages
 
@@ -516,6 +517,7 @@ Se usi già Home Assistant, entrambe le opzioni sono valide; questo plugin è la
 - **Node.js 22.12 o successivo.** Node 22, 24 e 26 sono testati in CI.
 - **Homebridge**: il pacchetto accetta `^1.6.0 || ^2.0.0-beta.0`. Homebridge **2.5.x** è la versione verificata (test di contratto sullo stack Matter reale di Homebridge e un'installazione reale); **2.4.x** è coperta da un job di contratto in CI; **1.x non è testato** e può funzionare solo per HomeKit. **Matter richiede Homebridge 2.x.**
 - **Limite HomeKit**: un bridge Homebridge accetta al massimo **149 accessori**. Oltre il limite il plugin registra un solo avviso (`HomeKit (HAP) limit reached`) e gli altri dispositivi restano disponibili su Matter e MQTT. Usa le liste di esclusione o un child bridge per restare sotto il limite.
+- **Una centrale per istanza di Homebridge**: gli ID dei dispositivi (`light_1`, `zone_3`) non hanno un namespace per centrale, quindi due blocchi `Lares4Complete` nella stessa istanza di Homebridge entrerebbero in collisione sulle identità degli accessori, sui file del plugin nella cartella storage e sui topic MQTT. Per una seconda centrale usa una seconda istanza di Homebridge con la propria cartella storage e un `mqtt.topicPrefix` diverso.
 
 ### Installazione
 
@@ -633,7 +635,7 @@ Come vengono letti i valori:
 | `ksaImport.applyRoomMapping` | boolean | true | — | Usa i nomi delle stanze della centrale per i topic MQTT quando non hai definito stanze; non attiva mai `roomMapping` |
 | `ksaImport.applyCustomNames` | boolean | false | — | Aggiunge i nomi della centrale per i dispositivi che non hai nominato tu |
 | `mqtt.enabled` | boolean | false | — | Attiva il bridge MQTT |
-| `mqtt.commands` | boolean | true | — | Accetta comandi via MQTT. Disattivato: solo stato e disponibilità, nessuna iscrizione ai topic `.../set`. Vedi [Sicurezza MQTT](#sicurezza-mqtt) |
+| `mqtt.commands` | boolean | true | — | Accetta comandi via MQTT. Disattivato: solo stato e disponibilità, nessuna iscrizione ai topic `.../set`. Anche un valore che non è né `true` né `false` disattiva i comandi. Vedi [Sicurezza MQTT](#sicurezza-mqtt) |
 | `mqtt.broker` | string | — | — | URL del broker con il suo schema (`mqtt://host:1883`, `mqtts://host:8883`) |
 | `mqtt.port` | integer | — | 1..65535 | Sostituisce la porta nell'URL del broker. Vuota: la porta dell'URL, o quella predefinita del protocollo (1883 per `mqtt://`, 8883 per `mqtts://`) |
 | `mqtt.username` | string | — | — | Utente del broker (facoltativo) |
@@ -711,8 +713,8 @@ Irrigazione (`IRR`), indicatori e LED di stato (`GEN`, modo `S`), sirene (`GEN`,
 
 ### Termostati
 
-- **Scritture parziali.** Il plugin scrive solo ciò che un comando cambia, come l'app web ufficiale Ksenia. Un cambio di modo invia solo il modo (e la stagione per Heat/Cool). Un cambio di temperatura rilegge la configurazione di quel termostato subito prima di scrivere e invia solo il blocco della stagione attiva con il nuovo setpoint. Nient'altro viene riscritto: programmi settimanali, temperature di comfort e modifiche fatte dalla tastiera sopravvivono.
-- **Un setpoint non cambia mai il modo.** Con il termostato Off resta Off; in Auto il programma resta attivo. La nuova temperatura viene salvata come setpoint manuale della stagione attiva.
+- **Scritture parziali.** Il plugin scrive solo ciò che un comando cambia, come l'app web ufficiale Ksenia. Un cambio di modo invia solo il modo (e la stagione, solo quando Heat o Cool richiede l'altra). Un cambio di temperatura rilegge la configurazione di quel termostato subito prima di scrivere e invia solo il blocco della stagione attiva con il nuovo setpoint. Nient'altro viene riscritto: programmi settimanali, temperature di comfort e modifiche fatte dalla tastiera sopravvivono.
+- **Un setpoint non cambia mai il modo.** Con il termostato Off resta Off; in Auto il programma resta attivo. La nuova temperatura viene salvata come setpoint manuale della stagione attiva; in Auto o Off, HomeKit, Matter e MQTT mostrano poi di nuovo il target che la centrale sta davvero usando.
 - **Modo e temperatura insieme** (una scena HomeKit "Riscalda a 21 °C") diventano una sola scrittura sulla centrale, applicata nell'ordine giusto.
 - **L'instradamento è fail-closed.** Una scrittura va al termostato della centrale trovato, in quest'ordine, in `domusThermostat.manualCommandPairs`, nei programmi termostato della centrale, o in una stima verificata. Se non si riesce a stabilirlo, o la configurazione non è leggibile, la scrittura viene rifiutata con un errore e non viene inviato nulla. L'errore mostra la riga esatta di `manualCommandPairs` da aggiungere.
 - **Il ruolo dell'uscita.** Un programma Ksenia può avere un'uscita di riscaldamento e una di raffrescamento. Su Matter compaiono come due termostati, solo riscaldamento e solo raffrescamento; ciascuno mostra Off fuori dalla sua stagione e rifiuta i comandi in quel periodo. Su HomeKit in questa versione non cambia nulla.
@@ -727,9 +729,9 @@ Dettagli: [`docs/it/termostati-domus.md`](docs/it/termostati-domus.md).
 Con **Homebridge 2.x** ogni accessorio di questo plugin è esposto anche via Matter: le stesse luci, tapparelle, termostati e sensori che compaiono in Apple Casa funzionano in **Alexa**, **Google Home** e **SmartThings**, sulla rete locale. Non serve nessuna configurazione aggiuntiva: attiva Matter in Homebridge e abbina il bridge al tuo ecosistema.
 
 - **Thermostat nativi.** I termostati si registrano come veri Thermostat Matter con le sole capacità dell'uscita (solo riscaldamento significa niente raffrescamento e niente Auto). Se una versione di Homebridge lo rifiuta, il plugin riprova una volta con il payload delle versioni precedenti prima di ripiegare su un sensore di temperatura in sola lettura. Un termostato che una versione precedente aveva salvato come sensore di temperatura ha un tentativo automatico al primo avvio; `matterRecoveryRequests` ne consente un altro.
-- **Identità.** Una rinomina (un nome cambiato sulla centrale, `matterOverrides`, una collisione risolta a fine sincronizzazione) cambia il nome sull'accessorio vivo: mantiene l'identità, quindi i controller conservano stanze, preferiti e automazioni. Una luce che si scopre essere un dimmer viene sostituita una volta e mantiene l'identità. **Il passaggio Thermostat ↔ sensore di temperatura cambia l'identità di proposito** (un controller non deve conservare scene che impostano una temperatura su un sensore in sola lettura): il tuo controller lo mostra come accessorio nuovo.
+- **Identità.** Una rinomina (un nome cambiato sulla centrale, `matterOverrides`, una collisione risolta a fine sincronizzazione) cambia il nome sull'accessorio vivo: mantiene l'identità, quindi i controller conservano stanze, preferiti e automazioni. Una luce che si scopre essere un dimmer viene sostituita una volta e mantiene l'identità. **Il passaggio Thermostat ↔ sensore di temperatura cambia l'identità di proposito** (un controller non deve conservare scene che impostano una temperatura su un sensore in sola lettura): il tuo controller lo mostra come accessorio nuovo. Un sensore il cui recupero fallisce torna come lo stesso sensore, con la sua identità.
 - **Rimozione.** Un dispositivo cancellato sulla centrale lascia Matter dopo tre sincronizzazioni complete, riavvii compresi, senza riavviare Homebridge. L'ultimo dispositivo di una famiglia (l'unico scenario, per esempio) non viene rimosso automaticamente: usa la lista `exclude*` corrispondente. Le sonde di temperatura della centrale non vengono mai rimosse.
-- **Raggiungibilità.** Quando la centrale non è raggiungibile ogni accessorio Matter viene segnato "non risponde" dopo 15 secondi, compresi quelli che Homebridge ha ripristinato dalla sua cache.
+- **Raggiungibilità.** Quando la centrale non è raggiungibile ogni accessorio Matter viene segnato "non risponde" dopo 15 secondi, compresi quelli che Homebridge ha ripristinato dalla sua cache. Tornano quando una sincronizzazione con la centrale è stata completata, non al login.
 - **Nomi.** I nomi vengono dalla centrale e sono la fonte di verità; il plugin li ripulisce e risolve le collisioni in modo deterministico (vedi [Assistenti vocali](#assistenti-vocali-nomi-stanze-e-alias)).
 
 Risoluzione problemi e dettagli: [`docs/it/matter.md`](docs/it/matter.md).
@@ -833,7 +835,7 @@ user living_room_panel
 topic write homebridge/klares4/living_room/+/+/set
 ```
 
-**L'ACL deve consentire all'utente del plugin di scrivere `<prefix>/status`.** Mosquitto 2 può rifiutare una CONNECT il cui topic di last will l'utente non può scrivere: il bridge allora si riconnette senza last will, registra un avviso che indica la riga di ACL da aggiungere e continua a pubblicare lo stato (si perde solo il rilevamento di un crash).
+**L'ACL deve consentire all'utente del plugin di scrivere `<prefix>/status`.** Mosquitto 2 può rifiutare una CONNECT il cui topic di last will l'utente non può scrivere: quando quella CONNECT viene rifiutata e quella inviata subito dopo senza last will viene accettata, il bridge funziona senza, lo dice in un avviso, continua a pubblicare lo stato (si perde solo il rilevamento di un crash) e riprova il last will ogni 30 minuti.
 
 #### Topic
 
@@ -879,7 +881,7 @@ Da sapere: nulla viene accodato mentre il broker non è raggiungibile (l'ultimo 
 
 - **Nessuna telemetria.** Il plugin non invia nulla a terzi. Le sue uniche connessioni sono verso la tua centrale e, se lo attivi, verso il tuo broker MQTT.
 - **Il PIN sta in `config.json`** in chiaro. Non viene mai scritto nel log, in MQTT né nel file di debug.
-- **Il file di debug è riservato.** `generateDebugFile: true` registra il traffico WebSocket grezzo al prossimo avvio (per `debugCaptureDurationMs`) e scrive `klares4-debug-<timestamp>.json` nella cartella storage di Homebridge, leggibile solo dal proprietario (`0600`); il flag si disattiva da solo. Il file contiene i nomi dei tuoi dispositivi e lo stato del tuo impianto d'allarme. PIN, dati dell'account, numeri di serie della centrale e posizione di casa (compresi gli orari di alba e tramonto) sono mascherati. **Non allegarlo a una issue pubblica: invialo in privato.** Contiene al massimo 20.000 frame e 8 MiB; se dei frame sono stati lasciati fuori, `captureInfo.droppedMessages` dice quanti.
+- **Il file di debug è riservato.** `generateDebugFile: true` registra il traffico WebSocket grezzo al prossimo avvio (per `debugCaptureDurationMs`) e scrive `klares4-debug-<timestamp>.json` nella cartella storage di Homebridge, leggibile solo dal proprietario (`0600`); il flag si disattiva da solo. Il file contiene i nomi dei tuoi dispositivi e lo stato del tuo impianto d'allarme. PIN, dati dell'account, numeri di serie della centrale e posizione di casa (compresi gli orari di alba e tramonto) sono mascherati. **Non allegarlo a una issue pubblica: invialo in privato.** Contiene al massimo 5.000 frame e 2 MiB di traffico; se dei frame sono stati lasciati fuori, `captureInfo.droppedMessages` dice quanti.
 - I file che il plugin crea per la prima volta sono privati (`0600`); quelli esistenti mantengono i loro permessi.
 
 Dettagli: [`docs/it/privacy-e-file-di-debug.md`](docs/it/privacy-e-file-di-debug.md) e [`SECURITY.md`](SECURITY.md).
@@ -891,7 +893,7 @@ Dettagli: [`docs/it/privacy-e-file-di-debug.md`](docs/it/privacy-e-file-di-debug
 1. Controlla l'indirizzo IP e il PIN (un utente abilitato all'API WebSocket).
 2. Controlla che la centrale accetti connessioni WebSocket su 443 (HTTPS) o 80 (HTTP). Con `https: false` lascia `port` vuota o impostala a 80.
 3. Se il log parla di certificato autofirmato o di `unsafe legacy renegotiation disabled`, attiva `allowInsecureTls` (solo LAN fidata) e riavvia Homebridge.
-4. Dopo 3 login falliti di fila il plugin riprova una volta all'ora (e registra cosa controllare). Correggi il PIN e riavvia Homebridge per riconnetterti subito.
+4. Dopo 3 login rifiutati di fila dalla centrale il plugin riprova una volta all'ora (e registra cosa controllare). Correggi il PIN e riavvia Homebridge per riconnetterti subito. I login a cui la centrale non risponde (un riavvio, troppe sessioni aperte, la rete) non fanno mai scattare questo ritmo: vengono riprovati con il backoff normale.
 
 #### Messaggi all'avvio
 

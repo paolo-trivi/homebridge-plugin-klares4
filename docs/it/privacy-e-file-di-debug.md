@@ -23,15 +23,18 @@
 
 Mascherato per chiave, a qualsiasi profondità, nei frame in entrambe le direzioni, negli snapshot dei dispositivi e nelle sezioni derivate da essi, qualunque sia il tipo di valore (un frame che non può essere analizzato viene mascherato come testo); il valore mascherato è scritto `***MASKED***`:
 
-- credenziali: qualsiasi chiave con un segmento `pin`, `pwd`, `passwd`, `password`, `passcode`, `secret`, `token`, e la chiave `code`;
-- posizione: `POSITION`, `LAT`, `LONG`, `LON`, `LNG`, `LATITUDE`, `LONGITUDE`, e gli orari di alba e tramonto (`DAWN`, `DUSK`), che insieme alla data rivelano latitudine e longitudine;
-- identità: la descrizione e l'ID dell'account (`DESCRIPTION`, `ID_ACCOUNT`), i numeri di serie (`SN`, `SERIAL`) e l'identificativo della centrale che i frame provenienti dalla centrale portano in `SENDER`.
+- credenziali, per famiglia e in qualunque grafia (`PIN`, `USER_PIN`, `userPin`, `PINCODE`, `PIN1`): `pin`, `pwd`, `passwd`, `password`, `passcode`, `pass`, `secret`, `token`, e `code` quando è da solo o segue una parola come `pin`, `user`, `access` o `security` (`ERROR_CODE` e `RESULT_CODE` restano leggibili). Una chiave che contiene soltanto quelle lettere (`PING`, `PASSIVE`) non viene mascherata. Il log usa la stessa regola;
+- identificativi, per famiglia: `serial`, `sn`, `mac`, `imei`, `iccid`, `email` (`SERIAL_NUMBER`, `macAddress`, ...);
+- posizione: `LAT`, `LONG`, `LON`, `LNG`, `LATITUDE`, `LONGITUDE`, `POSITION` nei frame, e gli orari di alba e tramonto (`DAWN`, `DUSK`), che insieme alla data rivelano latitudine e longitudine. L'apertura di una tapparella negli snapshot dei dispositivi (`status.position`, un semplice numero) viene conservata;
+- identità: la descrizione e l'ID dell'account (`DESCRIPTION`, `ID_ACCOUNT`) e l'identificativo della centrale che i frame provenienti dalla centrale portano in `SENDER`.
 
 **Non mascherato, di proposito:** i nomi di zone, uscite, scenari e dispositivi bus, i campi di stato, `ID_LOGIN`, `CRC_16`, `TIMESTAMP` e le stringhe del firmware: servono per diagnosticare un problema.
 
 ### Limiti
 
-La cattura tiene in memoria al massimo 20.000 frame e 8 MiB di traffico. I frame successivi vengono contati (`captureInfo.droppedMessages` nel file), viene registrato un avviso (`[DEBUG] Capture buffer full ...`) e la cattura termina comunque in tempo.
+La cattura tiene in memoria al massimo 5.000 frame e 2 MiB di traffico (una cattura reale di 15 minuti pesa circa 0,3 MB). I frame successivi vengono contati (`captureInfo.droppedMessages` nel file), viene registrato un avviso (`[DEBUG] Capture buffer full ...`) e la cattura termina comunque in tempo.
+
+Ogni frame viene scritto una sola volta, come testo JSON in `rawMessages[].rawData` (le versioni precedenti scrivevano anche una copia `parsed`: analizza `rawData`). Un frame mascherato non corrisponde più al proprio `CRC_16`. Uno snapshot dei dispositivi preso durante la cattura viene salvato solo se i dispositivi sono cambiati rispetto al precedente; il primo e l'ultimo vengono sempre salvati, al massimo 60 in mezzo.
 
 ### Righe di log
 

@@ -25,15 +25,16 @@ Every frame, in both directions, is a JSON object:
 | `TIMESTAMP` | Unix seconds, as text |
 | `CRC_16` | CRC-16 of the frame (polynomial 0x1021, seed 0xFFFF, as in `websocket-client/crc16.ts`) over the UTF-8 bytes up to and including the `"CRC_16"` key, written as `0x` and four hex digits. The plugin's algorithm matched every inbound frame of the real captures it was checked against |
 
-**Inbound frames are checked before anything reads them.** A frame is dropped and logged (never quoted, since it may carry names of the site) when it is not valid JSON, is not an object, has no `CMD`, has a `PAYLOAD` that is not an object, or carries a `CRC_16` that does not match. A frame with no `CRC_16` is accepted. The log counts the dropped frames of the session.
+**Inbound frames are checked before anything reads them.** A frame is dropped and logged (never quoted, since it may carry names of the site) when it is not valid JSON, is not an object, has no `CMD`, has a `PAYLOAD` that is not an object, or is plain ASCII and carries a `CRC_16` that does not match (certain corruption). A frame with non-ASCII text (an accented name, for example) whose `CRC_16` differs is accepted and reported once, with a request to open an issue: how the panel encodes those characters for the CRC has not been verified on a real panel yet. A frame with no `CRC_16` is accepted. The log counts the dropped frames of the session.
 
 `RESULT` in answers is read the same way everywhere (case and spaces ignored, so `ok` is accepted); a `RESULT` that is not text is a refusal.
 
 ## Login and the Login Guard
 
 - Login command: `CMD=LOGIN`, `PAYLOAD_TYPE=UNKNOWN`, with `PIN`. On an accepted `LOGIN_RES` the plugin stores `ID_LOGIN` and starts the synchronization. The `LOGIN` frame is logged only at debug level, masked, and never at every reconnection at normal level.
-- **What counts as a failed login:** an explicit refusal (with or without the ID of the request), an answer without a session ID, no answer before the login timeout, or the panel closing the socket before the answer. Failures before the frame is sent do not count.
-- **After 3 failed logins in a row** the plugin does not stop for good: it slows down to **one attempt per hour**, logs at every failed attempt what to check (the PIN, and that the user is enabled on the panel), and resets on the first accepted login. Restarting Homebridge reconnects at once. The slowdown protects against panels that lock a user out after wrong codes.
+- **What counts as a refused login:** an explicit refusal by the panel, with or without the ID of the request. Only refusals count towards the guard.
+- **After 3 refused logins in a row** the plugin does not stop for good: it slows down to **one attempt per hour**, logs at every refused attempt what to check (the PIN, and that the user is enabled on the panel), and resets on the first accepted login. Restarting Homebridge reconnects at once. The slowdown protects against panels that lock a user out after wrong codes.
+- **A login without a usable answer** (no answer before the login timeout, the panel closing the socket first, an accepted answer without a session ID, a network error) says nothing about the PIN: it stays in the normal reconnection backoff, at most 60 seconds between attempts. After 5 of them in a row one warning names the likely causes (the panel is restarting, busy, or at its limit of open sessions).
 
 ## Synchronization
 
@@ -51,9 +52,10 @@ Each login is one synchronization. The plugin sends, in order:
 The synchronization is **complete only when the panel accepted the realtime registration**.
 
 - A refused `ZONES` or `MULTI_TYPES` read, or a refused realtime registration, fails the synchronization: the refusal is logged as a warning, the session is closed and the plugin reconnects with backoff.
+- If the panel refuses the same discovery read (`ZONES` or `MULTI_TYPES`) in 3 synchronizations in a row, the synchronization completes without it (degraded): the other devices work, the devices of the refused read are neither discovered nor removed, and a warning names the read. A refused realtime registration always reconnects: without it no status change would ever arrive.
 - A refused status read or thermostat read is logged and the synchronization continues: the realtime registration carries the initial status again. The `CMD_NOT_AVAILABLE` answer to `PRG_THERMOSTATS` that panels give at every login is expected and not reported.
 - A panel that never answers the realtime registration is reconnected after 60 seconds.
-- A device that a complete discovery section no longer lists is dropped from the client's live state (so a deleted or re-categorised device cannot keep receiving the status of its successor). The platform removes accessories only after three complete synchronizations.
+- A device that a complete discovery section no longer lists is dropped from the client's live state (so a deleted or re-categorised device cannot keep receiving the status of its successor). A read in which one element could not be processed drops nothing. The platform removes accessories only after three complete synchronizations.
 - Statuses received for devices that were never discovered are kept for at most 512 IDs.
 
 ## Reconnection

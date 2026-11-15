@@ -26,13 +26,13 @@ Per scrivere su un termostato il plugin ha bisogno del suo ID di configurazione.
 
 1. `domusThermostat.manualCommandPairs` (la tua coppia esplicita, o una scritta dall'import KSA).
 2. Il programma `PRG_THERMOSTATS` della centrale stessa (live, oppure dalla cache KSA).
-3. Un'ipotesi verificata, solo sulle centrali senza programmi termostato e senza una coppia: l'ID del sensore DOMUS, poi l'ID dell'uscita, accettati solo se la configurazione letta per quell'ID è coerente con quanto il termostato riporta in realtime.
+3. Un'ipotesi verificata, solo sulle centrali senza programmi termostato e senza una coppia: l'ID del sensore DOMUS, poi l'ID dell'uscita, accettati solo se, tra tutte le configurazioni rilette dalla centrale per il controllo, è l'unica che corrisponde a quanto il termostato riporta in realtime, e quello stato realtime non corrisponde a nessun'altra. L'ipotesi viene ricordata per la sessione solo dopo una corrispondenza in modalità manuale con lo stesso setpoint; in Auto o Off, dove la maggior parte dei termostati si somiglia, viene verificata di nuovo a ogni scrittura.
 
 Una scrittura viene **rifiutata con un errore, e non viene inviato nulla**, quando:
 
 - l'ID di una coppia o di un programma non può essere letto dalla centrale (`cfg id X (from ... ) could not be read from the panel; write refused`);
 - l'uscita non è l'uscita di riscaldamento o di raffrescamento di alcun programma su una centrale che ha dei programmi;
-- un'ipotesi non corrisponde a quanto il termostato riporta in realtime, o è ambigua (due termostati esattamente nello stesso stato non si possono distinguere).
+- un'ipotesi non corrisponde a quanto il termostato riporta in realtime, o non è l'unica corrispondenza (due termostati nello stesso stato non si possono distinguere). Su queste centrali, finché più termostati sono in Auto o Off, le scritture vengono rifiutate fino a quando non aggiungi le coppie.
 
 L'errore per un'ipotesi indica la riga esatta di `manualCommandPairs` da aggiungere.
 
@@ -43,13 +43,14 @@ Il plugin invia solo ciò che il comando modifica, nella stessa forma dell'app w
 | Comando | Payload per il termostato (`ID` = ID di configurazione) |
 |---|---|
 | Modalità Off | `{ ID, ACT_MODE: "OFF" }` |
-| Modalità Heat | `{ ID, ACT_MODE: "MAN", ACT_SEA: "WIN" }` |
-| Modalità Cool | `{ ID, ACT_MODE: "MAN", ACT_SEA: "SUM" }` |
+| Modalità Heat | `{ ID, ACT_MODE: "MAN" }`; con `ACT_SEA: "WIN"` solo quando la centrale è in estate |
+| Modalità Cool | `{ ID, ACT_MODE: "MAN" }`; con `ACT_SEA: "SUM"` solo quando la centrale è in inverno |
 | Modalità Auto | `{ ID, ACT_MODE: "AUTO" }` |
 | Setpoint | `{ ID, WIN` oppure `SUM: <intero blocco della stagione, riletto subito prima, con il solo TM modificato> }` |
 | Modalità e setpoint insieme | Un'unica scrittura con entrambe le parti, nell'ordine giusto |
 
-- Un **setpoint** rilegge la configurazione di quel termostato subito prima di scrivere e invia il blocco della stagione attiva con la sola temperatura target (`TM`) modificata. Non invia mai una modalità: con il termostato Off resta Off, in Auto il programma resta attivo.
+- Un **setpoint** rilegge la configurazione di quel termostato subito prima di scrivere e invia il blocco della stagione attiva con la sola temperatura target (`TM`) modificata. Non invia mai una modalità: con il termostato Off resta Off, in Auto il programma resta attivo. In Auto o Off la nuova temperatura viene salvata come setpoint manuale (usato quando il termostato torna in manuale); HomeKit, Matter e MQTT mostrano poi di nuovo il target che la centrale sta davvero usando, e il log riporta `stored as the manual setpoint`.
+- Una **modalità** nella stagione in cui la centrale si trova già viene inviata esattamente come la invia l'app ufficiale. `ACT_SEA` viene aggiunto solo quando Heat o Cool richiede l'altra stagione: nessuna cattura dell'app ufficiale contiene una scrittura di questo tipo, quindi verifica il risultato sulla tua centrale la prima volta che la usi.
 - La **stagione** deriva dal valore realtime `ACT_SEA`, altrimenti dalla lettura della configurazione; vince l'osservazione più recente e una scrittura confermata vale solo finché la centrale non mostra altro. Un "cool" che la centrale non ha mai confermato non sposta i setpoint successivi sulla stagione estiva.
 - I comandi per lo stesso termostato vengono uniti (l'ultima modalità e l'ultimo setpoint partono insieme), e due accessori che condividono un unico termostato della centrale non si sovrascrivono a vicenda.
 - La scadenza è `commandTimeoutMs`; una scrittura ancora in coda dopo di essa viene rifiutata.
@@ -67,7 +68,7 @@ Il plugin invia solo ciò che il comando modifica, nella stessa forma dell'app w
 
 Una modalità realtime sconosciuta (qualunque valore diverso da OFF, MAN, AUTO) viene mostrata come riscaldamento o raffrescamento in base al setpoint attivo, con un solo warning che ti chiede di segnalare il valore.
 
-La **temperatura corrente** proviene dal sensore DOMUS della stanza. La temperatura interna della scheda della centrale viene usata solo per i termostati che non hanno alcuna fonte di temperatura, e solo quando cambia. `domusThermostat.sensorFreshnessMs` indica per quanto tempo una lettura realtime del termostato ha la precedenza sulla lettura del sensore DOMUS.
+La **temperatura corrente** proviene dal sensore DOMUS della stanza. La temperatura interna della scheda della centrale viene usata solo per i termostati che non hanno alcuna fonte di temperatura, solo dopo l'arrivo dello stato realtime iniziale, e solo quando cambia. `domusThermostat.sensorFreshnessMs` indica per quanto tempo una lettura realtime del termostato ha la precedenza sulla lettura del sensore DOMUS.
 
 ### Associazione per nome tra termostati e sensori DOMUS
 
@@ -80,7 +81,7 @@ Un programma Ksenia può avere un'uscita di riscaldamento e una di raffrescament
 - Su **Matter** compaiono come due termostati, solo riscaldamento e solo raffrescamento. L'uscita di riscaldamento mostra Off mentre il programma gira in estate (quella di raffrescamento mentre gira in inverno), rifiuta un setpoint o Heat in quella stagione e non inoltra Off (che fermerebbe l'altra uscita).
 - Su **HomeKit** in questa versione non cambia nulla: ogni uscita è un termostato con una propria modalità.
 
-Senza dati del programma (né `PRG_THERMOSTATS` né cache `.ksa`) il lato Matter decide tra solo riscaldamento e raffrescamento in base al nome al primo login; con la cache `.ksa` o dal secondo login in poi, il ruolo è noto quando l'endpoint viene registrato.
+La centrale elenca le uscite prima dei programmi termostato. Su Matter un termostato attende quindi i dati del programma (al massimo 20 secondi, nessuna attesa con una cache `.ksa`) e si registra con il ruolo giusto; una centrale che non fornisce i programmi lo registra subito con il ruolo ricavato dal nome dell'uscita. Se il programma viene modificato in seguito sulla centrale, il termostato Matter viene sostituito e mantiene la propria identità.
 
 ## Import KSA
 

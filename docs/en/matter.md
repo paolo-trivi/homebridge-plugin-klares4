@@ -15,11 +15,11 @@ All devices the plugin exposes (see the README, [Exposure policy](../../README.m
 
 ## Thermostats
 
-- **Native Thermostat.** A thermostat registers as a real Matter Thermostat declaring only the attributes of what it can do. Homebridge 2.5 derives the features from them: a heating-only output has heating and no cooling, no Auto, no Occupancy; a cooling-only one the reverse; an output that does both keeps heating, cooling and Auto. The role comes from the panel's thermostat program data (or the panel's own output name), never from a name you set in `matterOverrides` or `customNames`.
+- **Native Thermostat.** A thermostat registers as a real Matter Thermostat declaring only the attributes of what it can do. Homebridge 2.5 derives the features from them: a heating-only output has heating and no cooling, no Auto, no Occupancy; a cooling-only one the reverse; an output that does both keeps heating, cooling and Auto. The role comes from the panel's thermostat program data (or the panel's own output name), never from a name you set in `matterOverrides` or `customNames`. At a first start without a `.ksa` cache the thermostat appears once the program data has arrived (at most 20 seconds); if the program is changed on the panel later, the thermostat is replaced and keeps its identity.
 - **Running state.** The thermostat publishes whether its heating or cooling output is running.
 - **One program, two outputs.** A heating output and a cooling output of the same program appear as two thermostats. Each shows Off outside its season and refuses a setpoint or mode there; the heating output does not forward Off while the program runs in summer (it would stop the cooling).
 - **A refused command is reported.** Auto or Cool on a heating-only thermostat is refused to the controller instead of being accepted and ignored. A command that cannot reach the panel fails visibly and the previous value comes back.
-- **Quick commands.** A command sent shortly after another is not dropped as "already current" because the panel had not reported the first yet; two quick +1 °C steps add up to +2 °C.
+- **Quick commands.** A command sent shortly after another is not dropped as "already current" because the panel had not reported the first yet; two quick +1 °C steps add up to +2 °C. A step given right after a change made on the keypad or in HomeKit starts from that change.
 - **Unknown temperature.** A thermostat whose room temperature has not been read shows it as unknown, not as a made-up 20 °C.
 - **Ranges.** Fixed: heating 5-30 °C, cooling 16-35 °C. `temperatureDefaults` does not apply to Matter.
 
@@ -27,14 +27,14 @@ All devices the plugin exposes (see the README, [Exposure policy](../../README.m
 
 If a Homebridge version refuses the native Thermostat endpoint, the plugin tries once more with the payload of earlier versions (log: `trying the payload of earlier versions before falling back to TemperatureSensor`). If that is refused too, the thermostat registers as a read-only **temperature sensor** and the choice is saved in `klares4-matter-fallback.json`.
 
-- A thermostat that an earlier version saved as a temperature-sensor fallback gets **one automatic attempt** at the first start of 2.3.0, without any setting (log: `was saved as a TemperatureSensor fallback by an earlier version; trying the native Thermostat once`). If Homebridge does not accept it, the sensor comes back and no further automatic attempt is made.
+- A thermostat that an earlier version saved as a temperature-sensor fallback gets **one automatic attempt** at the first start of 2.3.0, without any setting (log: `was saved as a TemperatureSensor fallback by an earlier version; trying the native Thermostat once`). If Homebridge does not accept it, the sensor comes back with the identity it had (rooms and automations stay) and no further automatic attempt is made.
 - `matterRecoveryRequests` allows one more explicit attempt for a device: `[{ "deviceId": "thermostat_18", "generation": 1 }]`. The generation is consumed once and saved before the change; raise the number only for a deliberate retry; do not raise it at every start. On failure or an interrupted recovery the plugin returns to the temperature sensor. Never delete the fallback store.
-- A file the plugin does not understand (a newer version, an unknown layout) is left untouched and the state is kept in memory. An unreadable file is copied to `klares4-matter-fallback.json.unreadable.bak` before a new store starts. The store gains an optional `nativeShapeRevision` field that 2.2.0 reads unchanged.
-- If Homebridge 2.4.x needs the second payload, every restart tries the conformant payload first again (the choice is per process).
+- A file the plugin does not understand (a newer version, an unknown layout) is left untouched and the state is kept in memory. An unreadable file is copied to `klares4-matter-fallback.json.unreadable.bak` before a new store starts. The store gains the optional fields `nativeShape` and `nativeShapeRevision`, which 2.2.0 ignores.
+- The payload that worked is remembered in the store: on a Homebridge version that accepts only the earlier payload the plugin starts from it at the next start instead of being refused once per thermostat, and moves to the other payload by itself if the remembered one is refused later.
 
 ### Identity
 
-A replacement keeps the endpoint's `uniqueId` only when the new endpoint is the same device with the same function: a rename, another payload of the same device type, a light that becomes a dimmer. **Thermostat ↔ temperature sensor changes the function and therefore the identity on purpose**: a controller that kept the identity could keep scenes that set a temperature on a read-only sensor. Apple Home, Alexa and Google then show a new accessory: rooms and automations that used the sensor must be set again. This happens once for the thermostats that were sensors in 2.2.0.
+A replacement keeps the endpoint's `uniqueId` only when the new endpoint is the same device with the same function: a rename, another payload of the same device type, a light that becomes a dimmer. **Thermostat ↔ temperature sensor changes the function and therefore the identity on purpose**: a controller that kept the identity could keep scenes that set a temperature on a read-only sensor. Apple Home, Alexa and Google then show a new accessory: rooms and automations that used the sensor must be set again. This happens once for the thermostats that were sensors in 2.2.0. The reverse is not a change of function: a sensor whose recovery fails comes back as the same sensor, with its identity.
 
 ## Names and Renames
 
@@ -60,7 +60,7 @@ The log line `[Matter] Missing candidate: ...` names a device that is absent for
 
 ## Reachability
 
-When the panel connection is down, every Matter accessory of the plugin is marked "not responding" after **15 seconds**, including those Homebridge restored from its cache: a Homebridge restart during a panel outage no longer shows the last cached states as live. They return when the panel does (log: `[Matter] panel reachable again`).
+When the panel connection is down, every Matter accessory of the plugin is marked "not responding" after **15 seconds**, including those Homebridge restored from its cache: a Homebridge restart during a panel outage no longer shows the last cached states as live. They return when a synchronization with the panel has completed, not at the login (log: `[Matter] panel reachable again`): a panel that accepts the login but refuses the data reads does not make cached states look live. A normal reconnection completes well within the 15 seconds, so the accessories do not blink.
 
 ## Covers, Dimmers, Gates and Scenarios
 
@@ -68,6 +68,7 @@ When the panel connection is down, every Matter accessory of the plugin is marke
 - A brightness command on a dimmer that is off does not reach the panel.
 - Gates and scenarios are momentary switches.
 - A Matter command arriving while the panel connection is not available fails visibly in the controller.
+- A command and a state update of the same accessory never overlap (an update applied while Homebridge ran a command made the command fail in the controller with an internal lock error, although the panel had carried it out). A command that arrives while the plugin is updating that accessory waits for the update, up to about 150 ms more.
 
 ### Known limits (Homebridge, not fixable with the public API)
 

@@ -7,7 +7,7 @@ Il bridge pubblica lo stato di ogni dispositivo esposto, pubblica la propria dis
 | Chiave | Note |
 |---|---|
 | `mqtt.enabled` | Attiva il bridge |
-| `mqtt.commands` | Predefinito `true`. `false`: il bridge non si sottoscrive mai ai topic `.../set`, quindi nulla di ciò che viene pubblicato sul broker può azionare un dispositivo |
+| `mqtt.commands` | Predefinito `true`. `false`: il bridge non si sottoscrive mai ai topic `.../set`, quindi nulla di ciò che viene pubblicato sul broker può azionare un dispositivo. Anche un valore che non è né `true` né `false` (`"false"` scritto a mano, per esempio) disattiva i comandi, con un warning all'avvio |
 | `mqtt.broker` | URL con schema: `mqtt://`, `mqtts://`, `ws://`, `wss://` (funzionano anche `tcp://`, `tls://`, `ssl://`). Un URL che mqtt.js leggerebbe come un altro host (senza schema, `mqtt:/host`, un `/` o `#` non escapati nella password) viene rifiutato con un errore invece di connettersi altrove |
 | `mqtt.port` | Sovrascrive la porta dell'URL. Vuoto: la porta dell'URL, oppure quella predefinita del protocollo (1883, 8883) |
 | `mqtt.username`, `mqtt.password` | Da preferire alle credenziali nell'URL, che hanno la precedenza quando sono impostati entrambi. Una password con `/`, `#`, `?` o `@` deve essere codificata in percent-encoding nell'URL |
@@ -44,10 +44,10 @@ Ogni payload contiene `id`, `name`, `type` e un `timestamp` ISO, più:
 | cover | `position` (0-100), `state` (`opening`, `closing`, `stopped`) |
 | thermostat | `currentTemperature`, `targetTemperature`, `mode` (`off`, `heat`, `cool`, `auto`), `humidity` quando nota |
 | sensor | `sensorType`, `value`, `unit` |
-| zone | `open`, `armed`, `fault`, `bypassed` |
+| zone | `open`, `armed`, `fault`, `bypassed`, `tampered` |
 | scenario | `active` |
 
-Un cancello pubblica la forma generica `{"active": false}`, che non è uno stato reale. Il flag di manomissione di una zona è mostrato solo su HomeKit.
+Un cancello pubblica la forma generica `{"active": false}`, che non è uno stato reale. `tampered` (aggiunto nella 2.3.0, dopo `bypassed`; ogni campo precedente conserva nome, valore e ordine) è il flag di manomissione della zona; come gli altri flag della zona vale `false` finché la centrale non lo riporta.
 
 ## Disponibilità: `<prefix>/status`
 
@@ -114,4 +114,4 @@ topic read homebridge/klares4/#
 
 Con i comandi attivi, aggiungi `topic read` per `homebridge/klares4/+/+/set` e `homebridge/klares4/+/+/+/set` per l'utente del plugin, e `topic write homebridge/klares4/<room>/+/+/set` per ogni client che può comandare quella stanza.
 
-**L'utente del plugin deve poter scrivere su `<prefix>/status`.** Mosquitto 2 può rifiutare un CONNECT il cui topic last will l'utente non può scrivere (`Not authorized`). Il bridge allora si riconnette senza last will, scrive nel log un warning che spiega la riga ACL da aggiungere e continua a pubblicare lo stato; si perde solo il rilevamento dei crash.
+**L'utente del plugin deve poter scrivere su `<prefix>/status`.** Mosquitto 2 può rifiutare un CONNECT il cui topic last will l'utente non può scrivere (`Not authorized`). Quando un CONNECT con il last will viene rifiutato come `Not authorized` e il CONNECT inviato subito dopo senza di esso viene accettato, il bridge funziona senza last will, scrive nel log un warning che dice esattamente questo e continua a pubblicare lo stato; si perde solo il rilevamento dei crash. Il last will viene riprovato ogni 30 minuti, quindi torna senza riavvio appena l'ACL lo consente. Se anche il CONNECT senza last will viene rifiutato, la causa sono le credenziali e il last will resta attivo.

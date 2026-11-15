@@ -23,15 +23,18 @@
 
 Masked by key, at any depth, in frames in both directions, in device snapshots and in the sections derived from them, whatever the value type (a frame that cannot be parsed is masked as text); the masked value is written `***MASKED***`:
 
-- credentials: any key with a segment `pin`, `pwd`, `passwd`, `password`, `passcode`, `secret`, `token`, and the key `code`;
-- position: `POSITION`, `LAT`, `LONG`, `LON`, `LNG`, `LATITUDE`, `LONGITUDE`, and the sunrise and sunset times (`DAWN`, `DUSK`), which together with the date reveal latitude and longitude;
-- identity: the account description and ID (`DESCRIPTION`, `ID_ACCOUNT`), serial numbers (`SN`, `SERIAL`) and the panel identifier that frames from the panel carry in `SENDER`.
+- credentials, by family and in any spelling (`PIN`, `USER_PIN`, `userPin`, `PINCODE`, `PIN1`): `pin`, `pwd`, `passwd`, `password`, `passcode`, `pass`, `secret`, `token`, and `code` when it stands alone or follows a word such as `pin`, `user`, `access` or `security` (`ERROR_CODE` and `RESULT_CODE` stay readable). A key that merely contains the letters (`PING`, `PASSIVE`) is not masked. The log uses the same rule;
+- identifiers, by family: `serial`, `sn`, `mac`, `imei`, `iccid`, `email` (`SERIAL_NUMBER`, `macAddress`, ...);
+- position: `LAT`, `LONG`, `LON`, `LNG`, `LATITUDE`, `LONGITUDE`, `POSITION` in frames, and the sunrise and sunset times (`DAWN`, `DUSK`), which together with the date reveal latitude and longitude. The opening of a cover in the device snapshots (`status.position`, a plain number) is kept;
+- identity: the account description and ID (`DESCRIPTION`, `ID_ACCOUNT`) and the panel identifier that frames from the panel carry in `SENDER`.
 
 **Not masked, on purpose:** the names of zones, outputs, scenarios and bus devices, the state fields, `ID_LOGIN`, `CRC_16`, `TIMESTAMP` and firmware strings: they are needed to diagnose a problem.
 
 ### Limits
 
-The capture keeps at most 20,000 frames and 8 MiB of traffic in memory. Later frames are counted (`captureInfo.droppedMessages` in the file), one warning is logged (`[DEBUG] Capture buffer full ...`) and the capture still ends on time.
+The capture keeps at most 5,000 frames and 2 MiB of traffic in memory (a real 15-minute capture is about 0.3 MB). Later frames are counted (`captureInfo.droppedMessages` in the file), one warning is logged (`[DEBUG] Capture buffer full ...`) and the capture still ends on time.
+
+Each frame is written once, as its JSON text in `rawMessages[].rawData` (earlier versions also wrote a `parsed` copy: parse `rawData` instead). A masked frame no longer matches its own `CRC_16`. A device snapshot taken during the capture is stored only if the devices changed since the previous one; the first and the last are always stored, at most 60 in between.
 
 ### Log lines
 

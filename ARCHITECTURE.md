@@ -35,7 +35,7 @@ This document describes the structure of the plugin as of `2.3.0`: the layers, t
 - `mqtt/`: `topic-parser.ts` (topic parsing and slugs), `state-payload-mapper.ts` (stable payloads), `broker-url.ts` (URL validation and masking), `log-text.ts`.
 - `mqtt.commands: false` removes the command subscription entirely.
 
-**Diagnostics capture** — public facade `DebugCaptureManager` (`debug-capture/index.ts`): `raw-message-capture.ts`, `redaction.ts` (key-based redaction at any depth, text fallback), `capture-buffer.ts` (caps: 20,000 frames, 8 MiB), `analysis.ts`, `file-generator.ts` (the file is written with mode `0600`).
+**Diagnostics capture** — public facade `DebugCaptureManager` (`debug-capture/index.ts`): `raw-message-capture.ts`, `redaction.ts` (key-based redaction at any depth, text fallback), `capture-buffer.ts` (caps: 5,000 frames, 2 MiB; each frame stored once, as text), `analysis.ts`, `file-generator.ts` (the file is written with mode `0600`).
 
 ### 2) Domain Layer
 

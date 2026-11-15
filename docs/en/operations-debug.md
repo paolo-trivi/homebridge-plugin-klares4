@@ -35,10 +35,13 @@
 
 | Message | Meaning and action |
 |---|---|
-| `The panel refused or did not answer the login N times in a row ... one attempt every 60 min` | Check the PIN and that the user is enabled on the panel. The plugin retries once an hour; restart Homebridge after fixing the PIN to reconnect at once |
+| `The panel refused the login N times in a row ... one attempt every 60 min` | Check the PIN and that the user is enabled on the panel. The plugin retries once an hour; restart Homebridge after fixing the PIN to reconnect at once |
+| `The panel did not answer the last 5 logins ...` | The panel is restarting, busy or at its limit of open sessions (app, web, other clients). The plugin keeps reconnecting with the normal backoff; the PIN is not in question |
 | `The panel refused the <TYPE> read (...)` | A discovery read (`ZONES`, `MULTI_TYPES`) fails the synchronization and the plugin reconnects with backoff; a refused status or thermostat read is logged and the synchronization continues |
+| `The panel refused the <TYPE> read (...) in N synchronizations in a row: continuing without it` | The devices of that read are not discovered or updated in this session (existing accessories are kept). Check the permissions of the panel user configured in the plugin |
 | `The panel refused the realtime registration (...)` / `The panel did not complete the synchronization within 60s` | The session is closed and retried with backoff |
-| `<...> frame with a wrong CRC_16: dropped (N frame(s) dropped in this session so far)` | A corrupted frame. Frequent ones: check the network path. If frames with accented names are always dropped, report it |
+| `<...> frame with a wrong CRC_16: dropped (N frame(s) dropped in this session so far)` | A corrupted frame. Frequent ones: check the network path |
+| `The panel sent a <...> frame with non-ASCII text ... whose CRC_16 differs ...` | Not an error: the frame is accepted. The panel computes the CRC of accented characters in a way the plugin has not verified yet; please open an issue with this line |
 | `Zone status field X reported "Y", a value not observed before` | Informational: a new value of a zone field, logged once |
 
 ## Command Messages

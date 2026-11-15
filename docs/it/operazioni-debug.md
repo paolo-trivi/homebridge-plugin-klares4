@@ -35,10 +35,13 @@
 
 | Messaggio | Significato e azione |
 |---|---|
-| `The panel refused or did not answer the login N times in a row ... one attempt every 60 min` | Controlla il PIN e che l'utente sia abilitato sulla centrale. Il plugin riprova una volta all'ora; riavvia Homebridge dopo aver corretto il PIN per riconnetterti subito |
+| `The panel refused the login N times in a row ... one attempt every 60 min` | Controlla il PIN e che l'utente sia abilitato sulla centrale. Il plugin riprova una volta all'ora; riavvia Homebridge dopo aver corretto il PIN per riconnetterti subito |
+| `The panel did not answer the last 5 logins ...` | La centrale si sta riavviando, è occupata o ha raggiunto il limite di sessioni aperte (app, web, altri client). Il plugin continua a riconnettersi con il backoff normale; il PIN non è in discussione |
 | `The panel refused the <TYPE> read (...)` | Una lettura di scoperta (`ZONES`, `MULTI_TYPES`) fa fallire la sincronizzazione e il plugin si riconnette con backoff; una lettura di stato o termostato rifiutata viene registrata e la sincronizzazione continua |
+| `The panel refused the <TYPE> read (...) in N synchronizations in a row: continuing without it` | I dispositivi di quella lettura non vengono scoperti né aggiornati in questa sessione (gli accessori esistenti restano). Controlla i permessi dell'utente della centrale configurato nel plugin |
 | `The panel refused the realtime registration (...)` / `The panel did not complete the synchronization within 60s` | La sessione viene chiusa e ritentata con backoff |
-| `<...> frame with a wrong CRC_16: dropped (N frame(s) dropped in this session so far)` | Un frame corrotto. Se sono frequenti: controlla il percorso di rete. Se i frame con nomi accentati vengono sempre scartati, segnalalo |
+| `<...> frame with a wrong CRC_16: dropped (N frame(s) dropped in this session so far)` | Un frame corrotto. Se sono frequenti: controlla il percorso di rete |
+| `The panel sent a <...> frame with non-ASCII text ... whose CRC_16 differs ...` | Non è un errore: il frame viene accettato. La centrale calcola il CRC dei caratteri accentati in un modo che il plugin non ha ancora verificato; apri una issue riportando questa riga |
 | `Zone status field X reported "Y", a value not observed before` | Informativo: un nuovo valore di un campo di zona, registrato una sola volta |
 
 ## Messaggi di comando

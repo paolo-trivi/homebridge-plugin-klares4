@@ -15,11 +15,11 @@ Tutti i dispositivi che il plugin espone (vedi il README, [Politica di esposizio
 
 ## Termostati
 
-- **Thermostat nativo.** Un termostato si registra come un vero Thermostat Matter che dichiara solo gli attributi di ciò che sa fare. Homebridge 2.5 ne ricava le feature: un'uscita solo riscaldamento ha il riscaldamento e non ha raffrescamento, né Auto, né Occupancy; una solo raffrescamento il contrario; un'uscita che fa entrambi mantiene riscaldamento, raffrescamento e Auto. Il ruolo deriva dai dati del programma termostato della centrale (o dal nome dell'uscita della centrale stessa), mai da un nome che imposti in `matterOverrides` o `customNames`.
+- **Thermostat nativo.** Un termostato si registra come un vero Thermostat Matter che dichiara solo gli attributi di ciò che sa fare. Homebridge 2.5 ne ricava le feature: un'uscita solo riscaldamento ha il riscaldamento e non ha raffrescamento, né Auto, né Occupancy; una solo raffrescamento il contrario; un'uscita che fa entrambi mantiene riscaldamento, raffrescamento e Auto. Il ruolo deriva dai dati del programma termostato della centrale (o dal nome dell'uscita della centrale stessa), mai da un nome che imposti in `matterOverrides` o `customNames`. Al primo avvio senza una cache `.ksa` il termostato compare quando sono arrivati i dati del programma (al massimo 20 secondi); se il programma viene modificato in seguito sulla centrale, il termostato viene sostituito e mantiene la propria identità.
 - **Stato di funzionamento.** Il termostato pubblica se la sua uscita di riscaldamento o raffrescamento è in funzione.
 - **Un programma, due uscite.** Un'uscita di riscaldamento e una di raffrescamento dello stesso programma compaiono come due termostati. Ciascuno mostra Off fuori dalla propria stagione e rifiuta lì un setpoint o una modalità; l'uscita di riscaldamento non inoltra Off mentre il programma gira in estate (fermerebbe il raffrescamento).
 - **Un comando rifiutato viene segnalato.** Auto o Cool su un termostato solo riscaldamento viene rifiutato al controller invece di essere accettato e ignorato. Un comando che non può raggiungere la centrale fallisce in modo visibile e torna il valore precedente.
-- **Comandi rapidi.** Un comando inviato poco dopo un altro non viene scartato come "già corrente" perché la centrale non aveva ancora riportato il primo; due passi rapidi di +1 °C si sommano a +2 °C.
+- **Comandi rapidi.** Un comando inviato poco dopo un altro non viene scartato come "già corrente" perché la centrale non aveva ancora riportato il primo; due passi rapidi di +1 °C si sommano a +2 °C. Un passo dato subito dopo una modifica fatta dalla tastiera o da HomeKit parte da quella modifica.
 - **Temperatura sconosciuta.** Un termostato di cui non è stata letta la temperatura ambiente la mostra come sconosciuta, non come un 20 °C inventato.
 - **Intervalli.** Fissi: riscaldamento 5-30 °C, raffrescamento 16-35 °C. `temperatureDefaults` non si applica a Matter.
 
@@ -27,14 +27,14 @@ Tutti i dispositivi che il plugin espone (vedi il README, [Politica di esposizio
 
 Se una versione di Homebridge rifiuta l'endpoint Thermostat nativo, il plugin riprova una volta con il payload delle versioni precedenti (log: `trying the payload of earlier versions before falling back to TemperatureSensor`). Se viene rifiutato anche quello, il termostato si registra come **sensore di temperatura** in sola lettura e la scelta viene salvata in `klares4-matter-fallback.json`.
 
-- Un termostato che una versione precedente aveva salvato come fallback a sensore di temperatura ottiene **un tentativo automatico** al primo avvio della 2.3.0, senza alcuna impostazione (log: `was saved as a TemperatureSensor fallback by an earlier version; trying the native Thermostat once`). Se Homebridge non lo accetta, torna il sensore e non viene fatto nessun altro tentativo automatico.
+- Un termostato che una versione precedente aveva salvato come fallback a sensore di temperatura ottiene **un tentativo automatico** al primo avvio della 2.3.0, senza alcuna impostazione (log: `was saved as a TemperatureSensor fallback by an earlier version; trying the native Thermostat once`). Se Homebridge non lo accetta, torna il sensore con l'identità che aveva (stanze e automazioni restano) e non viene fatto nessun altro tentativo automatico.
 - `matterRecoveryRequests` consente un ulteriore tentativo esplicito per un dispositivo: `[{ "deviceId": "thermostat_18", "generation": 1 }]`. La generation viene consumata una sola volta e salvata prima della modifica; aumenta il numero solo per un nuovo tentativo deliberato; non aumentarlo a ogni avvio. In caso di errore o di recupero interrotto il plugin torna al sensore di temperatura. Non eliminare mai lo store di fallback.
-- Un file che il plugin non capisce (una versione più recente, un layout sconosciuto) viene lasciato intatto e lo stato resta in memoria. Un file illeggibile viene copiato in `klares4-matter-fallback.json.unreadable.bak` prima che parta un nuovo store. Lo store acquisisce un campo opzionale `nativeShapeRevision` che la 2.2.0 legge senza problemi.
-- Se Homebridge 2.4.x richiede il secondo payload, a ogni riavvio si prova di nuovo prima il payload conforme (la scelta è per processo).
+- Un file che il plugin non capisce (una versione più recente, un layout sconosciuto) viene lasciato intatto e lo stato resta in memoria. Un file illeggibile viene copiato in `klares4-matter-fallback.json.unreadable.bak` prima che parta un nuovo store. Lo store acquisisce i campi opzionali `nativeShape` e `nativeShapeRevision`, che la 2.2.0 ignora.
+- Il payload che ha funzionato viene ricordato nello store: su una versione di Homebridge che accetta solo il payload precedente il plugin parte da quello all'avvio successivo, invece di farsi rifiutare una volta per ogni termostato, e passa da solo all'altro payload se in seguito quello ricordato viene rifiutato.
 
 ### Identità
 
-Una sostituzione mantiene l'`uniqueId` dell'endpoint solo quando il nuovo endpoint è lo stesso dispositivo con la stessa funzione: una ridenominazione, un altro payload dello stesso tipo di dispositivo, una luce che diventa dimmer. **Il passaggio termostato ↔ sensore di temperatura cambia la funzione e quindi l'identità, di proposito**: un controller che mantenesse l'identità potrebbe conservare scene che impostano una temperatura su un sensore in sola lettura. Apple Home, Alexa e Google mostrano allora un accessorio nuovo: stanze e automazioni che usavano il sensore vanno impostate di nuovo. Succede una volta per i termostati che nella 2.2.0 erano sensori.
+Una sostituzione mantiene l'`uniqueId` dell'endpoint solo quando il nuovo endpoint è lo stesso dispositivo con la stessa funzione: una ridenominazione, un altro payload dello stesso tipo di dispositivo, una luce che diventa dimmer. **Il passaggio termostato ↔ sensore di temperatura cambia la funzione e quindi l'identità, di proposito**: un controller che mantenesse l'identità potrebbe conservare scene che impostano una temperatura su un sensore in sola lettura. Apple Home, Alexa e Google mostrano allora un accessorio nuovo: stanze e automazioni che usavano il sensore vanno impostate di nuovo. Succede una volta per i termostati che nella 2.2.0 erano sensori. Il contrario non è un cambio di funzione: un sensore il cui recupero fallisce torna come lo stesso sensore, con la sua identità.
 
 ## Nomi e ridenominazioni
 
@@ -60,7 +60,7 @@ La riga di log `[Matter] Missing candidate: ...` indica un dispositivo assente d
 
 ## Raggiungibilità
 
-Quando la connessione alla centrale è interrotta, ogni accessorio Matter del plugin viene segnato "non risponde" dopo **15 secondi**, compresi quelli che Homebridge ha ripristinato dalla cache: un riavvio di Homebridge durante un'interruzione della centrale non mostra più come attuali gli ultimi stati in cache. Tornano quando torna la centrale (log: `[Matter] panel reachable again`).
+Quando la connessione alla centrale è interrotta, ogni accessorio Matter del plugin viene segnato "non risponde" dopo **15 secondi**, compresi quelli che Homebridge ha ripristinato dalla cache: un riavvio di Homebridge durante un'interruzione della centrale non mostra più come attuali gli ultimi stati in cache. Tornano quando una sincronizzazione con la centrale è stata completata, non al login (log: `[Matter] panel reachable again`): una centrale che accetta il login ma rifiuta le letture dei dati non fa sembrare attuali gli stati in cache. Una riconnessione normale si completa ben dentro i 15 secondi, quindi gli accessori non lampeggiano.
 
 ## Tapparelle, dimmer, cancelli e scenari
 
@@ -68,6 +68,7 @@ Quando la connessione alla centrale è interrotta, ogni accessorio Matter del pl
 - Un comando di luminosità su un dimmer spento non arriva alla centrale.
 - Cancelli e scenari sono interruttori momentanei.
 - Un comando Matter che arriva mentre la connessione alla centrale non è disponibile fallisce in modo visibile nel controller.
+- Un comando e un aggiornamento di stato dello stesso accessorio non si sovrappongono mai (un aggiornamento applicato mentre Homebridge eseguiva un comando faceva fallire il comando nel controller con un errore interno di lock, anche se la centrale lo aveva eseguito). Un comando che arriva mentre il plugin sta aggiornando quell'accessorio attende l'aggiornamento, fino a circa 150 ms in più.
 
 ### Limiti noti (Homebridge, non risolvibili con l'API pubblica)
 

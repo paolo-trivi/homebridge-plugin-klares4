@@ -44,7 +44,7 @@ export function reportConfigOverrides(
         // A Homebridge UI save before 2.2.0 wrote exposed:false on every override row.
         log.warn(
             `[Matter] matterOverrides hides ${hidden.length} device(s) from Matter: ${hidden.join(', ')}. `
-            + 'If you did not untick "Esposto su Matter" yourself, tick it again in the plugin settings.',
+            + 'If you did not untick "Exposed on Matter" yourself, tick it again in the plugin settings.',
         );
     }
 

@@ -25,15 +25,16 @@ Ogni frame, in entrambe le direzioni, è un oggetto JSON:
 | `TIMESTAMP` | Secondi Unix, come testo |
 | `CRC_16` | CRC-16 del frame (polinomio 0x1021, seed 0xFFFF, come in `websocket-client/crc16.ts`) calcolato sui byte UTF-8 fino alla chiave `"CRC_16"` inclusa, scritto come `0x` seguito da quattro cifre esadecimali. L'algoritmo del plugin ha corrisposto a ogni frame in ingresso delle catture reali su cui è stato verificato |
 
-**I frame in ingresso vengono controllati prima che qualunque componente li legga.** Un frame viene scartato e registrato nel log (mai citato, perché può contenere nomi dell'impianto) quando non è JSON valido, non è un oggetto, non ha `CMD`, ha un `PAYLOAD` che non è un oggetto, oppure porta un `CRC_16` che non corrisponde. Un frame senza `CRC_16` viene accettato. Il log conta i frame scartati nella sessione.
+**I frame in ingresso vengono controllati prima che qualunque componente li legga.** Un frame viene scartato e registrato nel log (mai citato, perché può contenere nomi dell'impianto) quando non è JSON valido, non è un oggetto, non ha `CMD`, ha un `PAYLOAD` che non è un oggetto, oppure è solo ASCII e porta un `CRC_16` che non corrisponde (corruzione certa). Un frame con testo non ASCII (un nome accentato, per esempio) il cui `CRC_16` differisce viene accettato e segnalato una volta, con la richiesta di aprire una issue: come la centrale codifichi quei caratteri per il CRC non è ancora stato verificato su una centrale reale. Un frame senza `CRC_16` viene accettato. Il log conta i frame scartati nella sessione.
 
 `RESULT` nelle risposte viene letto ovunque allo stesso modo (maiuscole e spazi ignorati, quindi `ok` è accettato); un `RESULT` che non è testo è un rifiuto.
 
 ## Login e Protezione del Login
 
 - Comando di login: `CMD=LOGIN`, `PAYLOAD_TYPE=UNKNOWN`, con `PIN`. Su un `LOGIN_RES` accettato il plugin salva `ID_LOGIN` e avvia la sincronizzazione. Il frame `LOGIN` viene registrato solo a livello debug, mascherato, e mai a ogni riconnessione a livello normale.
-- **Cosa conta come login fallito:** un rifiuto esplicito (con o senza l'ID della richiesta), una risposta senza ID di sessione, nessuna risposta prima del timeout di login, oppure la centrale che chiude il socket prima della risposta. I fallimenti prima dell'invio del frame non contano.
-- **Dopo 3 login falliti di fila** il plugin non si ferma per sempre: rallenta a **un tentativo all'ora**, a ogni tentativo fallito scrive nel log cosa controllare (il PIN, e che l'utente sia abilitato sulla centrale), e si azzera al primo login accettato. Riavviare Homebridge riconnette subito. Il rallentamento protegge dalle centrali che bloccano un utente dopo codici errati.
+- **Cosa conta come login rifiutato:** un rifiuto esplicito della centrale, con o senza l'ID della richiesta. Solo i rifiuti contano per la protezione.
+- **Dopo 3 login rifiutati di fila** il plugin non si ferma per sempre: rallenta a **un tentativo all'ora**, a ogni tentativo rifiutato scrive nel log cosa controllare (il PIN, e che l'utente sia abilitato sulla centrale), e si azzera al primo login accettato. Riavviare Homebridge riconnette subito. Il rallentamento protegge dalle centrali che bloccano un utente dopo codici errati.
+- **Un login senza una risposta utilizzabile** (nessuna risposta prima del timeout di login, la centrale che chiude il socket prima, una risposta accettata senza ID di sessione, un errore di rete) non dice nulla sul PIN: resta nel normale backoff di riconnessione, al massimo 60 secondi tra un tentativo e l'altro. Dopo 5 di fila un warning indica le cause probabili (la centrale si sta riavviando, è occupata o ha raggiunto il limite di sessioni aperte).
 
 ## Sincronizzazione
 
@@ -51,9 +52,10 @@ Ogni login corrisponde a una sincronizzazione. Il plugin invia, in ordine:
 La sincronizzazione è **completa solo quando la centrale ha accettato la registrazione realtime**.
 
 - Una lettura `ZONES` o `MULTI_TYPES` rifiutata, o una registrazione realtime rifiutata, fa fallire la sincronizzazione: il rifiuto viene registrato come warning, la sessione viene chiusa e il plugin si riconnette con backoff.
+- Se la centrale rifiuta la stessa lettura di discovery (`ZONES` o `MULTI_TYPES`) in 3 sincronizzazioni di fila, la sincronizzazione si completa senza di essa (degradata): gli altri dispositivi funzionano, i dispositivi della lettura rifiutata non vengono né scoperti né rimossi, e un warning indica la lettura. Una registrazione realtime rifiutata porta sempre alla riconnessione: senza di essa non arriverebbe mai alcun cambio di stato.
 - Una lettura di stato o dei termostati rifiutata viene registrata e la sincronizzazione prosegue: la registrazione realtime riporta di nuovo lo stato iniziale. La risposta `CMD_NOT_AVAILABLE` a `PRG_THERMOSTATS`, che le centrali danno a ogni login, è prevista e non viene segnalata.
 - Una centrale che non risponde mai alla registrazione realtime viene riconnessa dopo 60 secondi.
-- Un dispositivo che una sezione di discovery completa non elenca più viene rimosso dallo stato live del client (così un dispositivo eliminato o ricategorizzato non può continuare a ricevere lo stato del suo successore). La piattaforma rimuove gli accessori solo dopo tre sincronizzazioni complete.
+- Un dispositivo che una sezione di discovery completa non elenca più viene rimosso dallo stato live del client (così un dispositivo eliminato o ricategorizzato non può continuare a ricevere lo stato del suo successore). Una lettura in cui un elemento non ha potuto essere elaborato non rimuove nulla. La piattaforma rimuove gli accessori solo dopo tre sincronizzazioni complete.
 - Gli stati ricevuti per dispositivi mai scoperti vengono conservati per al massimo 512 ID.
 
 ## Riconnessione

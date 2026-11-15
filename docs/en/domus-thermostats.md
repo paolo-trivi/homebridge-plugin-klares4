@@ -26,13 +26,13 @@ To write to a thermostat the plugin needs its configuration ID. It takes the fir
 
 1. `domusThermostat.manualCommandPairs` (your explicit pair, or one written by the KSA import).
 2. The panel's own `PRG_THERMOSTATS` program (live, or from the KSA cache).
-3. A verified guess, only on panels without thermostat programs and without a pair: the DOMUS sensor ID, then the output ID, accepted only if the configuration read for that ID is coherent with what the thermostat reports in realtime.
+3. A verified guess, only on panels without thermostat programs and without a pair: the DOMUS sensor ID, then the output ID, accepted only if, among all the configurations re-read from the panel for the check, it is the only one that matches what the thermostat reports in realtime, and that realtime state matches no other. The guess is remembered for the session only after a match in manual mode with the same setpoint; in Auto or Off, where most thermostats look alike, it is checked again at every write.
 
 A write is **refused with an error, and nothing is sent**, when:
 
 - the ID from a pair or a program cannot be read from the panel (`cfg id X (from ... ) could not be read from the panel; write refused`);
 - the output is not the heating or cooling output of any program on a panel that has programs;
-- a guess does not match what the thermostat reports in realtime, or is ambiguous (two thermostats in exactly the same state cannot be told apart).
+- a guess does not match what the thermostat reports in realtime, or is not the only match (two thermostats in the same state cannot be told apart). On such panels, while several thermostats are in Auto or Off, writes are refused until you add the pairs.
 
 The error for a guess names the exact `manualCommandPairs` line to add.
 
@@ -43,13 +43,14 @@ The plugin sends only what the command changes, in the same form as the official
 | Command | Payload for the thermostat (`ID` = configuration ID) |
 |---|---|
 | Mode Off | `{ ID, ACT_MODE: "OFF" }` |
-| Mode Heat | `{ ID, ACT_MODE: "MAN", ACT_SEA: "WIN" }` |
-| Mode Cool | `{ ID, ACT_MODE: "MAN", ACT_SEA: "SUM" }` |
+| Mode Heat | `{ ID, ACT_MODE: "MAN" }`; with `ACT_SEA: "WIN"` only when the panel is in summer |
+| Mode Cool | `{ ID, ACT_MODE: "MAN" }`; with `ACT_SEA: "SUM"` only when the panel is in winter |
 | Mode Auto | `{ ID, ACT_MODE: "AUTO" }` |
 | Setpoint | `{ ID, WIN` or `SUM: <whole season block, re-read right before, with only TM changed> }` |
 | Mode and setpoint together | One write with both parts, in the right order |
 
-- A **setpoint** re-reads that thermostat's configuration right before writing and sends the active season's block with only the target temperature (`TM`) changed. It never sends a mode: with the thermostat Off it stays Off, in Auto the program stays active.
+- A **setpoint** re-reads that thermostat's configuration right before writing and sends the active season's block with only the target temperature (`TM`) changed. It never sends a mode: with the thermostat Off it stays Off, in Auto the program stays active. In Auto or Off the new temperature is stored as the manual setpoint (used when the thermostat goes back to manual); HomeKit, Matter and MQTT then show again the target the panel is really using, and the log says `stored as the manual setpoint`.
+- A **mode** in the season the panel is already in is sent exactly as the official app sends it. `ACT_SEA` is added only when Heat or Cool needs the other season: no capture of the official app contains such a write, so check the result on your panel the first time you use it.
 - The **season** comes from the realtime `ACT_SEA`, else from the configuration read; the freshest observation wins and an acknowledged write only counts until the panel shows otherwise. A "cool" the panel never confirmed does not move later setpoints to the summer season.
 - Commands for the same thermostat are merged (the latest mode and the latest setpoint go out together), and two accessories that share one panel thermostat do not overwrite each other.
 - The deadline is `commandTimeoutMs`; a write still queued after it is refused.
@@ -67,7 +68,7 @@ The plugin sends only what the command changes, in the same form as the official
 
 An unknown realtime mode (anything but OFF, MAN, AUTO) is shown as heating or cooling according to the active setpoint, with one warning asking you to report the value.
 
-The **current temperature** comes from the DOMUS sensor of the room. The panel's internal board temperature is used only for thermostats that have no temperature source at all, and only when it changes. `domusThermostat.sensorFreshnessMs` is how long a realtime thermostat reading takes precedence over the DOMUS sensor reading.
+The **current temperature** comes from the DOMUS sensor of the room. The panel's internal board temperature is used only for thermostats that have no temperature source at all, only once the initial realtime state has arrived, and only when it changes. `domusThermostat.sensorFreshnessMs` is how long a realtime thermostat reading takes precedence over the DOMUS sensor reading.
 
 ### Name matching between thermostats and DOMUS sensors
 
@@ -80,7 +81,7 @@ One Ksenia program can have a heating output and a cooling output (the program d
 - On **Matter** they appear as two thermostats, heating-only and cooling-only. The heating output shows Off while the program runs in summer (the cooling output while it runs in winter), refuses a setpoint or Heat in that season and does not forward Off (which would stop the other output).
 - On **HomeKit** nothing changes in this release: each output is a thermostat with its own mode.
 
-Without program data (no `PRG_THERMOSTATS` and no `.ksa` cache) the Matter side decides heating-only versus cooling from the name on the first login; with the `.ksa` cache or from the second login on, the role is known when the endpoint is registered.
+The panel lists the outputs before the thermostat programs. On Matter a thermostat therefore waits for the program data (at most 20 seconds; no wait with a `.ksa` cache) and registers with the right role; a panel that does not provide the programs registers it at once with the role from the output name. If the program is changed on the panel later, the Matter thermostat is replaced and keeps its identity.
 
 ## KSA Import
 
