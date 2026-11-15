@@ -215,7 +215,9 @@ function pairedSetpoints(coolActive: boolean, targetC: number): { heat: number; 
 }
 
 /**
- * Build the Thermostat cluster state for a Lares4 thermostat.
+ * Build the Thermostat cluster state for a Lares4 thermostat, for the
+ * device's role or `roleOverride` (the role its live endpoint was registered
+ * for, when that differs).
  *
  * Homebridge 2.5 derives the cluster features from the attributes declared at
  * registration (`homebridge/dist/matter/serverHelpers.js:370-390`), so the
@@ -226,8 +228,8 @@ function pairedSetpoints(coolActive: boolean, targetC: number): { heat: number; 
  * preset attribute (TH-01). The `legacy` shape is the 2.2.0 payload; see
  * `matter-thermostat-shape.ts`.
  */
-export function buildThermostatMatterState(device: KseniaThermostat): ThermostatMatterState {
-    const role = thermostatRole(device);
+export function buildThermostatMatterState(device: KseniaThermostat, roleOverride?: ThermostatOutputRole): ThermostatMatterState {
+    const role = roleOverride ?? thermostatRole(device);
     const legacy = thermostatShapeOf(device.id) === 'legacy';
     const coolActive = isCoolingSetpointActiveForRole(role, modeOf(device));
     // LocalTemperature is nullable ("X", thermostat-cluster.element.js:31): a

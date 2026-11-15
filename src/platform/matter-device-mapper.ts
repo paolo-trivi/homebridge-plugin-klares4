@@ -76,6 +76,12 @@ interface MapperDeps {
     getLatestDevice?: (id: string) => KseniaDevice | undefined;
     /** Re-publish the known state of a device after a command the panel refused. */
     republishState?: (id: string) => void;
+    /**
+     * Sends a state the handlers produce (momentary auto-off, cover position)
+     * through the registry's update queue, so it never lands inside a running
+     * controller command. Without it, straight to `api.matter`.
+     */
+    pushState?: (id: string, cluster: string, attributes: Record<string, unknown>) => void;
 }
 
 function latestSnapshot<T extends KseniaDevice>(device: T, deps: MapperDeps): T {
@@ -88,6 +94,10 @@ const DEFAULT_MOMENTARY_AUTO_OFF_MS = 500;
 function scheduleMomentaryAutoOff(uuid: string, deps: MapperDeps): void {
     const delay = deps.momentaryAutoOffMs ?? DEFAULT_MOMENTARY_AUTO_OFF_MS;
     setTimeout(() => {
+        if (deps.pushState) {
+            deps.pushState(uuid, 'onOff', { onOff: false });
+            return;
+        }
         deps.api.matter?.updateAccessoryState(uuid, 'onOff', { onOff: false })
             .catch((err: unknown) => {
                 deps.log.debug(`[Matter] momentary auto-off failed for ${uuid}: ${err instanceof Error ? err.message : String(err)}`);
@@ -178,7 +188,10 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
                 configStatus: { liftPositionAware: true, operational: true },
             },
         },
-        handlers: buildCoverHandlers(device, { api, getWsClient, log, latest: () => latestSnapshot(device, deps) }),
+        handlers: buildCoverHandlers(device, {
+            api, getWsClient, log, latest: () => latestSnapshot(device, deps),
+            pushState: deps.pushState && ((attributes) => deps.pushState?.(device.id, 'windowCovering', attributes)),
+        }),
     };
 }
 

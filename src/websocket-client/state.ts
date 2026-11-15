@@ -57,6 +57,7 @@ export function createInitialWebSocketClientState(
         domusThermostatConfig: resolvedDomusConfig,
         thermostatOutputs: new Map(),
         thermostatProgramById,
+        thermostatProgramsSettled: thermostatProgramById.size > 0,
         thermostatProgramIdByOutputId,
         domusSensorIdByThermostatProgramId,
         thermostatCommandIdByOutputId: new Map(),

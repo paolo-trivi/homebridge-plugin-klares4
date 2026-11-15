@@ -159,6 +159,8 @@ export class MessageService {
         const result = frameResult(message);
         if (result !== undefined && result !== 'OK') {
             this.readRefusals.refused(message.PAYLOAD_TYPE, result, resultDetail(message));
+            // Without programs the roles taken from the output names are final (the Matter registration waits for them).
+            if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS') section('PRG_THERMOSTATS refused', () => this.thermostats.programsUnavailable());
             return;
         }
         this.readRefusals.accepted(message.PAYLOAD_TYPE);

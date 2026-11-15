@@ -34,7 +34,7 @@ import type { Logger, MatterClusterHandlers } from 'homebridge';
 import type { KseniaThermostat, ThermostatOutputRole } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import {
-    normalizeMatterSetpointC, matterSystemModeForRole, domainModeToMatterSystemMode, isCoolingSetpointActiveForRole,
+    normalizeMatterSetpointC, matterSystemModeForRole, isCoolingSetpointActiveForRole,
     DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C,
     DEFAULT_HEATING_SETPOINT_C, DEFAULT_COOLING_SETPOINT_C,
 } from './matter-thermostat-mapper';
@@ -71,13 +71,15 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
     const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
     const modeOf = (d: KseniaThermostat): Mode | undefined => {
         const observed = d.status?.mode ?? d.mode;
-        return tracker ? tracker.effectiveMode(uuid, observed) : observed;
+        return tracker ? tracker.effectiveMode(uuid, observed, d.status?.observedAt) : observed;
     };
     const targetOf = (d: KseniaThermostat): number | undefined => {
         const observed = d.status?.targetTemperature ?? d.targetTemperature;
-        return tracker ? tracker.effectiveTarget(uuid, observed) : observed;
+        return tracker ? tracker.effectiveTarget(uuid, observed, d.status?.observedAt) : observed;
     };
     const coolActive = (role: ThermostatOutputRole, d: KseniaThermostat): boolean => isCoolingSetpointActiveForRole(role, modeOf(d));
+    /** The role the live endpoint was registered for, else the device's. */
+    const roleOf = (d: KseniaThermostat): ThermostatOutputRole => tracker?.registeredRole(uuid) ?? thermostatRole(d);
     const client = (): KseniaWebSocketClient => {
         const ws = getWsClient();
         if (!ws) throw new Error('no connection to the panel');
@@ -95,11 +97,19 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         deps.republish?.();
     };
 
+    /**
+     * Records an ACK in the tracker's ledger only when the client did not
+     * apply it to the device state itself (`status.acknowledged` unchanged).
+     * When it did, the state already says what the ACK means (in AUTO or OFF
+     * a setpoint is not the live target), and the ledger must not override it.
+     */
+    const ackedByClient = (before: unknown): boolean => latest().status?.acknowledged !== before;
+
     const sendTemp = async (attr: SetpointAttr, label: string, value: number): Promise<void> => {
-        tracker?.recordIntent(uuid, attr, Math.round(value * 100));
         try {
+            const before = latest().status?.acknowledged;
             await client().setThermostatTemperature(device.id, value);
-            tracker?.recordConfirmed(uuid, 'target', value);
+            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'target', value);
         } catch (err) {
             failed(attr, `setThermostatTemperature(${label}) failed: ${errMsg(err)}`);
         }
@@ -112,7 +122,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
     const setpointChange = async (attr: SetpointAttr, centi: number): Promise<void> => {
         const cooling = attr === 'occupiedCoolingSetpoint';
         const current = latest();
-        const role = thermostatRole(current);
+        const role = roleOf(current);
         if (coolActive(role, current) !== cooling) {
             log.debug(`[Matter] ${device.name}: ${attr}=${fmt(centi)}°C not forwarded (not the active setpoint)`);
             return;
@@ -132,7 +142,6 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         const target = targetOf(current);
         if (typeof target === 'number' && Math.abs(target - value) < 0.05) {
             log.debug(`[Matter] idempotent Matter thermostat change ignored: ${device.name} ${attr} ${value}°C already current`);
-            tracker?.recordIntent(uuid, attr, Math.round(value * 100));
             return;
         }
         log.debug(`[Matter] external Matter command accepted: ${device.name} ${attr} -> ${value}°C`);
@@ -141,7 +150,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
 
     const setpointRaiseLower = async (args: { mode: number; amount: number }): Promise<void> => {
         const current = latest();
-        const role = thermostatRole(current);
+        const role = roleOf(current);
         const cooling = coolActive(role, current);
         // Only the active setpoint exists on the panel; `Both` adjusts it too.
         if ((args.mode === RAISE_LOWER_HEAT && cooling) || (args.mode === RAISE_LOWER_COOL && !cooling)) {
@@ -172,7 +181,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
             return;
         }
         const current = latest();
-        const role = thermostatRole(current);
+        const role = roleOf(current);
         const klares4Mode = matterSystemModeForRole(requestedMode, role);
         if (klares4Mode === null) {
             // matter.js already refuses most of these by conformance; this covers
@@ -189,15 +198,15 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
             failed('systemMode', `systemMode ${klares4Mode} not forwarded: ${OTHER_SEASON}; switching it here would change the season of the whole program`);
             return;
         }
-        tracker?.recordIntent(uuid, 'systemMode', domainModeToMatterSystemMode(klares4Mode));
         if (modeOf(current) === klares4Mode) {
             log.debug(`[Matter] idempotent Matter thermostat change ignored: ${device.name} mode=${klares4Mode} already current`);
             return;
         }
         log.debug(`[Matter] external Matter command accepted: ${device.name} systemMode ${requestedMode} -> ${klares4Mode}`);
         try {
+            const before = latest().status?.acknowledged;
             await client().setThermostatMode(device.id, klares4Mode);
-            tracker?.recordConfirmed(uuid, 'mode', klares4Mode);
+            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'mode', klares4Mode);
         } catch (err) {
             failed('systemMode', `setThermostatMode failed: ${errMsg(err)}`);
         }
@@ -211,7 +220,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         occupiedCoolingSetpointChange: async (args: { occupiedCoolingSetpoint: number }) => {
             // Only the legacy payload declares a cooling setpoint on a heating
             // output; there it is read-only state and never a command.
-            if (thermostatRole(latest()) === 'heating') {
+            if (roleOf(latest()) === 'heating') {
                 log.debug(`[Matter] ${device.name}: cooling setpoint change ignored (heating output)`);
                 return;
             }

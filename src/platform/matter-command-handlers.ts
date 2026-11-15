@@ -14,6 +14,7 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaCover, KseniaLight } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
+import { hasObservedState } from '../device-observation';
 
 type Handlers = NonNullable<MatterAccessory['handlers']>;
 
@@ -22,6 +23,8 @@ export interface CommandContext<T> {
     getWsClient: () => KseniaWebSocketClient | undefined;
     latest: () => T;
     log?: Logger;
+    /** Sends a state through the registry's update queue (never inside a running command). */
+    pushState?: (attributes: Record<string, unknown>) => void;
 }
 
 // Matter spec: Status.UnsupportedCommand. Homebridge ships no named class for it.
@@ -139,14 +142,20 @@ function liftPercent100ths(panelPosition: number): number {
  */
 function keepReportedPosition(device: KseniaCover, requested: number, ctx: CommandContext<KseniaCover>): void {
     setTimeout(() => {
-        const position = ctx.latest().status?.position;
+        const latest = ctx.latest();
+        // A position the panel never reported (cache without the marker) is not sent as one.
+        const position = hasObservedState(latest) ? latest.status?.position : undefined;
         const target = liftPercent100ths(requested);
         const attributes: Record<string, unknown> = { targetPositionLiftPercent100ths: target };
-        if (Number.isFinite(position)) {
+        if (typeof position === 'number' && Number.isFinite(position)) {
             const current = liftPercent100ths(position);
             const movement = current === target ? MOVEMENT_STOPPED : current < target ? MOVEMENT_CLOSING : MOVEMENT_OPENING;
             attributes.currentPositionLiftPercent100ths = current;
             attributes.operationalStatus = { global: movement, lift: movement, tilt: MOVEMENT_STOPPED };
+        }
+        if (ctx.pushState) {
+            ctx.pushState(attributes);
+            return;
         }
         ctx.api.matter?.updateAccessoryState(device.id, 'windowCovering', attributes)
             .catch((err: unknown) => {
