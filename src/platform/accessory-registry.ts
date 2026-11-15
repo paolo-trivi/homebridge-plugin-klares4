@@ -1,6 +1,6 @@
 import type { API, Logger, PlatformAccessory } from 'homebridge';
 import { sanitizeHapDisplayName } from '../display-name';
-import { hasObservedState, mergeKnownState } from '../device-observation';
+import { adoptCachedState, hasObservedState, mergeKnownState, recordObservation } from '../device-observation';
 import type { KseniaDevice } from '../types';
 import { errorDetail } from '../isolation';
 import {
@@ -62,6 +62,8 @@ export class AccessoryRegistry {
         }
         // Excluded: removed at the end of the first sync, never commandable meanwhile.
         if (this.options.isDeviceExcluded?.(device)) return;
+        // Before the handler reads it: a cached sensor never reported is not a reading.
+        adoptCachedState(accessory.context, device);
 
         try {
             // Legacy caches keep the invalid Name that HAP warns about at every publish.
@@ -88,6 +90,7 @@ export class AccessoryRegistry {
             // Discovery placeholders must not overwrite the state cached from the last session.
             if (!hasObservedState(device)) device = mergeKnownState(device, existingAccessory.context.device as KseniaDevice);
             existingAccessory.context.device = device;
+            recordObservation(existingAccessory.context, device);
             this.alignHapNames(existingAccessory, device);
             const existingHandler = this.options.accessoryHandlers.get(uuid);
             if (existingHandler) {
@@ -109,6 +112,7 @@ export class AccessoryRegistry {
             uuid,
         );
         accessory.context.device = device;
+        recordObservation(accessory.context, device);
 
         // The services must exist before HAP publishes the accessory, but the
         // handler is kept only once Homebridge has accepted it (the bridge
@@ -163,6 +167,7 @@ export class AccessoryRegistry {
         }
 
         accessory.context.device = device;
+        recordObservation(accessory.context, device);
         this.options.updateAccessoryHandler(handler, device);
     }
 
