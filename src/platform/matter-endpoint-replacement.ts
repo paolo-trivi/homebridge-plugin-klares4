@@ -33,6 +33,21 @@ export interface ReplaceableRegistration {
  * and the registration flow checks it again once the endpoint answers. Across
  * a chain of attempts the first endpoint's identity is the one kept.
  */
+/**
+ * The endpoint registered next under `reg.uuid` takes `uniqueId` (an identity
+ * kept from an earlier endpoint of the same device, e.g. the sensor a
+ * Thermostat recovery removed), applied with the register like the one
+ * `replaceEndpoint` records.
+ */
+export function inheritIdentity(
+    reg: ReplaceableRegistration,
+    coordinator: MatterTopologyCoordinator,
+    uniqueId: string | undefined,
+): void {
+    reg.inheritedUniqueId = uniqueId;
+    coordinator.inheritOnNextRegister(reg.uuid, uniqueId);
+}
+
 export async function replaceEndpoint(
     reg: ReplaceableRegistration,
     coordinator: MatterTopologyCoordinator,

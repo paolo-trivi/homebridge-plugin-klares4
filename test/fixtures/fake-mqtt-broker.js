@@ -44,6 +44,10 @@ async function startFakeBroker(t, { connackCodes = [0] } = {}) {
     packets,
     connects: () => connects,
     subscribed: () => packets.some((p) => p.cmd === 'subscribe'),
+    /** Drops every client connection (a broker restart, a network cut). */
+    dropConnections() {
+      for (const socket of sockets) socket.destroy();
+    },
     /** Live (not retained) QoS 0 publish to every connected client. */
     publish(topic, payload) {
       for (const socket of sockets) {

@@ -108,13 +108,16 @@ jobs:
             console.log('@matter/main', read('node_modules/@matter/main/package.json'));
           "
 
-      - name: Contract tests on the real Homebridge Matter stack
-        run: npm run test:contract
+      # Every test file that boots the real Homebridge Matter stack (the ones
+      # loading test/fixtures/real-matter-stack), one at a time, not only the
+      # contract file.
+      - name: Real Homebridge Matter stack tests
+        run: npm run test:real-stack
 
       - name: Explain a contract failure
         if: failure()
         run: |
-          echo "::error title=Contract tests failed on Homebridge ${{ matrix.homebridge }}.x::The plugin does not work with this Homebridge/matter.js line, or the test harness (test/fixtures/real-matter-stack.js, test/matter-real-stack-contract.test.js) relies on behaviour that differs in it. Read the first failing test above."
+          echo "::error title=Real-stack tests failed on Homebridge ${{ matrix.homebridge }}.x::The plugin does not work with this Homebridge/matter.js line, or the test harness (test/fixtures/real-matter-stack.js and the tests that use it) relies on behaviour that differs in it. Read the first failing test above."
 
   coverage:
     name: Coverage

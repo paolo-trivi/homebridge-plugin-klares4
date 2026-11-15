@@ -67,6 +67,7 @@ test('stale-endpoint purge: the re-registered endpoint keeps the uniqueId', { ti
     const registry = registryOn(stack, t);
 
     await registry.addOrUpdateAccessory(light(1, { on: false, dimmable: false }));
+    await stack.until(() => stack.record('light_1'), 'first light_1 endpoint');
     const first = stack.read('light_1', BRIDGED).uniqueId;
     await waitFor(() => registry.getStatus('light_1') === 'registered', 10000);
 
@@ -109,6 +110,7 @@ test('TemperatureSensor fallback: another kind of device, new uniqueId', { timeo
     const registry = registryOn(stack, t);
 
     await registry.addOrUpdateAccessory(thermostat(3));
+    await stack.until(() => stack.record('thermostat_3'), 'first thermostat_3 endpoint');
     const first = stack.read('thermostat_3', BRIDGED).uniqueId;
     await waitFor(() => stack.deviceTypeName('thermostat_3') === 'TemperatureSensor'
         && registry.getStatus('thermostat_3') === 'registered', 10000);

@@ -1,6 +1,10 @@
 import type { API, Logger } from 'homebridge';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { PendingMatterStateUpdate } from './matter-state-updates';
+import { MatterCommandGuard } from './matter-command-guard';
+
+/** Retry interval of a flush held back by a Matter command on the endpoint. */
+const HELD_RETRY_MS = 10;
 
 export class MatterStateUpdateQueue {
     private readonly flushTimers = new Map<string, NodeJS.Timeout>();
@@ -11,12 +15,18 @@ export class MatterStateUpdateQueue {
         private readonly registrations: Map<string, MatterRegistration>,
         private readonly fmtErr: (err: unknown) => string,
         /**
-         * Invoked just before `api.matter.updateAccessoryState` so the registry can
-         * record the values it's about to push (used by the thermostat echo tracker
-         * to recognise its own state echo when matter.js re-fires the handlers).
+         * Invoked just before `api.matter.updateAccessoryState`: returns the
+         * attributes to push (a thermostat update is rebuilt from the latest
+         * state) and lets the registry record them (the thermostat echo tracker
+         * recognises its own state echo when matter.js re-fires the handlers).
          */
-        private readonly onBeforePush?: (uuid: string, clusterName: string, attrs: Record<string, unknown>) => void,
-    ) {}
+        private readonly onBeforePush?: (reg: MatterRegistration, update: PendingMatterStateUpdate) => Record<string, unknown>,
+    ) {
+        this.commands = new MatterCommandGuard(api);
+    }
+
+    /** Serializes this queue's pushes with the controller commands on each endpoint. */
+    public readonly commands: MatterCommandGuard;
 
     /**
      * The endpoint answered the probe, so no bootstrap delay is needed;
@@ -30,7 +40,7 @@ export class MatterStateUpdateQueue {
         reg: MatterRegistration,
         update: PendingMatterStateUpdate,
     ): Promise<void> {
-        if (!this.isReadyForStateUpdates(reg)) {
+        if (!this.isReadyForStateUpdates(reg) || this.commands.isBusy(reg.uuid)) {
             this.queue(reg, update);
             this.scheduleFlush(reg.uuid);
             return;
@@ -59,6 +69,14 @@ export class MatterStateUpdateQueue {
             this.scheduleFlush(uuid);
             return;
         }
+        if (this.commands.isBusy(uuid)) {
+            const timer = setTimeout(() => {
+                this.flushTimers.delete(uuid);
+                void this.flush(uuid);
+            }, HELD_RETRY_MS);
+            this.flushTimers.set(uuid, timer);
+            return;
+        }
 
         const pending = reg.pendingStateUpdates.splice(0);
         this.log.debug(`[Matter] pending updates flush: ${reg.displayName} (${pending.length})`);
@@ -73,10 +91,12 @@ export class MatterStateUpdateQueue {
 
     private async updateAccessoryState(reg: MatterRegistration, update: PendingMatterStateUpdate): Promise<void> {
         try {
-            this.onBeforePush?.(reg.uuid, update.clusterName, update.attributes);
-            await this.api.matter!.updateAccessoryState(reg.uuid, update.clusterName, update.attributes, update.partId);
+            const attributes = this.onBeforePush?.(reg, update) ?? update.attributes;
+            this.commands.notePush(reg.uuid, update.clusterName, attributes, () => reg.matterAccessory.clusters?.[update.clusterName]);
+            await this.api.matter!.updateAccessoryState(reg.uuid, update.clusterName, attributes, update.partId);
         } catch (err) {
-            this.log.debug(`[Matter] state update failed for ${reg.displayName} (${update.clusterName}): ${this.fmtErr(err)}`);
+            // Lost values are not a debug matter: the endpoint shows a stale state until the next update.
+            this.log.warn(`[Matter] state update refused for ${reg.displayName} (${update.clusterName}): ${this.fmtErr(err)}`);
         }
     }
 

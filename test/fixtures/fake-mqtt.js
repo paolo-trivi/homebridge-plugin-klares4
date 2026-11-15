@@ -14,9 +14,9 @@ class FakeMqttClient extends EventEmitter {
     this.published = [];
     this.subscriptions = [];
     this.ended = false;
-    this.reconnects = 0;
-    /** `options.will` as it was at each CONNECT (mqtt.js reads it again every time). */
-    this.connectWills = [this.options.will];
+    this.stream = { destroyed: false, destroy() { this.destroyed = true; } };
+    /** Set to model a broker that never confirms: `end(false)` then never completes. */
+    this.holdEnd = false;
   }
 
   publish(topic, payload, options, callback) {
@@ -33,16 +33,10 @@ class FakeMqttClient extends EventEmitter {
 
   end(force, opts, callback) {
     this.ended = true;
-    this.endForced = force;
+    this.endForced = force === true;
+    if (!force && this.holdEnd) return this;
     this.connected = false;
     if (typeof callback === 'function') callback();
-    return this;
-  }
-
-  reconnect() {
-    this.reconnects += 1;
-    this.connectWills.push(this.options.will);
-    this.emit('reconnect');
     return this;
   }
 

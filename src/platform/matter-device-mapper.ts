@@ -11,13 +11,12 @@ import type {
     KseniaZone,
 } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
-import { hasObservedState } from '../device-observation';
+import { contextWithObservation, hasObservedState } from '../device-observation';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import { buildThermostatMatterState, toMatterTemperatureCelsius, thermostatSupportsCooling } from './matter-thermostat-mapper';
 import { sanitizeMatterAccessoryName, MatterNameRegistry } from './matter-name-sanitizer';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { buildThermostatHandlers } from './matter-thermostat-handlers';
-import type { PendingMatterStateUpdate } from './matter-state-updates';
 import { buildCoverHandlers, buildLightHandlers, buildMomentaryHandlers, requireWsClient } from './matter-command-handlers';
 import {
     coverLift, finiteNumber, humidityMeasuredValue, MAX_LEVEL, MIN_LEVEL, illuminanceMeasuredValue, levelFromBrightness, temperatureMeasuredValue,
@@ -77,8 +76,12 @@ interface MapperDeps {
     getLatestDevice?: (id: string) => KseniaDevice | undefined;
     /** Re-publish the known state of a device after a command the panel refused. */
     republishState?: (id: string) => void;
-    /** A Matter-only state update for the registry's state-update queue (see `CommandContext.queueState`). */
-    queueState?: (id: string, update: PendingMatterStateUpdate) => void;
+    /**
+     * Sends a state the handlers produce (momentary auto-off, cover position)
+     * through the registry's update queue, so it never lands inside a running
+     * controller command. Without it, straight to `api.matter`.
+     */
+    pushState?: (id: string, cluster: string, attributes: Record<string, unknown>) => void;
 }
 
 function latestSnapshot<T extends KseniaDevice>(device: T, deps: MapperDeps): T {
@@ -91,6 +94,10 @@ const DEFAULT_MOMENTARY_AUTO_OFF_MS = 500;
 function scheduleMomentaryAutoOff(uuid: string, deps: MapperDeps): void {
     const delay = deps.momentaryAutoOffMs ?? DEFAULT_MOMENTARY_AUTO_OFF_MS;
     setTimeout(() => {
+        if (deps.pushState) {
+            deps.pushState(uuid, 'onOff', { onOff: false });
+            return;
+        }
         deps.api.matter?.updateAccessoryState(uuid, 'onOff', { onOff: false })
             .catch((err: unknown) => {
                 deps.log.debug(`[Matter] momentary auto-off failed for ${uuid}: ${err instanceof Error ? err.message : String(err)}`);
@@ -113,7 +120,7 @@ function baseFields(
         manufacturer: 'Ksenia',
         model: `Lares4 ${device.type}`,
         firmwareRevision: PLUGIN_VERSION,
-        context: { device },
+        context: contextWithObservation(device),
     };
 }
 
@@ -183,7 +190,7 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
         },
         handlers: buildCoverHandlers(device, {
             api, getWsClient, log, latest: () => latestSnapshot(device, deps),
-            queueState: deps.queueState ? (update) => deps.queueState?.(device.id, update) : undefined,
+            pushState: deps.pushState && ((attributes) => deps.pushState?.(device.id, 'windowCovering', attributes)),
         }),
     };
 }

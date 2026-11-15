@@ -11,7 +11,7 @@ Nota per chi integra: `.gitignore` conteneva la riga `scripts/`, che nascondeva 
 |---|---|---|
 | `validate` | `Validate (Node 22)`, `Validate (Node 24)`, `Validate (Node 26)` | `npm ci --ignore-scripts`, `npm run verify` (max-lines, tsc strict, suite compresi i test di contratto con l'Homebridge del lockfile). I nomi 22 e 24 sono quelli dei check obbligatori attuali. |
 | `engines-floor` | `Engines floor (Node 22.12.0)` | stesso `verify` sul limite inferiore di `engines.node` |
-| `contract` | `Contract (Homebridge 2.4.x)`, `Contract (Homebridge 2.5.x)` | installa Homebridge `~2.4.0` / `~2.5.0` in `node_modules` senza salvare (`npm install --no-save --no-package-lock`), poi `npm run test:contract` su Node 26. Non è `continue-on-error`. |
+| `contract` | `Contract (Homebridge 2.4.x)`, `Contract (Homebridge 2.5.x)` | installa Homebridge `~2.4.0` / `~2.5.0` in `node_modules` senza salvare (`npm install --no-save --no-package-lock`), poi `npm run test:real-stack` su Node 26: **tutti** i file di test che avviano lo stack Matter reale (non solo il contratto), uno alla volta. Non è `continue-on-error`. |
 | `coverage` | `Coverage` | `npm run test:coverage` su Node 22, con soglie (sotto) |
 | `package` | `Package` | `npm run check:pack`: `npm pack` con build di release e verifica del tarball contro una allowlist |
 
@@ -44,6 +44,22 @@ Procedura (da `RELEASING`/docs contributori): PR di bump di `package.json` e `CH
 - `permissions: {}` a livello di workflow, `contents: write` e `pull-requests: write` solo nel job; nessun checkout.
 - Auto-merge solo se **ogni** dipendenza di `updated-dependencies-json` è patch o minor E (`direct:development` oppure ecosistema `github_actions`). Le dipendenze runtime, gli aggiornamenti major e le indirette non vengono auto-unite: la PR resta aperta per la review.
 - `dependabot.yml`: gruppi separati `npm-dev-minor-and-patch` e `npm-runtime-minor-and-patch`, così le PR delle dipendenze runtime non si mescolano a quelle di sviluppo; gli aggiornamenti delle action (`github-actions`, gruppo `actions-minor-and-patch`) continuano e riscrivono sia lo SHA sia il commento con la versione.
+
+## Esecuzione della suite e file con stack reale (R4, rc.1)
+
+Problema: `node --test --test-timeout=N` è un budget per FILE oltre che per test; un file che avvia matter.js, su un runner con pochi core o con la copertura accesa, esauriva i 30 s senza alcun difetto (8 file cancellati e `npm test` con exit 1 con load 24-36). Con questa macchina a load 25 anche un file ordinario (`platform-discovery-epoch`) è stato cancellato: nessuna impostazione risolve una macchina saturata da altri; il punto è non far competere tra loro i file pesanti e quelli leggeri.
+- `scripts/run-tests.js` (usato da `npm test`, quindi da `verify`): fase 1 i file ordinari in parallelo con `--test-timeout=60000`; fase 2 i file che caricano `test/fixtures/real-matter-stack` uno alla volta (`--test-concurrency=1`) con `--test-timeout=120000`. Le fasi sono sequenziali, quindi non competono; tutta la suite gira comunque e un fallimento in una fase non salta l'altra. Il significato di `npm test` e `verify` non cambia, l'output ha due riepiloghi TAP invece di uno.
+- `npm run test:real-stack` = build + solo la fase 2. Lo usa il job `Contract`. `npm run test:contract` (solo il file di contratto) resta per l'uso locale.
+- `test:coverage` resta una sola invocazione (la copertura di due processi non si fonde): `--test-concurrency=2 --test-timeout=120000`.
+- **Criterio per i file con stack reale (esplicito e verificato)**: un file di test è "stack reale" se, seguendo i `require()`/`import()` relativi attraverso le fixture che carica, raggiunge `test/fixtures/real-matter-stack.js`. `test/run-tests-plan.test.js` lo confronta con una scansione indipendente (chi chiama le funzioni esportate dall'harness, direttamente o tramite una fixture) e fallisce se un file usa l'harness senza essere classificato così, o viceversa (provato in negativo con un file che costruisce il percorso a runtime). Per il job 2.4.x servirà un elenco di file validi su 2.4 (lo prepara l'agente che adatta l'harness): va letto dal runner, senza rinominare file.
+- I test dei file con stack reale hanno ciascuno `{ timeout: 30000|60000|120000 }` esplicito, che prevale sul flag: non li ho toccati (file di altri task, in modifica per 2.4.x). Sono il guardiano di hang per singolo test; con le fasi separate bastano. Se un test cancellato per timeout comparisse ancora, alzare quell'opzione, non il flag.
+- Timeout scelti per un runner CI a 2-4 core non saturato: 60 s per file ordinario (un file ordinario dura qualche secondo da scarico), 120 s per file con stack reale (da scarico 3-10 s ciascuno), 30-120 s per test dove già dichiarato. Margine di 10x sul caso normale: un hang viene colto, un runner lento no. Non vanno alzati per inseguire una macchina saturata. **La prova sotto carico va ripetuta a macchina scarica** (vedi l'esito delle esecuzioni nel resoconto: sono state fatte con load 25-38 per altri agenti sulla stessa macchina).
+
+## Auto-merge: compilatore e tipi esclusi (rc.1)
+`typescript` e `@types/*` sono devDependencies ma determinano il JavaScript e le dichiarazioni pubblicate: una minor del compilatore non può entrare senza review. `dependabot-auto-merge.yml` rifiuta l'auto-merge se un qualunque pacchetto della PR corrisponde a `^(typescript|@types/.+)$`; `dependabot.yml` ha un gruppo `npm-build-tools` (typescript, `@types/*`) separato da quello delle altre dev-dependencies. Restano auto-unite, a CI verde, solo le altre devDependencies (es. `homebridge`, che è il banco dei test) e le action. **Decisione da confermare**: se vuoi review anche su `homebridge`, aggiungilo a `REVIEWED_PACKAGES` (workflow) e ai `patterns` del gruppo (dependabot).
+
+## `release-guard`: formato delle versioni (R5, rc.1)
+Prima `X.Y.Z-rc1` (senza punto) veniva riconosciuta come rc e pubblicata su `rc`, ma `latestRc` non la contava e la stable successiva veniva rifiutata. Ora sono accettate solo `X.Y.Z`, `X.Y.Z-rc.N`, `X.Y.Z-beta.N`; `-rc1`, `-beta2` e il resto sono rifiutati con un messaggio che dice il formato giusto (test in `test/release-guard.test.js`). Le versioni storiche già pubblicate (`2.0.1-beta2`) non sono interessate: nessuna viene ripubblicata.
 
 ## Packaging (G-06, TD-Q-03)
 

@@ -6,14 +6,21 @@ import { buildStatusTopic, isValidTopicPrefix } from '../mqtt/topic-parser';
 import { checkBrokerUrl } from '../mqtt/broker-url';
 import type { Lares4Platform } from '../platform';
 import { AccessoryIndexService } from './accessory-index-service';
-import { BrokerSession, DEFAULT_RECONNECT_BACKOFF, type MqttConnectFn, type ReconnectBackoff } from './broker-session';
+import {
+    BrokerSession,
+    DEFAULT_RECONNECT_BACKOFF,
+    DEFAULT_SESSION_TIMING,
+    type MqttConnectFn,
+    type ReconnectBackoff,
+    type SessionTiming,
+} from './broker-session';
 import { CommandExecutor } from './command-executor';
 import { CommandIntake } from './command-intake';
 import { RoomResolver } from './room-resolver';
 import { StatePublisher } from './state-publisher';
 import { ThrottledWarnings } from './throttled-log';
 
-export type { MqttConnectFn, ReconnectBackoff } from './broker-session';
+export type { MqttConnectFn, ReconnectBackoff, SessionTiming } from './broker-session';
 
 /** What the bridge reads from the platform; `Lares4Platform` provides it. */
 export type MqttBridgePlatform = Pick<Lares4Platform, 'accessoryHandlers' | 'config'>;
@@ -22,6 +29,7 @@ export interface MqttBridgeDeps {
     /** Creates the MQTT client; `mqtt.connect` by default. Tests pass a fake. */
     connect?: MqttConnectFn;
     reconnectBackoff?: ReconnectBackoff;
+    sessionTiming?: Partial<SessionTiming>;
     /**
      * The platform's single decision on excluded devices (config lists and
      * exposure policy): such a device is never a command target, even with a
@@ -96,6 +104,7 @@ export class MqttBridge {
             log: this.log,
             connect: deps.connect ?? mqtt.connect,
             backoff: deps.reconnectBackoff ?? DEFAULT_RECONNECT_BACKOFF,
+            timing: { ...DEFAULT_SESSION_TIMING, ...deps.sessionTiming },
             onConnect: (client: mqtt.MqttClient): void => this.onConnect(client),
             onMessage: (topic: string, payload: Buffer, packet: mqtt.IPublishPacket): void => {
                 if (this.commandsEnabled) this.intake.handle(topic, payload, packet);
@@ -157,7 +166,7 @@ export class MqttBridge {
     private publishStatus(client: mqtt.MqttClient): void {
         const status: MqttStatusPayload = { state: 'online', panel: this.panel, timestamp: new Date().toISOString() };
         client.publish(this.statusTopic, JSON.stringify(status), { qos: this.qos, retain: true }, (error?: Error): void => {
-            if (error) this.log.error('MQTT: Status publish error:', error.message);
+            if (error && client.connected) this.log.error('MQTT: Status publish error:', error.message);
         });
     }
 

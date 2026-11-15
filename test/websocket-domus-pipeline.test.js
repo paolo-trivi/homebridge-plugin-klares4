@@ -147,6 +147,7 @@ test('STATUS_SYSTEM applies fallback only when the thermostat has no source (TH-
 
   state.thermostatToDomus.set('18', '1');
   state.domusLatest.set('1', { temp: 23, hum: 50, ts: Date.now() - 600000 });
+  state.hasCompletedInitialSync = true; // L1: the fallback waits for the initial realtime
 
   updater.updateSystemTemperatures([{ ID: '1', TEMP: { IN: '19.0', OUT: 'NA' } }]);
 

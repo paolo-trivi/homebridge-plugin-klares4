@@ -3,240 +3,291 @@
     "pluginType": "platform",
     "singular": true,
     "customUi": false,
-    "headerDisplay": "<div style='margin-bottom:12px;'><h3 style='margin:0 0 6px 0;'>Klares4 - Ksenia Lares4 per Homebridge</h3><p style='margin:0 0 12px 0;'>Plugin Homebridge per controllo locale della centrale Ksenia Lares4.</p><div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Prerequisiti:</strong><ul style='margin:8px 0 0 18px;padding:0;'><li>Centrale raggiungibile in rete locale</li><li>Interfaccia WebSocket abilitata</li><li>PIN utente valido (4-8 cifre)</li></ul></div></div>",
-    "footerDisplay": "<div style='margin-top:16px;padding-top:12px;border-top:1px solid currentColor;'><p style='margin:0 0 8px 0;'>Sviluppato da Paolo Trivisonno</p><p style='margin:0;'><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' rel='noopener noreferrer'>Documentazione</a> | <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' rel='noopener noreferrer'>Segnala Bug</a> | <a href='https://github.com/sponsors/paolo-trivi' target='_blank' rel='noopener noreferrer'>Supporta</a></p></div>",
+    "headerDisplay": "<div style='margin-bottom:12px;'><h3 style='margin:0 0 6px 0;'>Klares4 - Ksenia Lares4 for Homebridge</h3><p style='margin:0 0 12px 0;'>Homebridge plugin for local control of the Ksenia Lares4 panel, over HomeKit, Matter and MQTT.</p><div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Prerequisites:</strong><ul style='margin:8px 0 0 18px;padding:0;'><li>Panel reachable on the local network</li><li>WebSocket interface enabled</li><li>A valid user PIN (4-8 digits)</li></ul></div></div>",
+    "footerDisplay": "<div style='margin-top:16px;padding-top:12px;border-top:1px solid currentColor;'><p style='margin:0 0 8px 0;'>Developed by Paolo Trivisonno</p><p style='margin:0;'><a href='https://github.com/paolo-trivi/homebridge-plugin-klares4' target='_blank' rel='noopener noreferrer'>Documentation</a> | <a href='https://github.com/paolo-trivi/homebridge-plugin-klares4/issues' target='_blank' rel='noopener noreferrer'>Report a bug</a> | <a href='https://github.com/sponsors/paolo-trivi' target='_blank' rel='noopener noreferrer'>Support</a></p></div>",
     "schema": {
         "type": "object",
         "properties": {
             "name": {
-                "title": "Nome Piattaforma",
+                "title": "Platform Name",
                 "type": "string",
                 "default": "Klares4",
-                "description": "Nome identificativo che apparirà nei log di Homebridge",
+                "description": "Name shown in the Homebridge log",
                 "minLength": 1,
                 "maxLength": 50
             },
             "ip": {
-                "title": "Indirizzo IP Centrale",
+                "title": "Panel IP Address",
                 "type": "string",
                 "format": "ipv4",
                 "placeholder": "192.168.1.x",
-                "description": "Indirizzo IP locale della centrale Ksenia Lares4",
+                "description": "Local IP address of the Ksenia Lares4 panel",
                 "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
             },
             "port": {
-                "title": "Porta WebSocket",
+                "title": "WebSocket Port",
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 65535,
                 "placeholder": "443 / 80",
-                "description": "Lasciare vuoto per usare 443 con HTTPS e 80 senza HTTPS. Indicarla solo se la centrale usa una porta diversa."
+                "description": "Leave empty to use 443 with HTTPS and 80 without. Set it only if the panel uses a different port."
             },
             "https": {
-                "title": "Connessione Sicura (HTTPS)",
+                "title": "Secure Connection (HTTPS)",
                 "type": "boolean",
                 "default": true,
-                "description": "Usa connessione crittografata - raccomandata per la sicurezza"
+                "description": "Encrypted WebSocket (wss://). Recommended."
             },
             "allowInsecureTls": {
-                "title": "Consenti TLS Insicuro",
+                "title": "Allow Insecure TLS",
                 "type": "boolean",
                 "default": false,
-                "description": "Disabilita la verifica del certificato TLS e consente la rinegoziazione TLS legacy richiesta da molte centrali su Node 24 (solo in rete locale fidata)"
+                "description": "Turns off the check of the panel's TLS certificate and allows the legacy TLS renegotiation that most panels need (they use a self-signed certificate and old TLS settings). Use it only on a trusted local network, and only when the log asks for it."
             },
             "sender": {
-                "title": "Identificativo Client",
+                "title": "Client Identifier",
                 "type": "string",
                 "default": "homebridge",
                 "placeholder": "homebridge",
-                "description": "Nome univoco per identificare questa connessione sulla centrale",
+                "description": "Name that identifies this connection on the panel (letters, digits, hyphen, underscore)",
                 "pattern": "^[a-zA-Z0-9_-]+$",
                 "minLength": 1,
                 "maxLength": 32
             },
             "pin": {
-                "title": "PIN di Accesso",
+                "title": "Access PIN",
                 "type": "string",
                 "placeholder": "123456",
-                "description": "PIN utente abilitato all'uso delle API WebSocket sulla centrale",
+                "description": "User PIN allowed to use the WebSocket API on the panel. It is stored in clear text in Homebridge's config.json: use a dedicated panel user with only the rights this plugin needs.",
                 "pattern": "^[0-9]+$",
                 "minLength": 4,
                 "maxLength": 8
             },
             "showAdvanced": {
-                "title": "Mostra Configurazione Avanzata",
+                "title": "Show Advanced Settings",
                 "type": "boolean",
                 "default": false,
-                "description": "Abilita per personalizzare timing, heartbeat e parametri di rete"
+                "description": "Unlocks the timing and network parameters. Only used by this settings form."
             },
             "debug": {
-                "title": "Modalita Debug (Legacy)",
+                "title": "Debug Mode (legacy)",
                 "type": "boolean",
                 "default": false,
-                "description": "Deprecato: usare Livello Log. Vale solo se logLevel non e presente in config.json; la Homebridge UI salva sempre logLevel, quindi per il debug impostare Livello Log a 2"
+                "description": "Legacy switch. It adds a few detail lines (thermostat discovery, heartbeat, status updates) that are written at Homebridge's debug level, so they appear only when Homebridge itself runs in debug mode (-D). It does not depend on Log Level. It also stands in for Log Level 2 when Log Level is absent from config.json."
             },
             "logLevel": {
-                "title": "Livello Log",
+                "title": "Log Level",
                 "type": "integer",
                 "default": 1,
                 "oneOf": [
                     {
-                        "title": "0 - Minimal (solo errori e allarmi)",
+                        "title": "0 - Minimal",
                         "const": 0
                     },
                     {
-                        "title": "1 - Normal (funzionamento standard)",
+                        "title": "1 - Normal (default)",
                         "const": 1
                     },
                     {
-                        "title": "2 - Debug (dettagliato per diagnostica)",
+                        "title": "2 - Debug",
                         "const": 2
                     }
                 ],
-                "description": "Controlla la quantita di messaggi nei log"
+                "description": "Level 2 turns on the detailed trace of the plugin (commands sent to the panel, discovery and thermostat details). Those lines are written at Homebridge's debug level, so they appear only when Homebridge itself runs in debug mode (-D). Levels 0 and 1 currently behave the same."
             },
             "maxSeconds": {
-                "title": "Tempo Massimo Movimento Tapparelle",
+                "title": "Cover Travel Time",
                 "type": "integer",
                 "default": 30,
                 "minimum": 5,
                 "maximum": 300,
-                "description": "Secondi necessari per apertura/chiusura completa delle tapparelle"
+                "description": "Seconds a cover needs to open or close completely. HomeKit (HAP) only: Matter shows the position the panel reports."
             },
             "reconnectInterval": {
-                "title": "Intervallo Base Riconnessione",
+                "title": "Base Reconnect Interval",
                 "type": "integer",
                 "default": 5000,
                 "minimum": 1000,
                 "maximum": 60000,
-                "description": "Millisecondi prima del primo tentativo di riconnessione (raddoppia ad ogni tentativo)"
+                "description": "Milliseconds before the first reconnection attempt. It doubles at every failed attempt and restarts after a complete synchronization."
             },
             "heartbeatInterval": {
-                "title": "Intervallo Heartbeat",
+                "title": "Heartbeat Interval",
                 "type": "integer",
                 "default": 30000,
                 "minimum": 10000,
                 "maximum": 300000,
-                "description": "Millisecondi tra i ping di keep-alive per verificare la connessione"
+                "description": "Milliseconds between the keep-alive pings that detect a dead connection"
             },
             "commandTimeoutMs": {
-                "title": "Timeout Comandi API",
+                "title": "Command Timeout",
                 "type": "integer",
                 "default": 8000,
                 "minimum": 1000,
                 "maximum": 30000,
-                "description": "Timeout massimo (ms) per attendere la risposta ai comandi inviati alla centrale"
+                "description": "Maximum wait for the panel's answer to a command, thermostats included. A command still queued after this time is refused instead of being sent late."
             },
             "coverStepSize": {
-                "title": "Step Animazione Tapparelle",
+                "title": "Cover Animation Step",
                 "type": "integer",
                 "default": 5,
                 "minimum": 1,
                 "maximum": 20,
-                "description": "Percentuale di movimento per ogni step di animazione in HomeKit"
+                "description": "Percentage moved at each animation step while a cover travels in HomeKit. HomeKit (HAP) only."
             },
             "scenarioAutoOffDelay": {
-                "title": "Ritardo Auto-Off Scenari",
+                "title": "Scenario Auto-Off Delay",
                 "type": "integer",
                 "default": 500,
                 "minimum": 100,
                 "maximum": 5000,
-                "description": "Millisecondi prima che uno scenario torni automaticamente a OFF"
+                "description": "Milliseconds before a scenario switch, or a gate, returns to Off by itself after it was triggered"
             },
             "exposePartialArmScenarios": {
-                "title": "Esponi scenari di inserimento parziale",
+                "title": "Expose Partial-Arm Scenarios",
                 "type": "boolean",
                 "default": false,
-                "description": "Se disattivato (default) gli scenari di categoria PARTIAL (inserimento parziale) non vengono esposti a HomeKit, Matter o MQTT e non possono essere attivati, come gli scenari ARM/DISARM che non vengono mai esposti. Attivalo solo se accetti che chiunque possa azionare l'interruttore (assistenti vocali, scene, automazioni, MQTT) possa inserire parzialmente l'allarme senza che venga chiesto il PIN."
+                "description": "When off (default), scenarios of category PARTIAL (partial arming) are not exposed to HomeKit, Matter or MQTT and cannot be run, like ARM/DISARM scenarios, which are never exposed. Turn it on only if you accept that anyone who can operate the switch (voice assistants, scenes, automations, MQTT) can partially arm the alarm without a PIN prompt."
+            },
+            "exposeOutputs": {
+                "title": "Expose These Outputs Anyway",
+                "description": "Outputs of a category the plugin does not recognize (GEN such as sirens, alarm bridges, indicators or door strikes; IRR irrigation; no category) are not exposed to HomeKit, Matter or MQTT and cannot be controlled. Add an output here only if it is safe to switch it from voice assistants, scenes and automations (\"turn off all the lights\" included). The startup log lists the hidden outputs with the exact entry to add.",
+                "type": "array",
+                "default": [],
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "outputId": {
+                            "title": "Output ID (panel)",
+                            "type": "string",
+                            "required": true,
+                            "placeholder": "12",
+                            "pattern": "^[0-9]+$",
+                            "description": "The numeric ID of the output, as printed by the startup log"
+                        },
+                        "exposeAs": {
+                            "title": "Expose As",
+                            "type": "string",
+                            "enum": [
+                                "light"
+                            ],
+                            "description": "The output appears as a light (on/off), with the same ID, HomeKit identity and MQTT topic it had in 2.2.0. A row that leaves this empty means light."
+                        }
+                    }
+                }
+            },
+            "exposeScenarios": {
+                "title": "Expose These Scenarios Anyway",
+                "description": "Scenarios are exposed only when the panel lists them as generic (GEN). Scenarios with no category or an unknown one are hidden and cannot be run; list one here to expose it. Arming and disarming scenarios (ARM, DISARM) are never exposed; partial arming (PARTIAL) only with \"Expose Partial-Arm Scenarios\".",
+                "type": "array",
+                "default": [],
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "scenarioId": {
+                            "title": "Scenario ID (panel)",
+                            "type": "string",
+                            "required": true,
+                            "placeholder": "4",
+                            "pattern": "^[0-9]+$",
+                            "description": "The numeric ID of the scenario, as printed by the startup log"
+                        }
+                    }
+                }
             },
             "devicesSummaryDelay": {
-                "title": "Ritardo Sommario Dispositivi",
+                "title": "Device Summary Delay",
                 "type": "integer",
                 "default": 2000,
                 "minimum": 500,
                 "maximum": 10000,
-                "description": "Millisecondi di attesa prima di stampare il sommario dispositivi nei log"
+                "description": "Milliseconds to wait before the device summary is printed in the log"
             },
             "excludeZones": {
-                "title": "Zone da Escludere",
+                "title": "Excluded Zones",
                 "type": "array",
                 "items": {
                     "type": "string",
                     "pattern": "^[0-9]+$"
                 },
-                "default": []
+                "default": [],
+                "description": "Numeric zone IDs (the number of zone_5 is 5) to leave out of HomeKit, Matter and MQTT"
             },
             "excludeOutputs": {
-                "title": "Output da Escludere",
+                "title": "Excluded Outputs",
                 "type": "array",
                 "items": {
                     "type": "string",
                     "pattern": "^[0-9]+$"
                 },
-                "default": []
+                "default": [],
+                "description": "Numeric output IDs (the number of light_37 is 37) to leave out: lights, covers, gates and thermostats"
             },
             "excludeSensors": {
-                "title": "Sensori da Escludere",
+                "title": "Excluded Sensors",
                 "type": "array",
                 "items": {
                     "type": "string",
                     "pattern": "^[0-9]+$|^sensor_system_temp_(in|out)$"
                 },
-                "default": []
+                "default": [],
+                "description": "Numeric DOMUS sensor IDs (hides all three readings) or sensor_system_temp_in / sensor_system_temp_out for the panel's own temperatures"
             },
             "excludeScenarios": {
-                "title": "Scenari da Escludere",
+                "title": "Excluded Scenarios",
                 "type": "array",
                 "items": {
                     "type": "string",
                     "pattern": "^[0-9]+$"
                 },
-                "default": []
+                "default": [],
+                "description": "Numeric scenario IDs to leave out"
             },
             "matterExposure": {
-                "title": "Esposizione Matter per tipo",
+                "title": "Matter Exposure by Type",
                 "type": "object",
                 "properties": {
                     "zones": {
-                        "title": "Zone (sensori contatto)",
+                        "title": "Zones (contact sensors)",
                         "type": "boolean",
                         "default": true
                     },
                     "sensors": {
-                        "title": "Sensori ambientali",
+                        "title": "Environmental sensors",
                         "type": "boolean",
                         "default": true
                     },
                     "scenarios": {
-                        "title": "Scenari",
+                        "title": "Scenarios",
                         "type": "boolean",
                         "default": true
                     },
                     "lights": {
-                        "title": "Luci",
+                        "title": "Lights",
                         "type": "boolean",
                         "default": true
                     },
                     "covers": {
-                        "title": "Tapparelle / Cover",
+                        "title": "Covers",
                         "type": "boolean",
                         "default": true
                     },
                     "gates": {
-                        "title": "Cancelli",
+                        "title": "Gates",
                         "type": "boolean",
                         "default": true
                     },
                     "thermostats": {
-                        "title": "Termostati",
+                        "title": "Thermostats",
                         "type": "boolean",
                         "default": true
                     }
-                }
+                },
+                "description": "Turn off a whole type of device on Matter only. HomeKit and MQTT are not affected."
             },
             "matterOverrides": {
-                "title": "Override Matter per dispositivo",
-                "description": "Override opzionali per device ID Klares4. Non modificano HomeKit o MQTT.",
+                "title": "Matter Overrides per Device",
+                "description": "Optional per-device overrides, by Klares4 device ID. They change Matter only: HomeKit and MQTT are not affected.",
                 "type": "array",
                 "items": {
                     "type": "object",
@@ -247,59 +298,59 @@
                             "required": true,
                             "placeholder": "zone_18",
                             "pattern": "^(zone|light|cover|gate|thermostat|scenario|sensor_(temp|hum|light|motion|contact))_[A-Za-z0-9_-]+$|^sensor_system_temp_(in|out)$",
-                            "description": "ID come appare in klares4-devices.json (anche sensor_system_temp_in / sensor_system_temp_out per le temperature della centrale)"
+                            "description": "ID as printed by the startup log and written in klares4-devices.json (also sensor_system_temp_in / sensor_system_temp_out for the panel's own temperatures)"
                         },
                         "name": {
-                            "title": "Nome su Matter",
+                            "title": "Name on Matter",
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 64,
-                            "placeholder": "Contatto Studio"
+                            "placeholder": "Study Contact"
                         },
                         "exposed": {
-                            "title": "Esposto su Matter",
+                            "title": "Exposed on Matter",
                             "type": "boolean",
                             "default": true,
-                            "description": "Deselezionare per nascondere il dispositivo solo da Matter. Se selezionato, il dispositivo resta esposto anche se la sua categoria e disattivata in Esposizione Matter."
+                            "description": "Untick to hide the device from Matter only. When ticked, the device stays exposed even if its type is turned off in Matter Exposure by Type."
                         }
                     }
                 }
             },
             "matterRecoveryRequests": {
-                "title": "Richieste recovery termostati Matter",
-                "description": "Amministrativo: incrementare la generazione autorizza un solo nuovo tentativo controllato.",
+                "title": "Matter Thermostat Recovery Requests",
+                "description": "Administrative: raising the generation allows one more controlled attempt to register the thermostat as a native Matter Thermostat again.",
                 "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
                         "deviceId": {
-                            "title": "Device ID termostato",
+                            "title": "Thermostat Device ID",
                             "type": "string",
                             "required": true,
                             "placeholder": "thermostat_18",
                             "pattern": "^thermostat_[A-Za-z0-9_-]+$"
                         },
                         "generation": {
-                            "title": "Generazione",
+                            "title": "Generation",
                             "type": "integer",
                             "minimum": 1,
                             "placeholder": "1",
-                            "description": "Intero da 1 in su; una riga senza device ID o senza generazione viene ignorata"
+                            "description": "An integer from 1 up. A row without a device ID or without a generation is ignored."
                         }
                     }
                 }
             },
             "matterUnregisterTimeoutMs": {
-                "title": "Timeout Rimozione Endpoint Matter",
+                "title": "Matter Endpoint Removal Timeout",
                 "type": "integer",
                 "default": 3000,
                 "minimum": 500,
                 "maximum": 30000,
-                "description": "Millisecondi di attesa perche un endpoint rimosso sparisca davvero, prima di rinunciare e mantenere il nome attuale"
+                "description": "Milliseconds to wait for a removed Matter endpoint to really disappear before giving up and keeping the current name"
             },
             "customNames": {
-                "title": "Nomi personalizzati",
-                "description": "Rinomina i dispositivi su HomeKit, MQTT e Matter. Il vecchio formato a mappe per categoria resta accettato.",
+                "title": "Custom Names",
+                "description": "Renames devices on HomeKit, MQTT and Matter. The old per-category map format is still read, but the Homebridge UI deletes it the next time you save.",
                 "type": "array",
                 "items": {
                     "type": "object",
@@ -310,14 +361,14 @@
                             "required": true,
                             "placeholder": "light_18",
                             "pattern": "^(zone|light|cover|gate|thermostat|output|scenario)_[0-9]+$|^sensor_((temp|hum|light)_)?[0-9]+$|^sensor_system_temp_(in|out)$",
-                            "description": "ID come appare in klares4-devices.json (per i sensori DOMUS anche sensor_<id>: il nome vale per temperatura, umidita e luminosita; per le temperature della centrale sensor_system_temp_in / sensor_system_temp_out, nome usato cosi com'e)"
+                            "description": "ID as printed by the startup log and written in klares4-devices.json. For DOMUS sensors sensor_<id> works too: the name applies to temperature, humidity and light. For the panel's own temperatures use sensor_system_temp_in / sensor_system_temp_out (the name is used as written)."
                         },
                         "name": {
-                            "title": "Nome",
+                            "title": "Name",
                             "type": "string",
                             "required": true,
                             "minLength": 1,
-                            "placeholder": "Riscaldamento Soggiorno"
+                            "placeholder": "Living Room Heating"
                         }
                     }
                 }
@@ -326,36 +377,42 @@
                 "type": "object",
                 "properties": {
                     "target": {
-                        "title": "Temperatura Target Default",
+                        "title": "Default Target Temperature",
                         "type": "number",
                         "default": 21,
                         "minimum": 5,
-                        "maximum": 35
+                        "maximum": 35,
+                        "description": "Setpoint (°C) shown while the thermostat has not reported one"
                     },
                     "min": {
-                        "title": "Temperatura Minima",
+                        "title": "Minimum Temperature",
                         "type": "number",
                         "default": 10,
                         "minimum": 5,
-                        "maximum": 20
+                        "maximum": 20,
+                        "description": "Lowest setpoint (°C). Also applied to MQTT setpoint commands."
                     },
                     "max": {
-                        "title": "Temperatura Massima",
+                        "title": "Maximum Temperature",
                         "type": "number",
                         "default": 38,
                         "minimum": 25,
-                        "maximum": 40
+                        "maximum": 40,
+                        "description": "Highest setpoint (°C). Also applied to MQTT setpoint commands."
                     },
                     "step": {
-                        "title": "Step Regolazione",
+                        "title": "Adjustment Step",
                         "type": "number",
                         "default": 0.5,
                         "enum": [
                             0.5,
                             1
-                        ]
+                        ],
+                        "description": "Setpoint step (°C): 0.5 or 1"
                     }
-                }
+                },
+                "title": "Thermostat Temperature Defaults",
+                "description": "Setpoint range and step of the HomeKit (HAP) thermostat, also applied to setpoints received over MQTT. Matter thermostats use fixed ranges (heating 5-30 °C, cooling 16-35 °C)."
             },
             "domusThermostat": {
                 "type": "object",
@@ -366,22 +423,22 @@
                 },
                 "properties": {
                     "enabled": {
-                        "title": "Abilita Mapping DOMUS Termostati",
+                        "title": "Use DOMUS Sensors for Thermostats",
                         "type": "boolean",
                         "default": true,
-                        "description": "Usa i sensori DOMUS per la temperatura corrente dei termostati"
+                        "description": "Use the DOMUS sensors for the current temperature of the thermostats"
                     },
                     "sensorFreshnessMs": {
-                        "title": "Freshness Sensore DOMUS (ms)",
+                        "title": "DOMUS Sensor Freshness (ms)",
                         "type": "integer",
                         "default": 300000,
                         "minimum": 30000,
                         "maximum": 3600000,
-                        "description": "Dopo questo tempo senza update DOMUS, fallback su STATUS_SYSTEM.TEMP.IN"
+                        "description": "How long a realtime thermostat reading takes precedence over the DOMUS sensor reading"
                     },
                     "manualCommandPairs": {
-                        "title": "Mapping Comandi Termostato",
-                        "description": "Associa l'output del termostato all'ID del programma termostato usato per i comandi. Scritto dall'import KSA; di solito non va modificato a mano.",
+                        "title": "Thermostat Command Mapping",
+                        "description": "Links a thermostat output to the thermostat ID the panel uses for commands. Written by the KSA import; usually it needs no manual editing. A pair that points to an ID the panel does not have makes every write of that thermostat fail.",
                         "type": "array",
                         "items": {
                             "type": "object",
@@ -390,10 +447,10 @@
                                     "title": "Thermostat Output ID",
                                     "type": "string",
                                     "pattern": "^(thermostat_)?[0-9]+$",
-                                    "placeholder": "18 o thermostat_18"
+                                    "placeholder": "18 or thermostat_18"
                                 },
                                 "commandThermostatId": {
-                                    "title": "ID Programma Termostato",
+                                    "title": "Thermostat Program ID",
                                     "type": "string",
                                     "pattern": "^[0-9]+$",
                                     "placeholder": "3"
@@ -406,7 +463,7 @@
                         }
                     },
                     "manualPairs": {
-                        "title": "Override Manuale Mapping",
+                        "title": "Manual Sensor Mapping",
                         "type": "array",
                         "items": {
                             "type": "object",
@@ -415,22 +472,25 @@
                                     "title": "Thermostat Output ID",
                                     "type": "string",
                                     "pattern": "^(thermostat_)?[0-9]+$",
-                                    "placeholder": "18 o thermostat_18"
+                                    "placeholder": "18 or thermostat_18"
                                 },
                                 "domusSensorId": {
                                     "title": "DOMUS Sensor ID",
                                     "type": "string",
                                     "pattern": "^((sensor_(temp|hum|light)_)?[0-9]+)$",
-                                    "placeholder": "1 o sensor_temp_1"
+                                    "placeholder": "1 or sensor_temp_1"
                                 }
                             },
                             "required": [
                                 "thermostatOutputId",
                                 "domusSensorId"
                             ]
-                        }
+                        },
+                        "description": "Links a thermostat output to the DOMUS sensor that gives its room temperature"
                     }
-                }
+                },
+                "title": "DOMUS Thermostats",
+                "description": "How thermostats get their room temperature and which panel thermostat each one commands"
             },
             "ksaImport": {
                 "type": "object",
@@ -439,98 +499,102 @@
                     "applyAtStartup": false,
                     "applyDomusMappings": true,
                     "applyRoomMapping": true,
-                    "applyCustomNames": false,
-                    "applyExclusionSuggestions": false
+                    "applyCustomNames": false
                 },
                 "properties": {
                     "enabled": {
-                        "title": "Abilita Import KSA",
+                        "title": "Enable KSA Import",
                         "type": "boolean",
                         "default": false,
-                        "description": "Carica il file backup .ksa per generare mapping e metadata strutturali"
+                        "description": "Loads the .ksa backup at startup to derive thermostat mappings and room data. Nothing is written to config.json unless \"Apply to config at next start\" is on."
                     },
                     "filePath": {
-                        "title": "Percorso File .ksa",
+                        "title": ".ksa File Path",
                         "type": "string",
-                        "placeholder": "/var/lib/homebridge/prg-xxxx.ksa",
-                        "description": "Percorso assoluto del file backup .ksa esportato dalla centrale"
+                        "placeholder": "/var/lib/homebridge/backup.ksa",
+                        "description": "Absolute path of the .ksa backup exported from the panel"
                     },
                     "applyAtStartup": {
-                        "title": "Applica su config al riavvio",
+                        "title": "Apply to Config at Next Start",
                         "type": "boolean",
                         "default": false,
-                        "description": "Preview + apply: se attivo, applica su config.json e poi si resetta a false"
+                        "description": "Writes the selected sections into config.json at the next start, then switches itself off"
                     },
                     "applyDomusMappings": {
-                        "title": "Applica mapping Domus termostati",
+                        "title": "Apply Thermostat Mappings",
                         "type": "boolean",
-                        "default": true
+                        "default": true,
+                        "description": "Adds the thermostat mappings of the backup that are missing. The pairs you configured are never replaced."
                     },
                     "applyRoomMapping": {
-                        "title": "Applica room mapping",
+                        "title": "Apply Room Mapping",
                         "type": "boolean",
-                        "default": true
+                        "default": true,
+                        "description": "Uses the room names of the panel for MQTT topics when you have defined no rooms yourself. It never turns Room Mapping on."
                     },
                     "applyCustomNames": {
-                        "title": "Applica nomi personalizzati",
-                        "type": "boolean",
-                        "default": false
-                    },
-                    "applyExclusionSuggestions": {
-                        "title": "Applica suggerimenti esclusioni",
+                        "title": "Apply Custom Names",
                         "type": "boolean",
                         "default": false,
-                        "description": "Non consigliato di default: applica liste esclusione suggerite dal parser"
+                        "description": "Adds the names of the panel for devices you have not named yourself"
                     }
-                }
+                },
+                "title": "KSA Backup Import",
+                "description": "Reads a .ksa backup exported from the panel to derive thermostat mappings, rooms and names"
             },
             "mqtt": {
                 "type": "object",
                 "properties": {
                     "enabled": {
-                        "title": "Abilita Bridge MQTT",
+                        "title": "Enable MQTT Bridge",
                         "type": "boolean",
                         "default": false,
-                        "description": "Pubblica stati e riceve comandi via MQTT"
+                        "description": "Publishes device state and availability over MQTT and, unless \"Accept Commands over MQTT\" is off, receives commands"
+                    },
+                    "commands": {
+                        "title": "Accept Commands over MQTT",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When off, the bridge only publishes device state and availability: it does not subscribe to the .../set topics, so nothing published on the broker can operate lights, covers, thermostats or scenarios. Leave it on only if the broker requires authentication and its ACL limits who can write the .../set topics."
                     },
                     "broker": {
-                        "title": "URL Broker MQTT",
+                        "title": "MQTT Broker URL",
                         "type": "string",
                         "placeholder": "mqtt://192.168.1.x:1883",
-                        "description": "Indirizzo completo del broker (es: mqtt://host:1883 o mqtts://host:8883)"
+                        "description": "Full broker address with its scheme (mqtt://host:1883 or mqtts://host:8883). Prefer the Username and Password fields to credentials inside the URL."
                     },
                     "port": {
-                        "title": "Porta Broker",
+                        "title": "Broker Port",
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 65535,
                         "placeholder": "1883",
-                        "description": "Se indicata ha la precedenza sulla porta dell'URL. Indicarla sempre se il broker non usa 1883 (per esempio 8883 con mqtts)."
+                        "description": "Overrides the port in the broker URL. Leave it empty to use the URL's port, or the protocol default (1883 for mqtt://, 8883 for mqtts://)."
                     },
                     "username": {
                         "title": "Username",
                         "type": "string",
                         "placeholder": "mqtt_user",
-                        "description": "Credenziali di accesso al broker (opzionale)"
+                        "description": "Broker credentials (optional)"
                     },
                     "password": {
                         "title": "Password",
                         "type": "string",
                         "placeholder": "password",
-                        "description": "Password per l'autenticazione MQTT"
+                        "description": "Broker password"
                     },
                     "clientId": {
                         "title": "Client ID",
                         "type": "string",
                         "placeholder": "homebridge-klares4",
-                        "description": "Deve essere unico per ogni istanza sullo stesso broker. Lasciare vuoto per un ID casuale."
+                        "description": "Must be unique for each Homebridge instance on the same broker. Leave empty for a random one."
                     },
                     "topicPrefix": {
-                        "title": "Prefisso Topic",
+                        "title": "Topic Prefix",
                         "type": "string",
                         "default": "homebridge/klares4",
                         "placeholder": "homebridge/klares4",
-                        "description": "Prefisso per tutti i topic pubblicati"
+                        "description": "Prefix of every published topic. It cannot contain + or #."
                     },
                     "qos": {
                         "title": "Quality of Service",
@@ -550,13 +614,13 @@
                                 "const": 2
                             }
                         ],
-                        "description": "Livello di garanzia consegna messaggi"
+                        "description": "Message delivery guarantee"
                     },
                     "retain": {
-                        "title": "Retain Messages",
+                        "title": "Retain State Messages",
                         "type": "boolean",
                         "default": true,
-                        "description": "Il broker memorizza l'ultimo stato per i nuovi subscriber"
+                        "description": "The broker keeps the last state for new subscribers (state topics; the status topic is always retained)"
                     }
                 },
                 "dependencies": {
@@ -585,43 +649,44 @@
                             }
                         ]
                     }
-                }
+                },
+                "title": "MQTT Bridge"
             },
             "roomMapping": {
                 "type": "object",
                 "properties": {
                     "enabled": {
-                        "title": "Abilita Mappatura Stanze",
+                        "title": "Enable Room Mapping",
                         "type": "boolean",
                         "default": false,
-                        "description": "Organizza i topic MQTT per stanza invece che per tipo dispositivo"
+                        "description": "Organizes the MQTT topics by room instead of by device type. It changes every topic of the devices you map."
                     },
                     "rooms": {
-                        "title": "Stanze",
+                        "title": "Rooms",
                         "type": "array",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "roomName": {
-                                    "title": "Nome Stanza",
+                                    "title": "Room Name",
                                     "type": "string",
-                                    "placeholder": "soggiorno",
+                                    "placeholder": "living_room",
                                     "pattern": "^[a-z0-9_]+$",
-                                    "description": "Usare solo lettere minuscole, numeri e underscore"
+                                    "description": "Lowercase letters, digits and underscore only"
                                 },
                                 "devices": {
-                                    "title": "Dispositivi",
+                                    "title": "Devices",
                                     "type": "array",
                                     "items": {
                                         "type": "object",
                                         "properties": {
                                             "deviceId": {
-                                                "title": "ID Dispositivo",
+                                                "title": "Device ID",
                                                 "type": "string",
                                                 "pattern": "^(light_|cover_|gate_|zone_|thermostat_|scenario_)[0-9]+$|^sensor_(temp|hum|light)_[0-9]+$|^sensor_system_temp_(in|out)$"
                                             },
                                             "deviceName": {
-                                                "title": "Nome Dispositivo",
+                                                "title": "Device Name",
                                                 "type": "string",
                                                 "readOnly": true
                                             }
@@ -637,27 +702,22 @@
                             ]
                         }
                     }
-                }
+                },
+                "title": "Room Mapping"
             },
             "generateDebugFile": {
-                "title": "Genera File Debug",
+                "title": "Generate Debug File",
                 "type": "boolean",
                 "default": false,
-                "description": "Attiva per generare un file di diagnostica completo al prossimo riavvio (si disabilita automaticamente dopo la generazione)"
+                "description": "Turn on to write a diagnostic file at the next restart; it switches itself off afterwards. The file is confidential: it lists your devices and the state of your alarm system. Do not attach it to a public issue; send it privately."
             },
             "debugCaptureDurationMs": {
-                "title": "Durata cattura debug (ms)",
+                "title": "Capture Duration (ms)",
                 "type": "integer",
                 "default": 60000,
                 "minimum": 10000,
                 "maximum": 1800000,
-                "description": "Durata della cattura di debug in millisecondi (default 60000 = 60s). Aumentare a 300000 (5 min) o 600000 (10 min) su setup Matter-only se Apple Home impiega minuti a tornare responsive dopo il riavvio del child bridge."
-            },
-            "telemetry": {
-                "title": "Telemetria / Segnalazione Errori",
-                "type": "boolean",
-                "default": true,
-                "description": "Invia errori tecnici anonimi in automatico (Sentry) per aiutare a migliorare il plugin. Nessun IP, PIN, o nome dispositivo viene inviato."
+                "description": "How long the debug capture records the panel traffic (default 60000 = 60 s). Raise it to 300000 (5 min) or 600000 (10 min) on Matter-only setups where Apple Home needs minutes to respond after a child bridge restart."
             }
         },
         "required": [
@@ -668,20 +728,20 @@
     "layout": [
         {
             "type": "section",
-            "title": "Connessione & Autenticazione",
+            "title": "Connection & Authentication",
             "expandable": true,
             "expanded": true,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Configurazione essenziale</strong><p style='margin:8px 0 0 0;'>Inserisci IP e PIN della centrale; la porta serve solo se diversa da 443 (HTTPS) o 80 (HTTP). Se non conosci l'IP, verificalo nella configurazione di rete del pannello.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Essential settings</strong><p style='margin:8px 0 0 0;'>Enter the IP address and the PIN of the panel. The port is needed only if it is not 443 (HTTPS) or 80 (HTTP). If you do not know the IP address, check it in the network settings of the panel.</p><p style='margin:8px 0 0 0;'>The PIN is stored in clear text in Homebridge's config.json: use a dedicated panel user with only the rights this plugin needs.</p></div>"
                 },
                 {
                     "key": "ip",
                     "type": "string",
-                    "title": "Indirizzo IP Centrale",
+                    "title": "Panel IP Address",
                     "placeholder": "192.168.1.x",
-                    "validationMessage": "Inserisci un indirizzo IP valido (es: 192.168.1.100)"
+                    "validationMessage": "Enter a valid IP address (for example 192.168.1.100)"
                 },
                 {
                     "type": "flex",
@@ -700,9 +760,9 @@
                 {
                     "key": "pin",
                     "type": "password",
-                    "title": "PIN di Accesso",
-                    "placeholder": "Solo numeri (4-8 cifre)",
-                    "validationMessage": "Il PIN deve contenere solo numeri (4-8 cifre)"
+                    "title": "Access PIN",
+                    "placeholder": "Digits only (4-8)",
+                    "validationMessage": "The PIN must contain only digits (4-8)"
                 },
                 {
                     "type": "flex",
@@ -722,17 +782,17 @@
         },
         {
             "type": "section",
-            "title": "Preferenze Dispositivi",
+            "title": "Device Preferences",
             "expandable": true,
             "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Preferenze dispositivi</strong><p style='margin:8px 0 0 0;'>Regola i parametri di comportamento per tapparelle, termostati e scenari senza cambiare la logica di discovery.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Device preferences</strong><p style='margin:8px 0 0 0;'>Adjust how covers, thermostats and scenarios behave, without changing what is discovered.</p></div>"
                 },
                 {
                     "type": "fieldset",
-                    "title": "Tapparelle & Cover",
+                    "title": "Covers",
                     "expandable": false,
                     "items": [
                         {
@@ -742,12 +802,12 @@
                                 {
                                     "key": "maxSeconds",
                                     "flex": "1 1 200px",
-                                    "description": "Tempo totale apertura/chiusura"
+                                    "description": "Total travel time, HomeKit only"
                                 },
                                 {
                                     "key": "coverStepSize",
                                     "flex": "1 1 200px",
-                                    "description": "Fluidità animazione (5 = fluido)"
+                                    "description": "Animation smoothness (5 = smooth), HomeKit only"
                                 }
                             ]
                         }
@@ -755,7 +815,7 @@
                 },
                 {
                     "type": "fieldset",
-                    "title": "Termostati",
+                    "title": "Thermostats",
                     "expandable": false,
                     "items": [
                         {
@@ -764,17 +824,17 @@
                             "items": [
                                 {
                                     "key": "temperatureDefaults.target",
-                                    "title": "Temp. Target Default (°C)",
+                                    "title": "Default Target (°C)",
                                     "flex": "1 1 150px"
                                 },
                                 {
                                     "key": "temperatureDefaults.min",
-                                    "title": "Temp. Minima (°C)",
+                                    "title": "Minimum (°C)",
                                     "flex": "1 1 150px"
                                 },
                                 {
                                     "key": "temperatureDefaults.max",
-                                    "title": "Temp. Massima (°C)",
+                                    "title": "Maximum (°C)",
                                     "flex": "1 1 150px"
                                 },
                                 {
@@ -786,11 +846,11 @@
                         },
                         {
                             "key": "domusThermostat.enabled",
-                            "title": "Mapping DOMUS Attivo"
+                            "title": "DOMUS Mapping Enabled"
                         },
                         {
                             "key": "domusThermostat.sensorFreshnessMs",
-                            "title": "Freshness DOMUS (ms)",
+                            "title": "DOMUS Freshness (ms)",
                             "condition": {
                                 "functionBody": "return !model.domusThermostat || model.domusThermostat.enabled !== false;"
                             }
@@ -798,9 +858,9 @@
                         {
                             "key": "domusThermostat.manualPairs",
                             "type": "array",
-                            "title": "Override Manuale",
+                            "title": "Manual Sensor Mapping",
                             "orderable": true,
-                            "buttonText": "+ Aggiungi Pair",
+                            "buttonText": "+ Add pair",
                             "condition": {
                                 "functionBody": "return !model.domusThermostat || model.domusThermostat.enabled !== false;"
                             },
@@ -811,12 +871,12 @@
                                         {
                                             "key": "domusThermostat.manualPairs[].thermostatOutputId",
                                             "title": "Thermostat Output ID",
-                                            "placeholder": "18 o thermostat_18"
+                                            "placeholder": "18 or thermostat_18"
                                         },
                                         {
                                             "key": "domusThermostat.manualPairs[].domusSensorId",
                                             "title": "DOMUS Sensor ID",
-                                            "placeholder": "1 o sensor_temp_1"
+                                            "placeholder": "1 or sensor_temp_1"
                                         }
                                     ]
                                 }
@@ -825,9 +885,9 @@
                         {
                             "key": "domusThermostat.manualCommandPairs",
                             "type": "array",
-                            "title": "Mapping Comandi (da import KSA)",
+                            "title": "Command Mapping (from KSA import)",
                             "orderable": false,
-                            "buttonText": "+ Aggiungi Mapping",
+                            "buttonText": "+ Add mapping",
                             "condition": {
                                 "functionBody": "return !model.domusThermostat || model.domusThermostat.enabled !== false;"
                             },
@@ -838,11 +898,11 @@
                                         {
                                             "key": "domusThermostat.manualCommandPairs[].thermostatOutputId",
                                             "title": "Thermostat Output ID",
-                                            "placeholder": "18 o thermostat_18"
+                                            "placeholder": "18 or thermostat_18"
                                         },
                                         {
                                             "key": "domusThermostat.manualCommandPairs[].commandThermostatId",
-                                            "title": "ID Programma Termostato",
+                                            "title": "Thermostat Program ID",
                                             "placeholder": "3"
                                         }
                                     ]
@@ -853,24 +913,24 @@
                 },
                 {
                     "type": "fieldset",
-                    "title": "Import KSA",
+                    "title": "KSA Backup Import",
                     "expandable": false,
                     "items": [
                         {
                             "key": "ksaImport.enabled",
-                            "title": "Import KSA Attivo"
+                            "title": "KSA Import Enabled"
                         },
                         {
                             "key": "ksaImport.filePath",
-                            "title": "Percorso File .ksa",
+                            "title": ".ksa File Path",
                             "condition": {
                                 "functionBody": "return model.ksaImport && model.ksaImport.enabled === true;"
                             }
                         },
                         {
                             "key": "ksaImport.applyAtStartup",
-                            "title": "Apply alla Config al Prossimo Avvio",
-                            "description": "Esegue preview nei log e applica i blocchi selezionati, poi torna automaticamente OFF",
+                            "title": "Apply to Config at Next Start",
+                            "description": "Logs a preview and writes the selected sections into config.json, then switches itself off",
                             "condition": {
                                 "functionBody": "return model.ksaImport && model.ksaImport.enabled === true;"
                             }
@@ -884,7 +944,7 @@
                             "items": [
                                 {
                                     "key": "ksaImport.applyDomusMappings",
-                                    "title": "Domus Mapping",
+                                    "title": "Thermostat Mappings",
                                     "flex": "1 1 200px"
                                 },
                                 {
@@ -896,11 +956,6 @@
                                     "key": "ksaImport.applyCustomNames",
                                     "title": "Custom Names",
                                     "flex": "1 1 200px"
-                                },
-                                {
-                                    "key": "ksaImport.applyExclusionSuggestions",
-                                    "title": "Exclusions",
-                                    "flex": "1 1 200px"
                                 }
                             ]
                         }
@@ -908,12 +963,12 @@
                 },
                 {
                     "type": "fieldset",
-                    "title": "Scenari",
+                    "title": "Scenarios",
                     "expandable": false,
                     "items": [
                         {
                             "key": "scenarioAutoOffDelay",
-                            "description": "Dopo l'attivazione, lo switch torna OFF automaticamente"
+                            "description": "After it is triggered, the switch returns to Off by itself"
                         },
                         {
                             "key": "exposePartialArmScenarios"
@@ -924,83 +979,133 @@
         },
         {
             "type": "section",
-            "title": "Esclusioni Dispositivi",
+            "title": "Device Selection",
             "expandable": true,
             "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Come trovare gli ID</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Avvia il plugin almeno una volta</li><li>Nel sommario dei dispositivi stampato nei log, oppure nel campo <code>id</code> di <code>~/.homebridge/klares4-devices.json</code>, copia il valore <strong>exclude</strong> del dispositivo (l'ID numerico senza prefisso, per esempio <code>37</code> per <code>light_37</code>; per le temperature della centrale <code>sensor_system_temp_in</code> o <code>sensor_system_temp_out</code>)</li><li>Inseriscilo qui con il pulsante <strong>+ Aggiungi</strong></li></ol></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>How to find the IDs</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Start the plugin at least once</li><li>In the device summary printed in the log, or in the <code>id</code> field of <code>klares4-devices.json</code> in the Homebridge storage folder, copy the <strong>exclude</strong> value of the device (the numeric ID without prefix, for example <code>37</code> for <code>light_37</code>; for the panel's own temperatures <code>sensor_system_temp_in</code> or <code>sensor_system_temp_out</code>)</li><li>Enter it below with the <strong>+ Add</strong> button</li></ol><p style='margin:8px 0 0 0;'>Outputs of a category the plugin does not recognize (GEN, IRR, none) and scenarios of an unknown category are hidden by default. The startup log lists them with the exact entry to add under <strong>Expose Hidden Devices</strong>.</p></div>"
                 },
                 {
                     "key": "excludeOutputs",
                     "type": "array",
-                    "title": "Output Esclusi (Luci, Tapparelle, Termostati)",
-                    "description": "Inserisci solo il numero ID, senza prefissi",
+                    "title": "Excluded Outputs (lights, covers, gates, thermostats)",
+                    "description": "Enter the numeric ID only, without prefix",
                     "orderable": false,
-                    "buttonText": "+ Aggiungi Output",
+                    "buttonText": "+ Add output",
                     "items": [
                         {
                             "key": "excludeOutputs[]",
                             "notitle": true,
-                            "placeholder": "ID numerico (es: 18)"
+                            "placeholder": "Numeric ID (e.g. 18)"
                         }
                     ]
                 },
                 {
                     "key": "excludeZones",
                     "type": "array",
-                    "title": "Zone Escluse (Sensori di sicurezza)",
-                    "description": "Zone che non vuoi vedere come sensori contatto in HomeKit",
+                    "title": "Excluded Zones (security sensors)",
+                    "description": "Zones you do not want as contact sensors",
                     "orderable": false,
-                    "buttonText": "+ Aggiungi Zona",
+                    "buttonText": "+ Add zone",
                     "items": [
                         {
                             "key": "excludeZones[]",
                             "notitle": true,
-                            "placeholder": "ID numerico (es: 5)"
+                            "placeholder": "Numeric ID (e.g. 5)"
                         }
                     ]
                 },
                 {
                     "key": "excludeSensors",
                     "type": "array",
-                    "title": "Sensori Esclusi (Ambientali)",
-                    "description": "Sensori temperatura/umidità/luminosità da nascondere. Un ID DOMUS esclude tutte e tre le letture; per le temperature della centrale usare sensor_system_temp_in / sensor_system_temp_out",
+                    "title": "Excluded Sensors (environmental)",
+                    "description": "Temperature, humidity and light sensors to hide. A DOMUS ID hides all three readings; for the panel's own temperatures use sensor_system_temp_in / sensor_system_temp_out",
                     "orderable": false,
-                    "buttonText": "+ Aggiungi Sensore",
+                    "buttonText": "+ Add sensor",
                     "items": [
                         {
                             "key": "excludeSensors[]",
                             "notitle": true,
-                            "placeholder": "ID numerico (es: 1) o sensor_system_temp_in"
+                            "placeholder": "Numeric ID (e.g. 1) or sensor_system_temp_in"
                         }
                     ]
                 },
                 {
                     "key": "excludeScenarios",
                     "type": "array",
-                    "title": "Scenari Esclusi",
-                    "description": "Scenari che non vuoi attivare da HomeKit",
+                    "title": "Excluded Scenarios",
+                    "description": "Scenarios you do not want to run from HomeKit, Matter or MQTT",
                     "orderable": false,
-                    "buttonText": "+ Aggiungi Scenario",
+                    "buttonText": "+ Add scenario",
                     "items": [
                         {
                             "key": "excludeScenarios[]",
                             "notitle": true,
-                            "placeholder": "ID numerico (es: 3)"
+                            "placeholder": "Numeric ID (e.g. 3)"
                         }
                     ]
                 },
                 {
                     "type": "fieldset",
-                    "title": "Esposizione Matter (per tipo)",
+                    "title": "Expose Hidden Devices",
                     "expandable": true,
                     "expanded": false,
                     "items": [
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Solo lato Matter</strong><p style='margin:8px 0 0 0;'>Disattiva interi tipi di dispositivo sui controller Matter (Alexa, Google Home, Apple Home via Matter) senza toccare HomeKit/HAP né il bridge MQTT. Utile per installazioni voice-first: escludere le 39 zone contatto dimezza il namespace vocale e azzera le ambiguità sui nomi. Gli endpoint già registrati vengono rimossi automaticamente dopo 3 cicli di sincronizzazione consecutivi.</p></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Fail-closed exposure</strong><p style='margin:8px 0 0 0;'>A hidden device is never exposed or controllable. Add an output or a scenario here only if it is safe to operate it from voice assistants, scenes and automations. Arming and disarming scenarios (ARM, DISARM) can never be exposed.</p></div>"
+                        },
+                        {
+                            "key": "exposeOutputs",
+                            "type": "array",
+                            "title": "Outputs to Expose",
+                            "orderable": false,
+                            "buttonText": "Add output",
+                            "items": [
+                                {
+                                    "key": "exposeOutputs[].outputId",
+                                    "title": "Output ID (panel)",
+                                    "placeholder": "12"
+                                },
+                                {
+                                    "key": "exposeOutputs[].exposeAs",
+                                    "title": "Expose As",
+                                    "titleMap": [
+                                        {
+                                            "value": "light",
+                                            "name": "Light (on/off)"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "key": "exposeScenarios",
+                            "type": "array",
+                            "title": "Scenarios to Expose",
+                            "orderable": false,
+                            "buttonText": "Add scenario",
+                            "items": [
+                                {
+                                    "key": "exposeScenarios[].scenarioId",
+                                    "title": "Scenario ID (panel)",
+                                    "placeholder": "4"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "fieldset",
+                    "title": "Matter Exposure by Type",
+                    "expandable": true,
+                    "expanded": false,
+                    "items": [
+                        {
+                            "type": "help",
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Matter side only</strong><p style='margin:8px 0 0 0;'>Turns off whole device types on Matter controllers (Alexa, Google Home, Apple Home over Matter) without touching HomeKit or the MQTT bridge. Useful on voice-first installations: hiding the contact zones, for example, shrinks the voice namespace and removes name ambiguity. Endpoints that are already registered are removed after 3 consecutive synchronizations.</p></div>"
                         },
                         {
                             "key": "matterExposure.zones",
@@ -1032,11 +1137,11 @@
                         },
                         {
                             "key": "matterOverrides",
-                            "title": "Override per device ID",
-                            "description": "Cambia nome o esposizione di un singolo dispositivo, solo su Matter. HomeKit e MQTT restano invariati.",
+                            "title": "Overrides by Device ID",
+                            "description": "Change the name or the exposure of a single device, on Matter only. HomeKit and MQTT are not affected.",
                             "type": "array",
                             "orderable": false,
-                            "buttonText": "Aggiungi override",
+                            "buttonText": "Add override",
                             "items": [
                                 "matterOverrides[].deviceId",
                                 "matterOverrides[].name",
@@ -1048,15 +1153,15 @@
                         },
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Recovery termostati</strong><p style='margin:8px 0 0 0;'>Solo per amministrazione controllata: associa un device ID termostato a una generazione. Incrementare il numero autorizza un solo nuovo tentativo; in caso di errore il plugin torna automaticamente al sensore temperatura.</p></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Thermostat recovery</strong><p style='margin:8px 0 0 0;'>Controlled administration only. Thermostats register as native Matter thermostats; one that an earlier version saved as a temperature sensor gets one automatic attempt at the first start. To allow one more attempt, link a thermostat device ID to a generation and raise the number. On failure the plugin falls back to the temperature sensor.</p></div>"
                         },
                         {
                             "key": "matterRecoveryRequests",
-                            "title": "Generazioni recovery per device ID",
-                            "description": "Non incrementare automaticamente ad ogni avvio.",
+                            "title": "Recovery Generations by Device ID",
+                            "description": "Do not raise the number automatically at every start.",
                             "type": "array",
                             "orderable": false,
-                            "buttonText": "Aggiungi richiesta",
+                            "buttonText": "Add request",
                             "items": [
                                 "matterRecoveryRequests[].deviceId",
                                 "matterRecoveryRequests[].generation"
@@ -1068,20 +1173,20 @@
         },
         {
             "type": "section",
-            "title": "Nomi Personalizzati",
+            "title": "Custom Names",
             "expandable": true,
             "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Rinomina entita in HomeKit</strong><p style='margin:8px 0 0 0;'>Una riga per dispositivo: device ID (come in <code>klares4-devices.json</code>, per esempio <code>light_18</code>) e nome. Il nome cambia anche lo slug dei topic MQTT e il nome su Matter.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Rename devices</strong><p style='margin:8px 0 0 0;'>One row per device: the device ID (as printed by the startup log, for example <code>light_18</code>) and the name. The name also changes the MQTT topic slug and the name on Matter.</p></div>"
                 },
                 {
                     "key": "customNames",
-                    "title": "Nomi per device ID",
+                    "title": "Names by Device ID",
                     "type": "array",
                     "orderable": false,
-                    "buttonText": "Aggiungi nome",
+                    "buttonText": "Add name",
                     "items": [
                         "customNames[].deviceId",
                         "customNames[].name"
@@ -1091,17 +1196,23 @@
         },
         {
             "type": "section",
-            "title": "Integrazione MQTT",
+            "title": "MQTT Integration",
             "expandable": true,
             "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Bridge MQTT</strong><p style='margin:8px 0 6px 0;'>Pubblica stati su MQTT e riceve comandi da sistemi esterni (Home Assistant, Node-RED, automazioni custom).</p><p style='margin:0;'><strong>Topic:</strong> <code>{prefix}/{type}/{slug}/state</code> e <code>{prefix}/{type}/{slug}/set</code></p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>MQTT bridge</strong><p style='margin:8px 0 6px 0;'>Publishes device state and availability on MQTT and, if you leave commands on, receives commands from external systems (Home Assistant, Node-RED, custom automations).</p><p style='margin:0 0 6px 0;'><strong>Topics:</strong> <code>{prefix}/{type}/{slug}/state</code>, <code>{prefix}/{type}/{slug}/set</code>, <code>{prefix}/status</code></p><p style='margin:0;'><strong>Security:</strong> commands are not authenticated by the plugin. Use a broker with authentication and an ACL, or turn commands off.</p></div>"
                 },
                 {
                     "key": "mqtt.enabled",
-                    "title": "Abilita Bridge MQTT"
+                    "title": "Enable MQTT Bridge"
+                },
+                {
+                    "key": "mqtt.commands",
+                    "condition": {
+                        "functionBody": "return model.mqtt && model.mqtt.enabled === true;"
+                    }
                 },
                 {
                     "key": "mqtt.broker",
@@ -1168,7 +1279,7 @@
                 },
                 {
                     "type": "section",
-                    "title": "Mappatura Stanze",
+                    "title": "Room Mapping",
                     "expandable": true,
                     "expanded": false,
                     "condition": {
@@ -1177,18 +1288,18 @@
                     "items": [
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Organizza i topic per stanza</strong><p style='margin:8px 0 0 0;'>Esempio: da <code>klares4/light/luce_sala</code> a <code>soggiorno/light/luce_sala</code>. Usa <code>roomName</code> in minuscolo con underscore.</p></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Organize topics by room</strong><p style='margin:8px 0 0 0;'>Example: from <code>klares4/light/ceiling</code> to <code>living_room/light/ceiling</code>. Use a lowercase <code>roomName</code> with underscores. With room mapping on, a command is executed only through the topic of the room the device belongs to (or the room-less topic).</p></div>"
                         },
                         {
                             "key": "roomMapping.enabled",
-                            "title": "Abilita Mappatura Stanze"
+                            "title": "Enable Room Mapping"
                         },
                         {
                             "key": "roomMapping.rooms",
                             "type": "array",
-                            "title": "Configurazione Stanze",
+                            "title": "Room Configuration",
                             "orderable": true,
-                            "buttonText": "+ Aggiungi Stanza",
+                            "buttonText": "+ Add room",
                             "condition": {
                                 "functionBody": "return model.roomMapping && model.roomMapping.enabled === true;"
                             },
@@ -1198,20 +1309,25 @@
                                     "items": [
                                         {
                                             "key": "roomMapping.rooms[].roomName",
-                                            "title": "Nome Stanza (minuscolo)",
-                                            "placeholder": "soggiorno"
+                                            "title": "Room Name (lowercase)",
+                                            "placeholder": "living_room"
                                         },
                                         {
                                             "key": "roomMapping.rooms[].devices",
                                             "type": "array",
-                                            "title": "Dispositivi",
+                                            "title": "Devices",
                                             "orderable": false,
-                                            "buttonText": "+ Dispositivo",
+                                            "buttonText": "+ Device",
                                             "items": [
                                                 {
                                                     "key": "roomMapping.rooms[].devices[].deviceId",
-                                                    "title": "ID Dispositivo",
-                                                    "placeholder": "light_9, sensor_temp_1 o sensor_system_temp_in"
+                                                    "title": "Device ID",
+                                                    "placeholder": "light_9, sensor_temp_1 or sensor_system_temp_in"
+                                                },
+                                                {
+                                                    "key": "roomMapping.rooms[].devices[].deviceName",
+                                                    "title": "Device Name",
+                                                    "readonly": true
                                                 }
                                             ]
                                         }
@@ -1225,22 +1341,22 @@
         },
         {
             "type": "section",
-            "title": "Configurazione Avanzata",
+            "title": "Advanced Configuration",
             "expandable": true,
             "expanded": false,
             "items": [
                 {
                     "type": "help",
-                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Sezione avanzata</strong><p style='margin:8px 0 0 0;'>Modifica questi parametri solo se necessario. Valori non corretti possono causare timeout, riconnessioni frequenti o stato No Response.</p></div>"
+                    "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Advanced section</strong><p style='margin:8px 0 0 0;'>Change these parameters only if you need to. Wrong values can cause timeouts, frequent reconnections or a No Response state.</p></div>"
                 },
                 {
                     "key": "showAdvanced",
-                    "title": "Sblocca Parametri Avanzati",
-                    "description": "Abilita per modificare timing e parametri di rete"
+                    "title": "Unlock Advanced Parameters",
+                    "description": "Turn on to edit the timing and network parameters"
                 },
                 {
                     "type": "fieldset",
-                    "title": "Parametri di Rete",
+                    "title": "Network Parameters",
                     "condition": {
                         "functionBody": "return model.showAdvanced === true;"
                     },
@@ -1252,22 +1368,22 @@
                                 {
                                     "key": "reconnectInterval",
                                     "flex": "1 1 200px",
-                                    "description": "Base per exponential backoff (v1.1.6)"
+                                    "description": "Base of the exponential backoff"
                                 },
                                 {
                                     "key": "heartbeatInterval",
                                     "flex": "1 1 200px",
-                                    "description": "Frequenza ping keep-alive con timeout PONG (v1.1.6)"
+                                    "description": "Keep-alive ping frequency (a missing PONG drops the connection)"
                                 },
                                 {
                                     "key": "commandTimeoutMs",
                                     "flex": "1 1 200px",
-                                    "description": "Timeout risposta per comandi write/cmd_usr"
+                                    "description": "Wait for the answer to a command, thermostats included"
                                 },
                                 {
                                     "key": "allowInsecureTls",
                                     "flex": "1 1 220px",
-                                    "description": "Solo per impianti con certificato self-signed"
+                                    "description": "Only for panels with a self-signed certificate"
                                 }
                             ]
                         }
@@ -1275,7 +1391,7 @@
                 },
                 {
                     "type": "fieldset",
-                    "title": "Debug & Diagnostica",
+                    "title": "Logging",
                     "condition": {
                         "functionBody": "return model.showAdvanced === true;"
                     },
@@ -1287,7 +1403,7 @@
                                 {
                                     "key": "logLevel",
                                     "flex": "1 1 220px",
-                                    "description": "0 minimal, 1 normale, 2 diagnostica"
+                                    "description": "0 minimal, 1 normal, 2 detailed trace (shown only when Homebridge runs in debug mode)"
                                 },
                                 {
                                     "key": "debug",
@@ -1296,7 +1412,7 @@
                                 {
                                     "key": "devicesSummaryDelay",
                                     "flex": "1 1 200px",
-                                    "description": "Ritardo stampa lista dispositivi"
+                                    "description": "Delay before the device list is printed"
                                 }
                             ]
                         }
@@ -1304,36 +1420,31 @@
                 },
                 {
                     "type": "section",
-                    "title": "Diagnostica & Debug",
+                    "title": "Diagnostics & Debug File",
                     "expandable": true,
                     "expanded": false,
                     "items": [
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Strumento diagnostico completo</strong><p style='margin:8px 0 8px 0;'>Genera un file di supporto con:</p><ul style='margin:0 0 8px 18px;padding:0;'><li>messaggi WebSocket RAW (per la durata impostata in Durata cattura, default 60 secondi)</li><li>lista dispositivi rilevati</li><li>snapshot di stati e comandi principali</li></ul><p style='margin:0;'><strong>Importante:</strong> durante la cattura prova le entita che non funzionano dall'app Ksenia, cosi il trace include il comportamento reale del pannello.</p></div>"
-                        },
-                        {
-                            "key": "telemetry",
-                            "title": "Abilita Telemetria",
-                            "description": "Segnalazione anonima degli errori al team di sviluppo"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Complete diagnostic tool</strong><p style='margin:8px 0 8px 0;'>Writes a support file with:</p><ul style='margin:0 0 8px 18px;padding:0;'><li>the raw WebSocket messages (for the duration set in Capture Duration, 60 seconds by default)</li><li>the list of discovered devices</li><li>a snapshot of states and main commands</li></ul><p style='margin:0 0 8px 0;'><strong>Important:</strong> while the capture runs, try the devices that do not work from the Ksenia app, so the trace includes the real behavior of the panel.</p><p style='margin:0;'><strong>The file is confidential.</strong> It contains the names of your devices and the state of your alarm system (PIN, account, serial numbers and home position are masked). Do not attach it to a public issue: send it privately.</p></div>"
                         },
                         {
                             "key": "generateDebugFile",
-                            "title": "Genera File Debug al Prossimo Avvio",
-                            "description": "Si disattiverà automaticamente dopo la generazione del file"
+                            "title": "Generate Debug File at Next Start",
+                            "description": "Switches itself off after the file is written. The file is confidential: send it privately."
                         },
                         {
                             "key": "debugCaptureDurationMs",
-                            "title": "Durata cattura (ms)",
-                            "description": "Default 60000 (60s). Su Matter-only con Apple Home che impiega minuti a tornare responsive, alzare a 600000 (10 min)."
+                            "title": "Capture Duration (ms)",
+                            "description": "Default 60000 (60 s). On Matter-only setups where Apple Home needs minutes to respond again, raise it to 600000 (10 min)."
                         },
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Procedura consigliata</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Attiva l'opzione e salva la configurazione</li><li>Riavvia Homebridge</li><li>Durante la cattura (Durata cattura, default 60 secondi) testa le entita problematiche dall'app Ksenia</li><li>Attendi la conferma di fine cattura nei log</li><li>Recupera e condividi il file generato (PIN gia mascherati)</li></ol></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Suggested procedure</strong><ol style='margin:8px 0 0 18px;padding:0;'><li>Turn the option on and save the configuration</li><li>Restart Homebridge</li><li>During the capture (Capture Duration, 60 seconds by default) test the problem devices from the Ksenia app</li><li>Wait for the end-of-capture message in the log</li><li>Fetch the generated file and send it privately: it is confidential</li></ol></div>"
                         },
                         {
                             "type": "help",
-                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Percorso file debug</strong><p style='margin:8px 0;'>Percorso standard:</p><p style='margin:8px 0;'><code>~/.homebridge/klares4-debug-*.json</code></p><p style='margin:8px 0;'>Su macOS in genere coincide con:</p><p style='margin:8px 0;'><code>/Users/[tuo-username]/.homebridge/klares4-debug-*.json</code></p><p style='margin:8px 0 0 0;'>Nei log trovi sempre il percorso completo del file appena creato.</p></div>"
+                            "helpvalue": "<div style='padding:10px 12px;border:1px solid currentColor;border-radius:8px;'><strong>Debug file location</strong><p style='margin:8px 0;'>Default location:</p><p style='margin:8px 0;'><code>~/.homebridge/klares4-debug-*.json</code></p><p style='margin:8px 0;'>On macOS this is usually:</p><p style='margin:8px 0;'><code>/Users/[your-username]/.homebridge/klares4-debug-*.json</code></p><p style='margin:8px 0 0 0;'>The log always shows the full path of the file just created.</p></div>"
                         }
                     ]
                 }

@@ -2,6 +2,7 @@ import type { Logger } from 'homebridge';
 import type * as mqtt from 'mqtt';
 
 import { toErrorMessage } from '../errors';
+import { LastWillPolicy } from './last-will-policy';
 
 export type MqttConnectFn = (brokerUrl: string, options: mqtt.IClientOptions) => mqtt.MqttClient;
 
@@ -12,6 +13,15 @@ export interface ReconnectBackoff {
 
 export const DEFAULT_RECONNECT_BACKOFF: ReconnectBackoff = { initialMs: 5000, maxMs: 60000 };
 
+export interface SessionTiming {
+    /** Longest wait at shutdown for the broker to confirm `offline` and the DISCONNECT. */
+    stopTimeoutMs: number;
+    /** While the broker refuses the last will, how often it is tried again. */
+    willRetryMs: number;
+}
+
+export const DEFAULT_SESSION_TIMING: SessionTiming = { stopTimeoutMs: 2000, willRetryMs: 30 * 60 * 1000 };
+
 interface BrokerSessionOptions {
     url: string;
     /** `scheme://host[:port]`, never with credentials. */
@@ -20,8 +30,17 @@ interface BrokerSessionOptions {
     log: Logger;
     connect: MqttConnectFn;
     backoff: ReconnectBackoff;
+    timing: SessionTiming;
     onConnect: (client: mqtt.MqttClient) => void;
     onMessage: (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) => void;
+}
+
+/** One connection attempt: its own mqtt.js client, used until it closes. */
+interface Attempt {
+    client: mqtt.MqttClient;
+    withWill: boolean;
+    connected: boolean;
+    notAuthorized: boolean;
 }
 
 /** CONNACK "Not authorized" (MQTT 3.1.1 return code 5, MQTT 5 reason code 135). */
@@ -31,94 +50,123 @@ function isNotAuthorized(error: Error): boolean {
 }
 
 /**
- * One broker connection, kept alive by the plugin rather than by mqtt.js.
- * With `reconnectPeriod > 0` mqtt.js 5.16 retries at a fixed interval
- * (`client.js` `_setupReconnect`, a `setInterval`) and stops for good after a
- * refused CONNACK unless `reconnectOnConnackError` is set
- * (`handlers/connack.js:42-55`). Here mqtt.js never reconnects by itself
- * (`reconnectPeriod: 0`) and every `close` schedules `client.reconnect()`
- * with a delay that doubles up to `maxMs`; `connect()` clears
- * `reconnectSuppressed` (`client.js:312-313`), so a refused CONNACK is
- * retried like any other failure. Log lines are written on transitions only.
+ * The broker connection, kept alive by the plugin rather than by mqtt.js
+ * 5.16, which retries at a fixed interval (`client.js` `_setupReconnect`, a
+ * `setInterval`) and stops for good after a refused CONNACK unless
+ * `reconnectOnConnackError` is set (`handlers/connack.js:42-55`).
+ *
+ * Every attempt is a new client with `reconnectPeriod: 0`. A closed attempt
+ * is ended with `force`, which with `clean: true` and `reconnectPeriod: 0`
+ * fails the callbacks of its unconfirmed publishes (`client.js` `_cleanUp` →
+ * `_flush`): nothing of an old connection stays queued, so a later shutdown
+ * is not held by a publish no broker will ever confirm. The next attempt
+ * starts after a delay that doubles up to `maxMs`. Log lines are written on
+ * transitions only.
  */
 export class BrokerSession {
-    private client?: mqtt.MqttClient;
+    private attempt?: Attempt;
     private stopped = false;
     private timer?: NodeJS.Timeout;
+    private willRetryTimer?: NodeJS.Timeout;
     private delayMs: number;
     private connectedOnce = false;
-    private wasConnected = false;
     private failing = false;
     private lastError?: string;
-    /** The last will is dropped after the broker refused a CONNECT carrying it (see `onError`). */
-    private willRefused = false;
-    private willProbe = false;
+    /** The current attempt replaces a working connection to try the last will again. */
+    private retryingWill = false;
+    private readonly will: LastWillPolicy;
 
     constructor(private readonly options: BrokerSessionOptions) {
         this.delayMs = options.backoff.initialMs;
+        const willTopic = options.clientOptions.will?.topic ?? '';
+        this.will = new LastWillPolicy(options.clientOptions.will !== undefined, willTopic, options.timing.willRetryMs, options.log);
     }
 
     public get connectedClient(): mqtt.MqttClient | undefined {
-        return this.client?.connected ? this.client : undefined;
+        const attempt = this.attempt;
+        return attempt?.connected && attempt.client.connected ? attempt.client : undefined;
     }
 
     public start(): void {
-        try {
-            const client = this.options.connect(this.options.url, this.clientOptions());
-            this.client = client;
-            client.on('connect', () => this.onConnect(client));
-            client.on('error', (error: Error) => this.onError(error));
-            client.on('close', () => this.onClose(client));
-            client.on('message', (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) =>
-                this.options.onMessage(topic, payload, packet));
-        } catch (error: unknown) {
-            this.options.log.error(`MQTT: Connection error: ${toErrorMessage(error)}`);
-        }
+        this.open(this.will.nextWithWill);
     }
 
-    /** Publishes `last` (if connected) and closes the connection; no reconnect afterwards. */
+    /**
+     * Publishes `last` and sends DISCONNECT; if the broker has not confirmed
+     * within `stopTimeoutMs`, the socket is closed anyway. No reconnection
+     * afterwards.
+     */
     public stop(last?: { topic: string; payload: string; qos: 0 | 1 | 2 }): void {
         this.stopped = true;
-        if (this.timer) clearTimeout(this.timer);
-        this.timer = undefined;
-        const client = this.client;
-        if (!client) return;
-        if (client.connected && last) {
-            client.publish(last.topic, last.payload, { qos: last.qos, retain: true });
+        this.clearTimers();
+        const attempt = this.attempt;
+        if (!attempt) return;
+        const { client } = attempt;
+        const { log } = this.options;
+        if (!this.connectedClient) {
+            client.end(true);
+            log.info('MQTT: Disconnected');
+            return;
         }
-        client.end(!client.connected, {}, () => this.options.log.info('MQTT: Disconnected'));
+        let closed = false;
+        const deadline = setTimeout(() => {
+            if (closed) return;
+            closed = true;
+            client.stream.destroy();
+            log.warn(`MQTT: Disconnected; the broker did not confirm the last messages within ${this.options.timing.stopTimeoutMs} ms`);
+        }, this.options.timing.stopTimeoutMs);
+        deadline.unref();
+        if (last) client.publish(last.topic, last.payload, { qos: last.qos, retain: true });
+        client.end(false, {}, () => {
+            if (closed) return;
+            closed = true;
+            clearTimeout(deadline);
+            log.info('MQTT: Disconnected');
+        });
     }
 
-    private clientOptions(): mqtt.IClientOptions {
+    private open(withWill: boolean): void {
         const { will, ...rest } = this.options.clientOptions;
-        return { ...rest, ...(will && !this.willRefused ? { will } : {}), reconnectPeriod: 0 };
+        const clientOptions: mqtt.IClientOptions = { ...rest, ...(withWill && will ? { will } : {}), reconnectPeriod: 0 };
+        let client: mqtt.MqttClient;
+        try {
+            client = this.options.connect(this.options.url, clientOptions);
+        } catch (error: unknown) {
+            this.options.log.error(`MQTT: Connection error: ${toErrorMessage(error)}`);
+            return;
+        }
+        const attempt: Attempt = { client, withWill, connected: false, notAuthorized: false };
+        this.attempt = attempt;
+        client.on('connect', () => this.onConnect(attempt));
+        client.on('error', (error: Error) => this.onError(attempt, error));
+        client.on('close', () => this.onClose(attempt));
+        client.on('message', (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) => {
+            if (this.attempt === attempt) this.options.onMessage(topic, payload, packet);
+        });
     }
 
-    private onConnect(client: mqtt.MqttClient): void {
-        const verb = this.failing ? 'Reconnected' : 'Connected';
-        this.options.log.info(`MQTT: ${verb} to broker ${this.options.display}`);
-        if (this.willProbe) {
-            this.options.log.warn(
-                'MQTT: The broker refused the connection while it carried the last will on the status topic, ' +
-                    'and accepted it without: availability is published, but a crash will not mark the bridge offline. ' +
-                    'Allow this user to write the status topic in the broker ACL and restart Homebridge.',
-            );
-            this.willProbe = false;
+    private onConnect(attempt: Attempt): void {
+        if (this.stopped || attempt !== this.attempt) return;
+        attempt.connected = true;
+        if (!this.retryingWill) {
+            this.options.log.info(`MQTT: ${this.failing ? 'Reconnected' : 'Connected'} to broker ${this.options.display}`);
         }
+        this.retryingWill = false;
+        this.will.onConnected(attempt.withWill);
         this.delayMs = this.options.backoff.initialMs;
         this.connectedOnce = true;
-        this.wasConnected = true;
         this.failing = false;
         this.lastError = undefined;
-        this.options.onConnect(client);
+        if (this.will.retryPending) this.scheduleWillRetry();
+        this.options.onConnect(attempt.client);
     }
 
-    private onError(error: Error): void {
+    private onError(attempt: Attempt, error: Error): void {
+        if (attempt !== this.attempt) return;
+        if (isNotAuthorized(error)) attempt.notAuthorized = true;
         const message = toErrorMessage(error);
-        if (isNotAuthorized(error) && this.options.clientOptions.will) {
-            this.adaptWill();
-        }
-        if (message === this.lastError) {
+        // The periodic retry of the will is expected to be refused while the ACL is unchanged.
+        if (message === this.lastError || this.retryingWill) {
             this.options.log.debug(`MQTT: Error: ${message}`);
             return;
         }
@@ -126,27 +174,19 @@ export class BrokerSession {
         this.options.log.error(`MQTT: Error: ${message}`);
     }
 
-    /**
-     * A broker may refuse a CONNECT whose last-will topic the ACL does not let
-     * the user write (mosquitto 2 answers "Not authorized"). That cannot be
-     * told apart from wrong credentials, so the next attempt goes without the
-     * will: if it connects, the will was the cause; if it is refused too, the
-     * credentials are, and the will comes back for the following attempts.
-     */
-    private adaptWill(): void {
-        const client = this.client;
-        if (!client) return;
-        this.willRefused = !this.willRefused;
-        this.willProbe = this.willRefused;
-        // mqtt.js reads `options.will` again for every CONNECT packet (`client.js:403-407`).
-        if (this.willRefused) delete client.options.will;
-        else client.options.will = this.options.clientOptions.will;
-    }
-
-    private onClose(client: mqtt.MqttClient): void {
-        if (this.stopped || client !== this.client) return;
-        if (this.wasConnected) {
-            this.wasConnected = false;
+    private onClose(attempt: Attempt): void {
+        if (attempt !== this.attempt) return;
+        // Fails what this connection still had in flight: it is republished on the next connect.
+        attempt.client.end(true);
+        if (this.stopped) return;
+        if (this.willRetryTimer) clearTimeout(this.willRetryTimer);
+        this.willRetryTimer = undefined;
+        if (!attempt.connected && this.will.onRefused(attempt.withWill, attempt.notAuthorized) === 'retry-without-will-now') {
+            this.schedule(0, false);
+            return;
+        }
+        this.retryingWill = false;
+        if (attempt.connected) {
             this.options.log.warn('MQTT: Connection to the broker lost; reconnecting');
         }
         if (!this.failing) {
@@ -158,18 +198,40 @@ export class BrokerSession {
                     `(further failures are logged only when the error changes)${this.connectedOnce ? '' : '. State is not published until it connects'}`,
             );
         }
-        this.scheduleReconnect(client);
-    }
-
-    private scheduleReconnect(client: mqtt.MqttClient): void {
-        if (this.timer) return;
         const delay = this.delayMs;
         this.delayMs = Math.min(this.delayMs * 2, this.options.backoff.maxMs);
         this.options.log.debug(`MQTT: Reconnecting in ${delay} ms`);
+        this.schedule(delay, this.will.nextWithWill);
+    }
+
+    private schedule(delayMs: number, withWill: boolean): void {
+        if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => {
             this.timer = undefined;
-            if (!this.stopped) client.reconnect();
-        }, delay);
+            if (!this.stopped) this.open(withWill);
+        }, delayMs);
         this.timer.unref();
+    }
+
+    /** Replaces the working connection with one that carries the will again. */
+    private scheduleWillRetry(): void {
+        if (this.willRetryTimer) clearTimeout(this.willRetryTimer);
+        this.willRetryTimer = setTimeout(() => {
+            this.willRetryTimer = undefined;
+            const attempt = this.attempt;
+            if (this.stopped || !attempt?.connected) return;
+            this.retryingWill = true;
+            this.attempt = undefined;
+            attempt.client.end(true);
+            this.open(true);
+        }, this.options.timing.willRetryMs);
+        this.willRetryTimer.unref();
+    }
+
+    private clearTimers(): void {
+        if (this.timer) clearTimeout(this.timer);
+        if (this.willRetryTimer) clearTimeout(this.willRetryTimer);
+        this.timer = undefined;
+        this.willRetryTimer = undefined;
     }
 }

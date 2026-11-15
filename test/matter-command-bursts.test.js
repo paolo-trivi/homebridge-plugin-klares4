@@ -31,7 +31,7 @@ function wsClient() {
     };
 }
 
-async function setup(t, device) {
+async function setup(t, device, { waitForPushes = true } = {}) {
     const stack = await realMatterStackSession(t).start();
     // State pushes Homebridge is still applying (StateManager defers each one).
     let inFlight = 0;
@@ -51,10 +51,8 @@ async function setup(t, device) {
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(device);
     await waitFor(() => registry.getStatus(device.id) === 'registered', 10000);
-    // The burst starts once the registration's own state pushes are done: a
-    // push in flight makes any command fail with "Cannot lock" (see NEW-1 above).
-    await waitFor(() => registry.getPendingCount(device.id) === 0 && inFlight === 0, 10000);
-    return { stack, ws };
+    if (waitForPushes) await waitFor(() => registry.getPendingCount(device.id) === 0 && inFlight === 0, 10000);
+    return { stack, ws, inFlight: () => inFlight, registry };
 }
 
 async function burst(stack, uuid, cluster, commands, gapMs) {
@@ -76,16 +74,10 @@ const COVER_SEQUENCE = [
 ];
 
 for (const gapMs of [0, 1, 5]) {
-    // The position refresh after a cover command now takes the state-update
-    // queue, but a push in flight still holds the endpoint when the next
-    // command arrives: measured on Homebridge 2.5, 0 and 1 ms fail with
-    // "Cannot lock" without the per-endpoint serialization of plugin pushes
-    // against controller commands that task E adds to the queue
-    // (matter-state-update-queue.ts). Enable when that lands.
-    test(`NEW-1: cover commands ${gapMs} ms apart all succeed and each reaches the panel once`, {
-        timeout: 120000,
-        todo: 'NEW-1: needs the per-endpoint serialization of state pushes against commands (task E, matter-state-update-queue.ts)',
-    }, async (t) => {
+    // The position refresh after each command goes through the state-update
+    // queue, which holds it while a command runs on the endpoint
+    // (matter-command-guard.ts): no command may fail with "Cannot lock".
+    test(`NEW-1: cover commands ${gapMs} ms apart all succeed and each reaches the panel once`, { timeout: 120000 }, async (t) => {
         // At rest half open, so every command is a real movement (stopMotion is refused while moving).
         const cover = { id: 'cover_1', type: 'cover', name: 'Tenda raffica', description: '', status: { position: 50, targetPosition: 50, state: 'stopped' } };
         const { stack, ws } = await setup(t, cover);
@@ -123,3 +115,19 @@ for (const gapMs of [0, 1, 5]) {
         assert.deepEqual(ws.calls.map((c) => c[0]), ['switchLight', 'switchLight', 'switchLight', 'switchLight', 'dimLight', 'dimLight', 'dimLight']);
     });
 }
+
+// The registration's own state pushes are still being applied when the
+// controller's commands arrive: the commands must wait for them, not fail.
+test('NEW-1: commands that arrive during the initial state flush all succeed', { timeout: 120000 }, async (t) => {
+    const dimmer = { id: 'light_4', type: 'light', name: 'Faretto subito', description: '', status: { on: true, dimmable: true, brightness: 40 } };
+    const cover = { id: 'cover_5', type: 'cover', name: 'Tenda subito', description: '', status: { position: 50, targetPosition: 50, state: 'stopped' } };
+    const light = await setup(t, dimmer, { waitForPushes: false });
+    const onOff = await burst(light.stack, 'light_4', 'onOff', [['off', {}], ['on', {}], ['off', {}]], 0);
+    assert.deepEqual(onOff, ['off:ok', 'on:ok', 'off:ok']);
+    assert.equal(light.ws.calls.length, 3);
+
+    const blind = await setup(t, cover, { waitForPushes: false });
+    const moves = await burst(blind.stack, 'cover_5', 'windowCovering', [['downOrClose'], ['upOrOpen'], ['downOrClose']], 0);
+    assert.deepEqual(moves, ['downOrClose:ok', 'upOrOpen:ok', 'downOrClose:ok']);
+    assert.deepEqual(blind.ws.calls.map((c) => c[2]), [0, 100, 0]);
+});

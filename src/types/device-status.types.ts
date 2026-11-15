@@ -26,6 +26,12 @@ export interface ThermostatStatus {
     season?: 'WIN' | 'SUM';
     /** Role of this output in its thermostat program (`HEATING_OUT` / `COOLING_OUT`), when known. */
     outputRole?: ThermostatOutputRole;
+    /**
+     * `true` while the thermostat programs have not been read yet in this
+     * session and no `.ksa` backup provided them: `outputRole` then comes from
+     * the output's name and may still change.
+     */
+    outputRolePending?: boolean;
     /** When the panel last reported this thermostat in realtime (STATUS_TEMPERATURES), epoch ms. */
     observedAt?: number;
     /**

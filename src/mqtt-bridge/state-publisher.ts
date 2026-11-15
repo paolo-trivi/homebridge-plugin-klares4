@@ -65,11 +65,21 @@ export class StatePublisher {
         this.publishedTopics.set(device.id, topic);
         client.publish(topic, JSON.stringify(createDeviceStatePayload(device)), { qos, retain }, (error?: Error): void => {
             if (error) {
-                this.options.log.error('MQTT: Publish error:', error.message);
+                this.publishFailed('MQTT: Publish error:', client, error);
             } else {
                 this.options.log.debug(`MQTT: Published state ${topic.slice(this.options.topicPrefix.length + 1)}`);
             }
         });
+    }
+
+    /**
+     * A publish failed because its connection closed before the broker
+     * confirmed it: the state is republished on the next connect, so this is
+     * not an error.
+     */
+    private publishFailed(what: string, client: mqtt.MqttClient, error: Error): void {
+        if (client.connected) this.options.log.error(what, error.message);
+        else this.options.log.debug(what, error.message, '(connection closed; republished on reconnect)');
     }
 
     /**
@@ -90,7 +100,7 @@ export class StatePublisher {
         }
         client.publish(previousTopic, '', { qos: this.options.qos, retain: true }, (error?: Error): void => {
             if (error) {
-                this.options.log.error('MQTT: Error clearing stale state topic:', error.message);
+                this.publishFailed('MQTT: Error clearing stale state topic:', client, error);
             } else {
                 this.options.log.debug(`MQTT: Cleared stale state topic ${previousTopic}`);
             }

@@ -161,10 +161,13 @@ export class ThermostatAccessory {
      * Reached by HomeKit (already held to the characteristic's limits) and by
      * MQTT commands: a setpoint outside temperatureDefaults.min/max is refused.
      */
+    public isTargetTemperatureAllowed(value: unknown): value is number {
+        return typeof value === 'number' && Number.isFinite(value) && value >= this.tempMin && value <= this.tempMax;
+    }
+
     public async setTargetTemperature(value: CharacteristicValue): Promise<void> {
         const targetTemperature = value as number;
-        if (typeof targetTemperature !== 'number' || !Number.isFinite(targetTemperature)
-            || targetTemperature < this.tempMin || targetTemperature > this.tempMax) {
+        if (!this.isTargetTemperatureAllowed(value)) {
             this.platform.log.warn(
                 `${this.device.name}: setpoint ${String(value)} refused, outside ${this.tempMin}..${this.tempMax} (temperatureDefaults)`,
             );
@@ -178,6 +181,15 @@ export class ThermostatAccessory {
             await this.platform.wsClient.setThermostatTemperature(this.device.id, targetTemperature);
 
             this.platform.log.info(`${this.device.name}: Target temperature ${targetTemperature}C`);
+            if (this.device.mode !== 'heat' && this.device.mode !== 'cool') {
+                // In AUTO or OFF the panel keeps its own target. HAP stores the
+                // written value once this handler returns, so the real one is
+                // put back right after.
+                setImmediate(() => this.service.updateCharacteristic(
+                    this.platform.Characteristic.TargetTemperature,
+                    this.clampTarget(this.device.targetTemperature),
+                ));
+            }
         } catch (error: unknown) {
             this.platform.log.error(
                 `Thermostat temperature error ${this.device.name}:`,

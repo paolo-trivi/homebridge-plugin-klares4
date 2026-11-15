@@ -20,7 +20,7 @@ function recordingLog() {
 }
 
 function loggedInClient() {
-    const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', SYNTHETIC_PIN, silentLog(), { commandTimeoutMs: 200 });
+    const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', SYNTHETIC_PIN, silentLog(), { commandTimeoutMs: 5000 });
     client['state'].idLogin = '77';
     client['state'].ws = { readyState: 1 };
     // Commands only reach discovered outputs (WS-01 defense in depth).

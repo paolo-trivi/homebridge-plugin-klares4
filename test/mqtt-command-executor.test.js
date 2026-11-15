@@ -53,3 +53,24 @@ test('MQTT thermostat setpoint alone is still written', async () => {
     await settle();
     assert.deepEqual(h.events, ['temp:start:21.5']);
 });
+
+test('L3: a thermostat command with a valid mode and an out-of-range setpoint is refused as a whole', async () => {
+    const events = [];
+    const warns = [];
+    const accessory = {
+        isTargetTemperatureAllowed: (value) => value >= 16 && value <= 26,
+        setTargetHeatingCoolingState: async (value) => { events.push(`mode:${value}`); },
+        setTargetTemperature: async (value) => { events.push(`temp:${value}`); },
+    };
+    const executor = new CommandExecutor({
+        log: { info() {}, warn: (...a) => warns.push(a.join(' ')), debug() {}, error() {} },
+        findAccessory: () => accessory,
+    });
+    executor.executeCommand('thermostat', 'sala', JSON.stringify({ targetTemperature: 35, mode: 'heat' }));
+    await settle();
+    assert.deepEqual(events, []);
+    assert.ok(warns.some((line) => /refused/.test(line)));
+    executor.executeCommand('thermostat', 'sala', JSON.stringify({ targetTemperature: 22, mode: 'heat' }));
+    await settle();
+    assert.deepEqual(events, ['mode:1', 'temp:22']);
+});

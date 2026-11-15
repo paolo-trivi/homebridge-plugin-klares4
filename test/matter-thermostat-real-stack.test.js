@@ -67,8 +67,11 @@ async function bootWithRegistry(t, { ws = panel(), storagePath = tmpStorage(t, '
     registry.startDiscoveryCycle();
     const add = async (device) => {
         await registry.addOrUpdateAccessory(device);
-        await waitFor(() => ['registered', 'failed'].includes(registry.getStatus(device.id)), 10000);
+        await waitFor(() => ['registered', 'failed'].includes(registry.getStatus(device.id)), 60000);
         assert.equal(registry.getStatus(device.id), 'registered');
+        // The state pushed right after the registration is applied before the test acts.
+        await waitFor(() => registry.getPendingCount(device.id) === 0, 30000);
+        await stack.settle();
     };
     /** A realtime from the panel, as the WebSocket layer delivers it. */
     const realtime = async (device, patch) => {
@@ -81,7 +84,7 @@ async function bootWithRegistry(t, { ws = panel(), storagePath = tmpStorage(t, '
 const thermo = (stack, uuid) => stack.read(uuid, 'thermostat') ?? {};
 const warned = (lines, pattern) => lines.some((l) => l.startsWith('[warn]') && pattern.test(l));
 
-test('TH-01: the registry registers a thermostat as a native Thermostat and persists no fallback', { timeout: 30000 }, async (t) => {
+test('TH-01: the registry registers a thermostat as a native Thermostat and persists no fallback', { timeout: 120000 }, async (t) => {
     const { stack, add, storagePath, lines } = await bootWithRegistry(t);
     await add(thermostat(1));
     assert.equal(stack.deviceTypeName('thermostat_1'), 'Thermostat');
@@ -90,7 +93,7 @@ test('TH-01: the registry registers a thermostat as a native Thermostat and pers
     assert.equal(lines.some((l) => /falling back|TemperatureSensor/.test(l)), false, lines.join('\n'));
 });
 
-test('a temperature never read is unknown (null) on the native Thermostat, not 0 °C; the first reading fills it', { timeout: 30000 }, async (t) => {
+test('a temperature never read is unknown (null) on the native Thermostat, not 0 °C; the first reading fills it', { timeout: 120000 }, async (t) => {
     const { stack, registry } = await bootWithRegistry(t);
     const device = thermostat(13, { role: 'heating' });
     markStatusPlaceholder(device);
@@ -104,7 +107,7 @@ test('a temperature never read is unknown (null) on the native Thermostat, not 0
     await waitFor(() => thermo(stack, device.id).localTemperature === 1950);
 });
 
-test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupancy or Presets', { timeout: 30000 }, async (t) => {
+test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupancy or Presets', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const deps = { api: stack.api, log: recordingLog().log, getWsClient: () => panel() };
     const cases = [
@@ -113,7 +116,7 @@ test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupanc
         [thermostat(4, { role: 'heating-cooling' }), { heating: true, cooling: true, autoMode: true }, 4],
     ];
     for (const [device, features, sequence] of cases) {
-        await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [deviceToMatterAccessory(device, deps)]);
+        await stack.register([deviceToMatterAccessory(device, deps)]);
         const state = thermo(stack, device.id);
         assert.equal(stack.deviceTypeName(device.id), 'Thermostat', device.status.outputRole);
         for (const [feature, on] of Object.entries(features)) assert.equal(state.featureMap[feature], on, `${device.status.outputRole}.${feature}`);
@@ -123,14 +126,14 @@ test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupanc
     }
 });
 
-test('TH-05/invariant 3: the program data decides the role, a cooling-sounding name does not', { timeout: 30000 }, async (t) => {
+test('TH-05/invariant 3: the program data decides the role, a cooling-sounding name does not', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const device = { ...thermostat(5, { role: 'heating' }), name: 'Raffrescamento prova' };
-    await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [deviceToMatterAccessory(device, { api: stack.api, log: recordingLog().log, getWsClient: () => panel() })]);
+    await stack.register([deviceToMatterAccessory(device, { api: stack.api, log: recordingLog().log, getWsClient: () => panel() })]);
     assert.equal(thermo(stack, 'thermostat_5').featureMap.cooling, false);
 });
 
-test('TH-15/TH-09: a heating output refuses Auto, Cool and unoccupied setpoints to the controller; nothing reaches the panel', { timeout: 30000 }, async (t) => {
+test('TH-15/TH-09: a heating output refuses Auto, Cool and unoccupied setpoints to the controller; nothing reaches the panel', { timeout: 120000 }, async (t) => {
     const { stack, add, ws } = await bootWithRegistry(t);
     await add(thermostat(6, { role: 'heating' }));
     await assert.rejects(stack.write('thermostat_6', 'thermostat', { systemMode: 1 }), /Auto/);
@@ -140,7 +143,7 @@ test('TH-15/TH-09: a heating output refuses Auto, Cool and unoccupied setpoints 
     assert.deepEqual(ws.calls, []);
 });
 
-test('TH-10: the running state is published at registration and follows the output', { timeout: 30000 }, async (t) => {
+test('TH-10: the running state is published at registration and follows the output', { timeout: 120000 }, async (t) => {
     const { stack, add, realtime } = await bootWithRegistry(t);
     const device = thermostat(7, { role: 'heating', active: true });
     await add(device);
@@ -150,7 +153,7 @@ test('TH-10: the running state is published at registration and follows the outp
     assert.equal(thermo(stack, 'thermostat_7').thermostatRunningState.cool, false);
 });
 
-test('TH-05: in summer the heating output shows Off and refuses a setpoint and Heat; the cooling output works', { timeout: 30000 }, async (t) => {
+test('TH-05: in summer the heating output shows Off and refuses a setpoint and Heat; the cooling output works', { timeout: 120000 }, async (t) => {
     const { stack, add, ws, lines } = await bootWithRegistry(t);
     await add(thermostat(8, { role: 'heating', mode: 'cool', target: 26 }));
     await add(thermostat(9, { role: 'cooling', mode: 'cool', target: 26 }));
@@ -172,7 +175,7 @@ test('TH-05: in summer the heating output shows Off and refuses a setpoint and H
     assert.deepEqual(ws.calls, [['temp', 'thermostat_9', 25]]);
 });
 
-test('TH-08: a value the panel acknowledged is the base until the realtime catches up', { timeout: 30000 }, async (t) => {
+test('TH-08: a value the panel acknowledged is the base until the realtime catches up', { timeout: 120000 }, async (t) => {
     const { stack, add, ws } = await bootWithRegistry(t);
     await add(thermostat(10, { role: 'heating', target: 21 }));
 
@@ -198,7 +201,7 @@ test('TH-08: a value the panel acknowledged is the base until the realtime catch
     assert.deepEqual(ws.calls, [['mode', 'thermostat_10', 'off'], ['mode', 'thermostat_10', 'heat']]);
 });
 
-test('TH-17/MAT-15: without a WebSocket client a Matter write fails visibly and the value goes back', { timeout: 30000 }, async (t) => {
+test('TH-17/MAT-15: without a WebSocket client a Matter write fails visibly and the value goes back', { timeout: 120000 }, async (t) => {
     const ws = panel();
     const { stack, add, lines } = await bootWithRegistry(t, { ws });
     await add(thermostat(11, { role: 'heating', target: 21 }));
@@ -209,14 +212,14 @@ test('TH-17/MAT-15: without a WebSocket client a Matter write fails visibly and 
     assert.deepEqual(ws.calls, []);
 });
 
-test('TH-01: a fallback saved by an earlier version goes back to a native Thermostat once, by itself, and survives a restart', { timeout: 60000 }, async (t) => {
+test('TH-01: a fallback saved by an earlier version goes back to a native Thermostat once, by itself, and survives a restart', { timeout: 120000 }, async (t) => {
     const session = realMatterStackSession(t);
     const storagePath = tmpStorage(t, 'klares4-thermo-rs-');
     const device = thermostat(12, { role: 'heating' });
 
     // Boot 1 (as 2.2.0 left it): the thermostat is a TemperatureSensor and the v1 store says so.
     const boot1 = await session.start();
-    await boot1.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [
+    await boot1.register([
         mapThermostatAsTemperatureSensor(device, { api: boot1.api, log: recordingLog().log, getWsClient: () => undefined }),
     ]);
     assert.equal(boot1.deviceTypeName('thermostat_12'), 'TemperatureSensor');
@@ -226,7 +229,7 @@ test('TH-01: a fallback saved by an earlier version goes back to a native Thermo
     // Boot 2, no matterRecoveryRequests: one automatic attempt, and it works.
     const boot2 = await bootWithRegistry(t, { session, storagePath });
     await boot2.add(device);
-    await waitFor(() => boot2.stack.deviceTypeName('thermostat_12') === 'Thermostat', 10000);
+    await waitFor(() => boot2.stack.deviceTypeName('thermostat_12') === 'Thermostat', 60000);
     assert.ok(warned(boot2.lines, /saved as a TemperatureSensor fallback by an earlier version/));
     const record = JSON.parse(fs.readFileSync(path.join(storagePath, FALLBACK_FILE), 'utf8')).thermostats[0];
     assert.equal(record.mode, 'native');

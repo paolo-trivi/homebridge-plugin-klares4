@@ -84,3 +84,27 @@ test('real mqtt.js: online on connect, offline and DISCONNECT at shutdown', asyn
   assert.deepEqual(statuses(), ['online:true', 'offline:true']);
   assert.ok(broker.packets.some((p) => p.cmd === 'publish' && p.topic === 'homebridge/klares4/light/luce/state'));
 });
+
+test('N1 real mqtt.js: after a broker drop with a publish in flight, shutdown still sends offline and DISCONNECT', async (t) => {
+  const { startFakeBroker } = require('./fixtures/fake-mqtt-broker.js');
+  const broker = await startFakeBroker(t);
+  const log = recordingLog();
+  const bridge = new MqttBridge(
+    { enabled: true, broker: broker.url },
+    log.logger,
+    { accessoryHandlers: new Map(), config: {} },
+    { reconnectBackoff: { initialMs: 10, maxMs: 40 } },
+  );
+  await waitFor(() => broker.subscribed());
+  broker.dropConnections();
+  // Handed to mqtt.js while the socket is already gone: never confirmed by any broker.
+  bridge.publishDeviceState({ id: 'light_1', type: 'light', name: 'Luce', status: { on: false } });
+  await waitFor(() => broker.connects() === 2 && broker.packets.filter((p) => p.cmd === 'subscribe').length === 2);
+  const from = broker.packets.length;
+  bridge.disconnect();
+  await waitFor(() => broker.packets.slice(from).some((p) => p.cmd === 'disconnect'));
+  const after = broker.packets.slice(from).map((p) => (p.cmd === 'publish' ? `publish:${p.topic.split('/').pop()}` : p.cmd));
+  assert.deepEqual(after.filter((c) => c === 'publish:status' || c === 'disconnect'), ['publish:status', 'disconnect']);
+  await waitFor(() => log.lines.info.some((line) => line.includes('MQTT: Disconnected')));
+  assert.equal(log.lines.error.length, 0, log.lines.error.join(' | '));
+});

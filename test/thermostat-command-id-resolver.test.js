@@ -13,7 +13,7 @@ function input(overrides) {
       outputThermostatId: '21',
       hasProgramMapping: false,
       primeConfig: async () => true,
-      verifyGuess: () => true,
+      verifyGuess: async () => ({ accepted: true, remember: true }),
       rememberCommandId: (id) => remembered.push(id),
       onResolvedAlias: (id) => aliases.push(id),
       ...overrides,
@@ -67,8 +67,14 @@ test('uses mapped domus sensor id as degraded fallback candidate before output i
 });
 
 test('TH-04: a degraded guess that does not match the realtime is refused', async () => {
-  const h = input({ mappedDomusSensorId: '3', verifyGuess: () => false });
+  const h = input({ mappedDomusSensorId: '3', verifyGuess: async () => ({ accepted: false, reason: 'cfg 3 does not match' }) });
   await assert.rejects(() => resolveThermostatCommandId(h.args), /does not match/);
+  assert.deepEqual(h.remembered, []);
+});
+
+test('M2: a guess accepted without a discriminating match is used but not remembered', async () => {
+  const h = input({ mappedDomusSensorId: '3', verifyGuess: async () => ({ accepted: true, remember: false }) });
+  assert.deepEqual(await resolveThermostatCommandId(h.args), { id: '3', source: 'degraded' });
   assert.deepEqual(h.remembered, []);
 });
 

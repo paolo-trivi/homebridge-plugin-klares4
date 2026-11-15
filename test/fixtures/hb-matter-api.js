@@ -205,6 +205,10 @@ function makeHbMatterApi({
             handlers: a.handlers ?? {},
             reachable: true,
             uniqueId,
+            // Homebridge keeps the plugin's own clusters object and replaces a
+            // cluster's state object in it once an update is applied
+            // (StateManager.js updateAccessoryState, after endpoint.set).
+            pluginClusters: a.clusters,
         });
     }
 
@@ -329,6 +333,9 @@ function makeHbMatterApi({
                 } else {
                     ep.clusters[cluster] = { ...ep.clusters[cluster], ...attributes };
                 }
+                // Any cluster, the bridged information included: that key then
+                // appears in the plugin's clusters without being declared.
+                if (ep.pluginClusters) ep.pluginClusters[cluster] = { ...ep.pluginClusters[cluster], ...attributes };
                 updates.push({ uuid, cluster, attributes });
             });
         },

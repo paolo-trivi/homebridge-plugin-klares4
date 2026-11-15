@@ -98,10 +98,14 @@ export interface WebSocketClientState {
     heartbeatPending: boolean;
     lastPongReceived: number;
     reconnectAttempts: number;
-    /** Failed logins (refused, unanswered or invalid) since the last successful login. */
+    /** Explicit login refusals by the panel since the last successful login. */
     loginRejections: number;
-    /** Set after too many failed logins: reconnection slows to `suspendedLoginRetryMs`. */
+    /** Logins left without a verdict (timeout, socket closed) in a row; normal backoff. */
+    unansweredLogins?: number;
+    /** Set after too many refused logins: reconnection slows to `suspendedLoginRetryMs`. */
     reconnectSuspended: boolean;
+    /** Consecutive syncs in which each discovery read (ZONES, MULTI_TYPES) was refused. */
+    refusedDiscoveryReads?: Map<string, number>;
     isManualClose: boolean;
     pendingLogin?: PendingLoginRequest;
     hasCompletedInitialSync: boolean;
@@ -113,6 +117,11 @@ export interface WebSocketClientState {
     domusThermostatConfig: Required<DomusThermostatConfig>;
     thermostatOutputs: Map<string, KseniaOutputData>;
     thermostatProgramById: Map<string, KseniaProgramThermostatRaw>;
+    /**
+     * The thermostat programs are settled: `PRG_THERMOSTATS` answered (OK or
+     * refused) at least once, or the `.ksa` backup provided them.
+     */
+    thermostatProgramsSettled: boolean;
     thermostatProgramIdByOutputId: Map<string, string>;
     domusSensorIdByThermostatProgramId: Map<string, string>;
     thermostatCommandIdByOutputId: Map<string, string>;

@@ -1,10 +1,12 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
+import { recordObservation } from '../device-observation';
 import { hasAccessoryMetadataChanged } from './matter-device-mapper';
 import type { MatterRegistration } from './matter-registration-recovery';
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { mergeStateUpdates } from './matter-state-updates';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { currentThermostatAttributes } from './matter-thermostat-push';
 
 /**
  * The queue records every thermostat-cluster push so the mapper's
@@ -23,8 +25,11 @@ export function createStateUpdateQueue(
         log,
         registrations,
         (err) => (err instanceof Error ? err.message : String(err)),
-        (uuid, clusterName, attrs) => {
-            if (clusterName === 'thermostat') tracker.recordPushed(uuid, attrs);
+        (reg, update) => {
+            if (update.clusterName !== 'thermostat') return update.attributes;
+            const attrs = currentThermostatAttributes(reg.matterAccessory.context?.device as KseniaDevice | undefined, update.attributes, tracker);
+            tracker.recordPushed(reg.uuid, attrs, reg.matterAccessory.clusters?.thermostat as Record<string, unknown> | undefined);
+            return attrs;
         },
     );
 }
@@ -38,6 +43,7 @@ export function createStateUpdateQueue(
  */
 export function enqueueDeviceState(reg: MatterRegistration, device: KseniaDevice, thermostatAsFallback: boolean): void {
     reg.matterAccessory.context.device = device;
+    recordObservation(reg.matterAccessory.context, device);
     const clusters = reg.matterAccessory.clusters ?? {};
     mergeStateUpdates(reg.pendingStateUpdates, device, thermostatAsFallback, (name) => name in clusters);
 }

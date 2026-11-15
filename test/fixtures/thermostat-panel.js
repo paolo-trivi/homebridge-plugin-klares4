@@ -53,7 +53,7 @@ function createThermostatPanel({
 } = {}) {
     const state = createInitialWebSocketClientState({ manualCommandPairs });
     state.idLogin = '1';
-    const panel = { cfg: new Map(cfgs.map((c) => [c.ID, clone(c)])), writes: [], reads: [], counter: 1000, readFails, writeFails: false };
+    const panel = { cfg: new Map(cfgs.map((c) => [c.ID, clone(c)])), writes: [], reads: [], counter: 1000, readFails, writeFails: false, readGate: undefined };
     const log = silentLog();
     const emitted = [];
     const emitDeviceStatusUpdate = (device) => emitted.push({
@@ -99,9 +99,11 @@ function createThermostatPanel({
         sent.push({ cmd, payloadType, payload: clone(payload), options });
         if (cmd === 'READ' && payloadType === 'CFG_THERMOSTATS') {
             panel.reads.push(payload.ID_READ);
+            if (panel.readGate) await panel.readGate;
             if (panel.readFails) throw new Error('Command timed out');
+            const all = payload.ID_READ === 'ALL';
             const c = panel.cfg.get(payload.ID_READ);
-            reader.handleCfgThermostats(c ? [clone(c)] : [], prgCheck());
+            reader.handleCfgThermostats(all ? [...panel.cfg.values()].map(clone) : (c ? [clone(c)] : []), prgCheck());
             return undefined;
         }
         if (cmd === 'WRITE_CFG') {

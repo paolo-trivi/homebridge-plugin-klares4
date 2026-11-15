@@ -99,12 +99,15 @@ export class SystemTemperatureUpdater {
 
     /**
      * The panel's internal temperature stands in only for a thermostat that has
-     * no source at all: never reported in STATUS_TEMPERATURES and no mapped DOMUS
+     * no source at all, known only once the initial realtime has arrived: never reported in STATUS_TEMPERATURES and no mapped DOMUS
      * sensor that has reported. The panel sends those only when a value changes,
      * so a source that stays silent is a stable room, not a lost one.
      */
     private applyPanelTemperatureFallback(internalTemp: number): void {
         const state = this.deps.state;
+        // Until the initial realtime (REALTIME_RES) has been applied nobody can
+        // tell a thermostat without a source from one not reported yet.
+        if (!state.hasCompletedInitialSync) return;
         for (const device of state.devices.values()) {
             if (device.type !== 'thermostat') continue;
             const thermostatOutputId = stripDevicePrefix(device.id);

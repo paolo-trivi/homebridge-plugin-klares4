@@ -72,6 +72,8 @@ export interface ZoneStatePayload extends DeviceStatePayloadBase {
     armed: boolean;
     fault: boolean;
     bypassed: boolean;
+    /** Tamper (panel field `T`); `false` until the panel reports it, like the other zone flags. Since 2.3.0. */
+    tampered: boolean;
 }
 
 export interface ScenarioStatePayload extends DeviceStatePayloadBase {

@@ -5,9 +5,10 @@ import { hasObservedState } from '../device-observation';
 import { mapThermostatAsTemperatureSensor } from './matter-device-mapper';
 import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
 import { declaredClusters, type MatterTopologyCoordinator } from './matter-topology-coordinator';
-import { replaceEndpoint } from './matter-endpoint-replacement';
+import { inheritIdentity, replaceEndpoint } from './matter-endpoint-replacement';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { registerNextThermostatAttempt, resetThermostatAttempts } from './matter-thermostat-attempts';
+import { takeSensorIdentity } from './matter-thermostat-recovery-request';
 
 const MATTER_REGISTER_RECOVERY_LIMIT = 2;
 
@@ -112,6 +113,13 @@ export async function handleMissingRegisteredAccessory(
         && deps.thermostatFallbackEnabled;
 
     if (shouldFallbackThermostat) {
+        // A slow endpoint may have come up after the probe gave up (a short probe
+        // budget on a runtime whose register does not wait): look once more
+        // before calling the payload refused.
+        if (reg.recoveryAttempts === 1 && await isMatterAccessoryQueryable(deps.api, deps.log, deps.fmtErr, reg)) {
+            deps.scheduleComplete(reg.uuid);
+            return;
+        }
         // A runtime that refused the conformant payload may take the 2.2.0 one (TH-01).
         if (await registerNextThermostatAttempt(reg, deps)) return;
         deps.log.warn(
@@ -204,6 +212,8 @@ export async function registerFallbackAccessory(
         resolveDisplayName: deps.resolveDisplayName,
     });
     await replaceEndpoint(reg, deps.topologyCoordinator, 'other-device');
+    // Back to the sensor a recovery removed: the same device again, with its identity.
+    inheritIdentity(reg, deps.topologyCoordinator, takeSensorIdentity(device.id));
     await deps.topologyCoordinator.register(fallback);
     deps.thermostatFallbackUUIDs.add(device.id);
     deps.onFallbackPersist?.(device.id);

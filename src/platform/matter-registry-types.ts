@@ -24,6 +24,8 @@ export interface MatterTimings {
     unreachableGraceMs: number;
     /** Wait after an unregistered endpoint first reads as absent, before it is checked again (topology coordinator). */
     unregisterSettleMs: number;
+    /** Longest wait for the thermostat programs before a thermostat registers with the role from its name. */
+    thermostatRoleWaitMs: number;
 }
 
 const TIMING_DEFAULTS: Record<keyof MatterTimings, { env: string; value: number; allowZero: boolean }> = {
@@ -35,6 +37,7 @@ const TIMING_DEFAULTS: Record<keyof MatterTimings, { env: string; value: number;
     stateBootstrapMs: { env: 'KLARES4_MATTER_STATE_BOOTSTRAP_MS', value: 0, allowZero: true },
     unreachableGraceMs: { env: 'KLARES4_MATTER_UNREACHABLE_GRACE_MS', value: 15_000, allowZero: true },
     unregisterSettleMs: { env: 'KLARES4_MATTER_UNREGISTER_SETTLE_MS', value: 1_000, allowZero: true },
+    thermostatRoleWaitMs: { env: 'KLARES4_MATTER_THERMOSTAT_ROLE_WAIT_MS', value: 20_000, allowZero: true },
 };
 
 function usable(value: unknown, allowZero: boolean): value is number {
@@ -63,6 +66,7 @@ export function resolveMatterTimings(
         stateBootstrapMs: pick('stateBootstrapMs'),
         unreachableGraceMs: pick('unreachableGraceMs'),
         unregisterSettleMs: pick('unregisterSettleMs'),
+        thermostatRoleWaitMs: pick('thermostatRoleWaitMs'),
     };
 }
 

@@ -2,12 +2,16 @@ import type { RawMessage } from './types';
 
 export interface CaptureLimits {
     maxMessages: number;
-    /** Sum of the stored frames' sizes in UTF-8 bytes; the file written from them is a few times larger. */
+    /** Sum of the stored frames' sizes in UTF-8 bytes; the file holds each frame once. */
     maxBytes: number;
 }
 
-/** Real traffic is about 4 MB in 15 minutes: these hold more than the longest capture (30 minutes). */
-export const DEFAULT_CAPTURE_LIMITS: CaptureLimits = { maxMessages: 20_000, maxBytes: 8 * 1024 * 1024 };
+/**
+ * The frames of a real 10-15 minute capture weigh 0.15-0.3 MB (the snapshots are the bulk of
+ * the file), so 2 MiB is about eight times the largest one seen. The file is written in one
+ * synchronous step at shutdown and is meant to be sent privately, so it has to stay a few MiB.
+ */
+export const DEFAULT_CAPTURE_LIMITS: CaptureLimits = { maxMessages: 5_000, maxBytes: 2 * 1024 * 1024 };
 
 /**
  * The frames of a capture in progress. When a limit is reached the earliest frames

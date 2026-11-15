@@ -98,7 +98,7 @@ Eseguita il 2026-09-26 su un'installazione reale, dopo il report statico. Nessun
 | Child bridge | sì, `0E:91:2B:75:74:97`, **solo Matter** (`hap.enabled: false`, Matter su 5530), 109 endpoint |
 | MQTT | disabilitato nel plugin (non attivato per il test, per scelta dell'utente) |
 | Pannello | Lares4, firmware non esposto nei messaggi catturati; `PRG_THERMOSTATS` → `CMD_NOT_AVAILABLE` (percorso degradato "DOMUS sensor id come cfg id" attivo: `thermostat_18` e `thermostat_34` → cfg 1) |
-| Backup | `/root/smarthome/_backups/klares4-audit-20260926-202851/` sull'host (config, persist, accessories, storage Matter, file `klares4-*`, plugin rc.3 per il rollback) |
+| Backup | una cartella di backup sull'host (config, persist, accessories, storage Matter, file `klares4-*`, plugin rc.3 per il rollback) |
 
 **Gate locali**
 
@@ -331,7 +331,7 @@ Documenti da aggiornare: README (EN e IT, tabelle config), `docs/en/config-and-u
 
 ## [P1] F03 — Ogni (ri)connessione pubblica i default del parser come stato reale (transizioni spurie HomeKit/Matter) — CONFIRMED sul campo, FIXED (verificato)
 
-**Stato sul campo:** CONFIRMED, al boot e al reconnect (blocco iptables di circa 110 s verso il pannello). Log DEBUG di Homebridge, update di attributi Matter: la tapparella "Finestra Bagno Matrimoniale" (reale 80% aperta) passa da `currentPositionLiftPercent100ths: 10000` (chiusa) a 2000; il contatto "Contatto Bagno Matrimoniale" (finestra aperta) passa da `stateValue: true` (chiusa) di nuovo ad aperta circa 1 s dopo; i sensori DOMUS vanno a `measuredValue: 0` (0 °C) e i termostati a 2000 (20 °C) prima dei valori reali (2430). **Fix:** `device-observation.ts` (placeholder di discovery marcati, merge con lo stato noto) e `websocket-client/discovered-device.ts`; alla rediscovery il device conserva lo stato osservato; al boot Matter/HAP usano lo stato in cache finché il pannello non ne riporta uno. **Dopo la fix, sul campo:** 0 push di 0 °C/20 °C, tapparella solo 2000, contatto aperto sempre `false`, al boot e al reconnect. MQTT non verificato sul campo (disabilitato su questa installazione): pubblica solo sugli update di stato, quindi non riceveva placeholder dalla discovery.
+**Stato sul campo:** CONFIRMED, al boot e al reconnect (blocco iptables di circa 110 s verso il pannello). Log DEBUG di Homebridge, update di attributi Matter: la tapparella "Device 11" (reale 80% aperta) passa da `currentPositionLiftPercent100ths: 10000` (chiusa) a 2000; il contatto "Contatto Device 52" (finestra aperta) passa da `stateValue: true` (chiusa) di nuovo ad aperta circa 1 s dopo; i sensori DOMUS vanno a `measuredValue: 0` (0 °C) e i termostati a 2000 (20 °C) prima dei valori reali (2430). **Fix:** `device-observation.ts` (placeholder di discovery marcati, merge con lo stato noto) e `websocket-client/discovered-device.ts`; alla rediscovery il device conserva lo stato osservato; al boot Matter/HAP usano lo stato in cache finché il pannello non ne riporta uno. **Dopo la fix, sul campo:** 0 push di 0 °C/20 °C, tapparella solo 2000, contatto aperto sempre `false`, al boot e al reconnect. MQTT non verificato sul campo (disabilitato su questa installazione): pubblica solo sugli update di stato, quindi non riceveva placeholder dalla discovery.
 
 **Category:** ROBUSTNESS
 **Files:** `src/websocket-client/message-service.ts`, `src/websocket/device-state-projector.ts`, `src/websocket-client/device-parsers.ts`, `src/platform/index.ts`, `src/platform/accessory-registry.ts`

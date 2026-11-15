@@ -45,7 +45,7 @@ test('TH-02 S2: a mode change does not bring back the setpoint read at login', a
     assert.equal(sim.panel.cfg.get('1').WIN.TM, '22.5');
     assert.deepEqual(sim.panel.writes, [
         { ID: '1', ACT_MODE: 'OFF' },
-        { ID: '1', ACT_MODE: 'MAN', ACT_SEA: 'WIN' },
+        { ID: '1', ACT_MODE: 'MAN' },
     ]);
 });
 
@@ -124,13 +124,22 @@ test('TH-02: a NM_CHANGES lagging behind several of our writes is still ours', a
     assert.equal(handleCfgChangeNotification(state, { CFG: 'x' }), false, 'malformed counter ignored');
 });
 
-test('TH-02: mode payloads are the official app shapes', async () => {
-    const sim = connected({ mode: 'MAN' });
-    for (const mode of ['off', 'auto', 'heat', 'cool']) await sim.service.setThermostatMode('thermostat_18', mode);
+test('TH-02: mode payloads are the official app shapes; ACT_SEA only to change season', async () => {
+    const sim = connected({ mode: 'MAN', season: 'WIN' });
+    for (const mode of ['off', 'auto', 'heat', 'cool', 'cool', 'heat']) await sim.service.setThermostatMode('thermostat_18', mode);
     assert.deepEqual(sim.panel.writes, [
         { ID: '1', ACT_MODE: 'OFF' },
         { ID: '1', ACT_MODE: 'AUTO' },
-        { ID: '1', ACT_MODE: 'MAN', ACT_SEA: 'WIN' },
+        { ID: '1', ACT_MODE: 'MAN' },
         { ID: '1', ACT_MODE: 'MAN', ACT_SEA: 'SUM' },
+        { ID: '1', ACT_MODE: 'MAN' },
+        { ID: '1', ACT_MODE: 'MAN', ACT_SEA: 'WIN' },
     ]);
+});
+
+test('TH-02: Heat on a thermostat the keypad moved to summer sends the season', async () => {
+    const sim = connected({ mode: 'OFF', season: 'WIN' });
+    sim.keypad('1', (c) => { c.ACT_SEA = 'SUM'; }, { notify: false });
+    await sim.service.setThermostatMode('thermostat_18', 'heat');
+    assert.deepEqual(sim.panel.writes, [{ ID: '1', ACT_MODE: 'MAN', ACT_SEA: 'WIN' }]);
 });

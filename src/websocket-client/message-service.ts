@@ -7,13 +7,13 @@ import { ThermostatReadHandler } from './thermostat-read-handler';
 import type { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
-import { runIsolated } from '../isolation';
+import { rawItemId, runIsolated } from '../isolation';
 import { frameResult, resultDetail } from '../websocket/protocol-result';
 import { abandonDiscoveryRound, closeDiscoveryRound, openDiscoveryRound } from './discovered-device';
 import { readInboundFrame } from './inbound-frame';
 import { LoginResponseHandler } from './login-response-handler';
-import { resetLoginRejections } from './login-rejection-guard';
-import { DISCOVERY_FAMILIES, type DiscoverySection, readRefusalImpact } from './sync-read-policy';
+import { type LoginFailureKind, resetLoginRejections } from './login-rejection-guard';
+import { DISCOVERY_FAMILIES, type DiscoverySection, isDiscoveryEntry, ReadRefusals } from './sync-read-policy';
 import type {
     CallbackRegistry,
     RealtimeStatusData,
@@ -38,7 +38,7 @@ interface MessageServiceDeps {
     emitRawMessage: (direction: 'in', rawMessage: string) => void;
     onLoginCompleted: () => void;
     /** A failed login: counted, socket closed, reconnection backoff. */
-    failLogin?: (error: Error) => void;
+    failLogin?: (error: Error, kind: LoginFailureKind) => void;
     /** The current session cannot complete its sync: closed and retried with backoff. */
     abortSession?: (reason: string) => void;
     /** The sync of the current session completed (REALTIME registration accepted). */
@@ -49,9 +49,13 @@ export class MessageService {
     private readonly thermostats: ThermostatReadHandler;
     private readonly discovery: DiscoveryReadHandler;
     private readonly login: LoginResponseHandler;
+    private readonly readRefusals: ReadRefusals;
     /** Dropped frames per kind of rejection, for the rate-limited log. */
     private readonly rejectedFrames = new Map<string, number>();
     private missingCrcReported = false;
+    private unverifiedCrcReported = false;
+    /** Errors the discovery handler logged (per-element failures), see `discoverySection`. */
+    private discoveryErrors = 0;
 
     constructor(private readonly deps: MessageServiceDeps) {
         this.thermostats = new ThermostatReadHandler({
@@ -62,9 +66,15 @@ export class MessageService {
             thermostatStatusUpdater: deps.thermostatStatusUpdater,
             emitDeviceStatusUpdate: (device): void => this.deps.callbacks.onDeviceStatusUpdate?.(device),
         });
+        const discoveryLog: Logger = Object.assign(Object.create(deps.log) as Logger, {
+            error: (...args: Parameters<Logger['error']>): void => {
+                this.discoveryErrors += 1;
+                deps.log.error(...args);
+            },
+        });
         this.discovery = new DiscoveryReadHandler({
             state: deps.state,
-            log: deps.log,
+            log: discoveryLog,
             exposePartialArmScenarios: deps.exposePartialArmScenarios,
             exposeOutputs: deps.exposeOutputs,
             exposeScenarios: deps.exposeScenarios,
@@ -72,11 +82,16 @@ export class MessageService {
             thermostats: this.thermostats,
             emitDeviceDiscovered: (device): void => this.deps.callbacks.onDeviceDiscovered?.(device),
         });
+        this.readRefusals = new ReadRefusals({
+            state: deps.state,
+            log: deps.log,
+            abortSession: (reason): void => this.abortSession(reason),
+        });
         this.login = new LoginResponseHandler({
             state: deps.state,
             log: deps.log,
             onLoginAccepted: (): void => this.onLoginAccepted(),
-            failLogin: (error): void => this.deps.failLogin?.(error),
+            failLogin: (error, kind): void => this.deps.failLogin?.(error, kind),
         });
     }
 
@@ -91,6 +106,16 @@ export class MessageService {
         if (frame.crc === 'missing' && !this.missingCrcReported) {
             this.missingCrcReported = true;
             this.deps.log.warn(`The panel sent a ${frameLabel(message)} frame without CRC_16; frames without CRC are accepted`);
+        }
+        if (frame.crc === 'unverified' && !this.unverifiedCrcReported) {
+            this.unverifiedCrcReported = true;
+            this.deps.log.warn(
+                `The panel sent a ${frameLabel(message)} frame with non-ASCII text (for example an accented name) `
+                + `whose CRC_16 differs from the plugin's UTF-8 computation (matching encoding: `
+                + `${frame.matchingEncoding ?? 'none of latin1, utf16le, utf16-low-byte'}). The frame is accepted. `
+                + 'Please report this line with the panel firmware version in a GitHub issue '
+                + '(do not attach debug captures publicly: they contain the names of your installation).',
+            );
         }
 
         if (this.deps.logLevel >= LogLevel.DEBUG) {
@@ -133,21 +158,24 @@ export class MessageService {
 
         const result = frameResult(message);
         if (result !== undefined && result !== 'OK') {
-            this.handleRefusedRead(message, result);
+            this.readRefusals.refused(message.PAYLOAD_TYPE, result, resultDetail(message));
+            // Without programs the roles taken from the output names are final (the Matter registration waits for them).
+            if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS') section('PRG_THERMOSTATS refused', () => this.thermostats.programsUnavailable());
             return;
         }
+        this.readRefusals.accepted(message.PAYLOAD_TYPE);
         this.deps.log.info(`Response received: ${message.PAYLOAD_TYPE}`);
 
         if (message.PAYLOAD_TYPE === 'ZONES') {
             const zones = payload.ZONES;
-            this.discoverySection('ZONES', zones, () => this.discovery.handleZones(zones ?? []));
+            this.discoverySection('ZONES', zones, (listed) => this.discovery.handleZones(listed));
         }
 
         if (message.PAYLOAD_TYPE === 'MULTI_TYPES') {
             const { OUTPUTS: outputs, SCENARIOS: scenarios, BUS_HAS: sensors } = payload;
-            this.discoverySection('OUTPUTS', outputs, () => this.discovery.handleOutputs(outputs ?? []));
-            this.discoverySection('SCENARIOS', scenarios, () => this.discovery.handleScenarios(scenarios ?? []));
-            this.discoverySection('BUS_HAS', sensors, () => this.discovery.handleBusSensors(sensors ?? []));
+            this.discoverySection('OUTPUTS', outputs, (listed) => this.discovery.handleOutputs(listed));
+            this.discoverySection('SCENARIOS', scenarios, (listed) => this.discovery.handleScenarios(listed));
+            this.discoverySection('BUS_HAS', sensors, (listed) => this.discovery.handleBusSensors(listed));
             section('thermostat mapping', () => this.thermostats.afterMultiTypes());
         }
 
@@ -214,40 +242,38 @@ export class MessageService {
         else this.deps.log.warn(reason);
     }
 
-    private handleRefusedRead(message: KseniaMessage, result: string): void {
-        const detail = resultDetail(message);
-        const what = `The panel refused the ${String(message.PAYLOAD_TYPE)} read (${detail ?? result})`;
-        switch (readRefusalImpact(message.PAYLOAD_TYPE, detail)) {
-            case 'expected':
-                this.deps.log.debug(`${what}: not available on this panel`);
-                return;
-            case 'fatal':
-                this.abortSession(`${what}: the synchronization is not complete, reconnecting`);
-                return;
-            default:
-                this.deps.log.warn(`${what}; the synchronization continues without it`);
-        }
-    }
-
     /**
      * One discovery section of a configuration read. When it is a list and
-     * its handler completes, the devices of its family that it no longer
-     * lists leave the session state (deleted or re-categorised on the panel).
+     * every element is a device entry that its handler processes, the devices
+     * of its family that it no longer lists leave the session state (deleted
+     * or re-categorised on the panel). An element that is not an object with
+     * an ID is reported like any element failure and handled by nobody.
      */
-    private discoverySection(name: DiscoverySection, items: unknown, handle: () => void): void {
+    private discoverySection<T>(name: DiscoverySection, items: T[] | undefined, handle: (listed: T[]) => void): void {
         if (items === undefined) return;
         if (!Array.isArray(items)) {
             this.deps.log.warn(`Ignoring the ${name} section of a discovery read: it is not a list`);
             return;
         }
         const devices = this.deps.state.devices;
+        const errorsBefore = this.discoveryErrors;
+        const listed = items.filter(isDiscoveryEntry);
+        for (const item of items.filter((entry) => !isDiscoveryEntry(entry))) {
+            this.discoveryErrors += 1;
+            const frame = name === 'ZONES' ? 'READ_RES/ZONES zone' : `READ_RES/MULTI_TYPES ${name} entry`;
+            runIsolated(this.deps.log, `${frame} ${rawItemId(item)}`, () => {
+                throw new Error('not an object with an ID');
+            });
+        }
         let completed = false;
         openDiscoveryRound(devices);
         runIsolated(this.deps.log, `READ_RES ${name}`, () => {
-            handle();
+            handle(listed);
             completed = true;
         });
-        if (!completed) {
+        // An element that failed is still listed by the panel: with one failure
+        // the section cannot tell absent devices apart, so nothing is removed.
+        if (!completed || this.discoveryErrors > errorsBefore) {
             abandonDiscoveryRound(devices);
             return;
         }

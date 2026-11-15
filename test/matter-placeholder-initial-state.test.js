@@ -70,18 +70,32 @@ test('a thermostat TemperatureSensor fallback also starts with a null measuredVa
     assert.equal(hb.endpoints.get('thermostat_5').clusters.temperatureMeasurement.measuredValue, null);
 });
 
-test('state known from the Homebridge cache still seeds the endpoint', async (t) => {
+test('state the panel reported and the cache recorded still seeds the endpoint', async (t) => {
     const hb = makeHbMatterApi();
     const reg = registry(t, hb);
     reg.configureCachedAccessory({
         UUID: 'sensor_t',
         displayName: 'Sensore temperature',
         deviceType: deviceTypes.TemperatureSensor,
-        context: { device: { id: 'sensor_t', type: 'sensor', name: 'Sensore temperature', description: '', status: { sensorType: 'temperature', value: 19 } } },
+        context: { panelReported: 1, device: { id: 'sensor_t', type: 'sensor', name: 'Sensore temperature', description: '', status: { sensorType: 'temperature', value: 19 } } },
     });
     await reg.addOrUpdateAccessory(placeholderSensor('sensor_t', 'temperature'));
     await waitFor(() => reg.getStatus('sensor_t') === 'registered');
     assert.equal(hb.endpoints.get('sensor_t').clusters.temperatureMeasurement.measuredValue, 1900);
+});
+
+test('PLAT-R1: a cache without the marker (2.2.0) holds a placeholder, not a reading', async (t) => {
+    const hb = makeHbMatterApi();
+    const reg = registry(t, hb);
+    reg.configureCachedAccessory({
+        UUID: 'sensor_t',
+        displayName: 'Sensore temperature',
+        deviceType: deviceTypes.TemperatureSensor,
+        context: { device: { id: 'sensor_t', type: 'sensor', name: 'Sensore temperature', description: '', status: { sensorType: 'temperature', value: 0 } } },
+    });
+    await reg.addOrUpdateAccessory(placeholderSensor('sensor_t', 'temperature'));
+    await waitFor(() => reg.getStatus('sensor_t') === 'registered');
+    assert.equal(hb.endpoints.get('sensor_t').clusters.temperatureMeasurement.measuredValue, null);
 });
 
 test('a thermostat that falls back during recovery does not publish its placeholder temperature', async (t) => {
