@@ -58,3 +58,21 @@ test('SP-23: checkBrokerUrl refuses what mqtt.js would read as another host', ()
     assert.ok(!result.reason.includes('broker.example') && !result.reason.includes('u:p'), result.reason);
   }
 });
+
+test('R8: an invalid port in the broker URL is reported as a port problem, without echoing the URL', () => {
+  for (const url of ['mqtt://broker.example:99999', 'mqtt://broker.example:notaport', 'mqtts://u:secret@broker.example:70000', 'mqtt://[2001:db8::1]:65536', 'mqtt://broker.example:0']) {
+    const result = checkBrokerUrl(url);
+    assert.equal(result.ok, false, url);
+    assert.match(result.reason, /port in the broker URL must be a number from 1 to 65535/, `${url}: ${result.reason}`);
+    assert.ok(!/broker\.example|secret|2001/.test(result.reason), result.reason);
+  }
+});
+
+test('R8: an unescaped / or # in the password is reported as such, not as a port problem', () => {
+  for (const url of ['mqtt://user:p/ss@broker.example', 'mqtt://user:p#ss@broker.example:1883']) {
+    const { reason } = checkBrokerUrl(url);
+    assert.match(reason, /password with \/, # or \? must be percent-encoded/, `${url}: ${reason}`);
+    assert.doesNotMatch(reason, /port/);
+  }
+  assert.equal(checkBrokerUrl('mqtt://broker.example:65535').ok, true);
+});
