@@ -11,11 +11,25 @@ updates:
         update-types:
           - version-update:semver-major
     groups:
-      # Development dependencies never ship in the package: their minor and patch
-      # updates may auto-merge once CI is green. Runtime dependencies are grouped
-      # apart so that they are always reviewed by a person.
+      # The compiler and the types it compiles against change the published
+      # JavaScript and declarations: always reviewed by a person, like runtime
+      # dependencies. First in the list: a package belongs to the first group
+      # that matches it.
+      npm-build-tools:
+        patterns:
+          - typescript
+          - '@types/*'
+        update-types:
+          - minor
+          - patch
+      # The other development dependencies never ship in the package: their minor
+      # and patch updates may auto-merge once CI is green. Runtime dependencies
+      # are grouped apart so that they are always reviewed by a person.
       npm-dev-minor-and-patch:
         dependency-type: development
+        exclude-patterns:
+          - typescript
+          - '@types/*'
         update-types:
           - minor
           - patch

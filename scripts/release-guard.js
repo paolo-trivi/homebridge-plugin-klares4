@@ -19,7 +19,7 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 
-const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-(rc|beta)\.?(\d+))?$/;
+const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-(rc|beta)\.(\d+))?$/;
 const DEPENDENCY_FIELDS = [
     'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides',
 ];
@@ -28,8 +28,9 @@ function classifyVersion(version) {
     const match = VERSION.exec(version);
     if (!match) {
         throw new Error(
-            `Unsupported version "${version}": use X.Y.Z, X.Y.Z-rc.N or X.Y.Z-beta.N ` +
-            '(other pre-release names would be published on the wrong dist-tag).',
+            `Unsupported version "${version}": use X.Y.Z, X.Y.Z-rc.N or X.Y.Z-beta.N, with the dot before N ` +
+            '(for example 2.3.0-rc.1, not 2.3.0-rc1). Other pre-release names would be published on the wrong dist-tag, ' +
+            'and a stable release only recognizes release candidates written -rc.N.',
         );
     }
     const base = `${match[1]}.${match[2]}.${match[3]}`;
