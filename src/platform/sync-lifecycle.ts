@@ -11,7 +11,7 @@ export interface SyncLifecycleDeps {
     log: Logger;
     accessoryRegistry: AccessoryRegistry;
     matterRegistry: MatterAccessoryRegistry;
-    /** Matter-named snapshots of the devices currently exposed on Matter. */
+    /** Matter-named snapshots of the devices exposed on Matter that the panel reported in the current sync. */
     eligibleMatterDevices: () => KseniaDevice[];
     /** Runs once, at the end of the first complete sync, with every device ID the panel reported. */
     onFirstSyncComplete?: (discoveredIds: ReadonlySet<string>) => void;
@@ -42,6 +42,8 @@ export class SyncLifecycle {
     /** Every device the panel listed in the current sync, excluded ones included. */
     private readonly syncDeviceIds = new Set<string>();
     private completed?: CompletedSync;
+    /** The Matter devices of the last completed sync, taken when it completed. */
+    private completedMatterDevices: KseniaDevice[] = [];
     private prunedEpoch?: number;
     private matterRun?: Promise<void>;
     private matterRunQueued = false;
@@ -52,7 +54,10 @@ export class SyncLifecycle {
     constructor(private readonly deps: SyncLifecycleDeps) {}
 
     public attach(client: KseniaWebSocketClient, deviceEvents: DeviceEventRouter): void {
-        client.onSyncStarted = (): void => this.startSync();
+        client.onSyncStarted = (): void => {
+            deviceEvents.startSync();
+            this.startSync();
+        };
         client.onDeviceDiscovered = (device: KseniaDevice): void => {
             this.discoveredIds.add(device.id);
             this.syncDeviceIds.add(device.id);
@@ -90,6 +95,8 @@ export class SyncLifecycle {
         const answeredFamilies = familiesOf(this.syncDeviceIds);
         runIsolated(log, 'HAP accessory prune', () => this.deps.accessoryRegistry.pruneStaleAccessories({ answeredFamilies }));
         this.completed = { epoch: this.epoch, answeredFamilies };
+        // Taken now: a sync that starts before the queued name pass runs must not shrink it.
+        this.completedMatterDevices = this.deps.eligibleMatterDevices();
         if (!this.firstSyncReported) {
             this.firstSyncReported = true;
             const { onFirstSyncComplete } = this.deps;
@@ -118,7 +125,7 @@ export class SyncLifecycle {
         // Two-phase naming, phase 2: with the full device set known, batch-compute
         // the authoritative name-map, persist it and refresh outliers — then prune.
         try {
-            await matterRegistry.finalizeNameMap(this.deps.eligibleMatterDevices());
+            await matterRegistry.finalizeNameMap(this.completedMatterDevices);
         } catch (err: unknown) {
             log.warn('[Matter] Name-map finalize error:', err instanceof Error ? err.message : String(err));
         }
