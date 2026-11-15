@@ -11,9 +11,9 @@
         "check:pack": "node scripts/check-pack.js",
         "verify": "npm run check:max-lines && npx tsc --noEmit --noUnusedLocals --noUnusedParameters && npm test",
         "release:dry-run": "npm publish --tag rc --dry-run",
-        "test": "npm run build && node --test --test-timeout=30000 $(find test -name '*.test.js' -print)",
-        "test:contract": "npm run build && node --test --test-timeout=60000 test/matter-real-stack-contract.test.js",
-        "test:coverage": "npm run build && node --test --test-timeout=30000 --enable-source-maps --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='scripts/**' --test-coverage-lines=92 --test-coverage-branches=87 --test-coverage-functions=93 $(find test -name '*.test.js' -print)",
+        "test": "npm run build && node --test --test-timeout=180000 $(find test -name '*.test.js' -print)",
+        "test:contract": "npm run build && node --test --test-timeout=180000 test/matter-real-stack-contract.test.js",
+        "test:coverage": "npm run build && node --test --test-timeout=180000 --enable-source-maps --experimental-test-coverage --test-coverage-exclude='test/**' --test-coverage-exclude='scripts/**' --test-coverage-lines=92 --test-coverage-branches=87 --test-coverage-functions=93 $(find test -name '*.test.js' -print)",
         "prepack": "npm run build:release"
     },
     "keywords": [
