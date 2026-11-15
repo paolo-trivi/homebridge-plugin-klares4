@@ -74,7 +74,7 @@ jobs:
       - name: Verify (without the real Matter stack)
         run: |
           npm run check:max-lines
-          npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+          npm run typecheck
           npm run build
           node scripts/run-tests.js --no-real-stack
 
@@ -105,7 +105,9 @@ jobs:
       # The lockfile pins one Homebridge. Swap it for the version under test in
       # node_modules only: package.json and the lockfile stay as committed.
       - name: Install Homebridge ${{ matrix.homebridge }}.x
-        run: npm install --no-save --no-package-lock --ignore-scripts "homebridge@~${{ matrix.homebridge }}.0"
+        env:
+          HOMEBRIDGE_LINE: ${{ matrix.homebridge }}
+        run: npm install --no-save --no-package-lock --ignore-scripts "homebridge@~${HOMEBRIDGE_LINE}.0"
 
       - name: Show installed versions
         run: |
@@ -123,8 +125,10 @@ jobs:
 
       - name: Explain a contract failure
         if: failure()
+        env:
+          HOMEBRIDGE_LINE: ${{ matrix.homebridge }}
         run: |
-          echo "::error title=Real-stack tests failed on Homebridge ${{ matrix.homebridge }}.x::The plugin does not work with this Homebridge/matter.js line, or the test harness (test/fixtures/real-matter-stack.js and the tests that use it) relies on behaviour that differs in it. Read the first failing test above."
+          echo "::error title=Real-stack tests failed on Homebridge ${HOMEBRIDGE_LINE}.x::The plugin does not work with this Homebridge/matter.js line, or the test harness (test/fixtures/real-matter-stack.js and the tests that use it) relies on behaviour that differs in it. Read the first failing test above."
 
   coverage:
     name: Coverage

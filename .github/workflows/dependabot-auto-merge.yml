@@ -1,26 +1,47 @@
 name: Dependabot auto-merge
 
-# Only Dependabot's own PRs, and only patch/minor updates of development
-# dependencies and GitHub Actions. Runtime dependencies (and anything that is not
-# a direct development dependency) always wait for a human review: they end up in
-# the published package. So do the packages that shape the published output even
-# though they are development dependencies: the compiler (typescript) and the
-# types it compiles against (@types/*). This workflow never checks out or runs
-# the PR's code.
+# Only Dependabot's own PRs, and only patch/minor updates of npm development
+# dependencies. Everything else waits for a human review:
+#   - runtime dependencies (and anything that is not a direct development
+#     dependency): they end up in the published package;
+#   - the packages that shape the published output although they are
+#     development dependencies: the compiler (typescript) and the types it
+#     compiles against (@types/*). The release build runs the compiler;
+#   - GitHub Actions: an action runs in every job that uses it, the publish job
+#     with the npm OIDC token included.
+# The remaining development dependencies (Homebridge, the test bench) run only in
+# jobs that have no secret and produce nothing that is published.
+# This workflow never checks out or runs the PR's code.
 
-on: pull_request_target
+# pull_request_target: the job needs a token that can merge. It is safe here
+# because nothing from the PR is checked out or executed.
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types: [opened, synchronize, reopened]
 
 permissions: {}
 
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   auto-merge:
-    if: >-
+    name: Auto-merge a development dependency update
+    # The PR author (not spoofable), and also the actor of this event (a person
+    # pushing to the branch is the actor of `synchronize`), and a single commit:
+    # fetch-metadata verifies only the first commit of the PR. The actor check
+    # only narrows the author check, so zizmor's bot-conditions does not apply.
+    if: >- # zizmor: ignore[bot-conditions]
       github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.commits == 1
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      contents: write
-      pull-requests: write
+      contents: write # merge the PR
+      pull-requests: write # enable auto-merge on it
 
     steps:
       - name: Fetch Dependabot metadata
@@ -37,21 +58,40 @@ jobs:
           REVIEWED_PACKAGES: '^(typescript|@types/.+)$'
         run: |
           set -euo pipefail
-          if jq -e --arg ecosystem "$ECOSYSTEM" --arg reviewed "$REVIEWED_PACKAGES" '
+          if [[ "$ECOSYSTEM" == "npm_and_yarn" || "$ECOSYSTEM" == "npm" ]] && jq -e --arg reviewed "$REVIEWED_PACKAGES" '
             length > 0 and all(.[];
               (.updateType == "version-update:semver-patch" or .updateType == "version-update:semver-minor")
               and (.dependencyName | test($reviewed) | not)
-              and (.dependencyType == "direct:development" or $ecosystem == "github_actions" or $ecosystem == "github-actions"))
+              and .dependencyType == "direct:development")
           ' <<<"$UPDATES" >/dev/null; then
             echo "allow=true" >> "$GITHUB_OUTPUT"
           else
             echo "allow=false" >> "$GITHUB_OUTPUT"
-            echo "Not auto-merging: needs a human review (runtime dependency, compiler or types, major update or indirect)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Not auto-merging: needs a human review (runtime dependency, compiler or types, action, major update or indirect)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Only package.json and the lockfile: anything else in a dependency PR is
+      # not a dependency update.
+      - name: Check the changed files
+        if: steps.decide.outputs.allow == 'true'
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          FILES="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename' | sort -u)"
+          if grep -qvxE 'package\.json|package-lock\.json' <<<"$FILES"; then
+            echo "allow=false" >> "$GITHUB_OUTPUT"
+            echo "Not auto-merging: the PR changes files other than package.json and package-lock.json." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "allow=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Enable auto-merge
-        if: steps.decide.outputs.allow == 'true'
+        if: steps.decide.outputs.allow == 'true' && steps.files.outputs.allow == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: gh pr merge --auto --squash --match-head-commit "$HEAD_SHA" "$PR_URL"

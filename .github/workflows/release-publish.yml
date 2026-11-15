@@ -1,9 +1,16 @@
 name: Release Publish
 
-# Two jobs on purpose. `build` installs and runs the code of every dependency, so
-# it has no OIDC token and cannot publish. `publish` has the token but runs no
-# repository or dependency code: it only publishes the tarball `build` produced,
-# after the `npm-publish` environment gate.
+# Three jobs on purpose.
+#
+# - `build` makes the tarball. It runs the repository's own scripts, npm and the
+#   TypeScript compiler, and nothing else: no test, no Homebridge, no other
+#   dependency code. Whatever runs here decides what is published.
+# - `test` runs the whole suite on the same commit, with every development
+#   dependency (Homebridge, matter.js and their trees). It produces nothing that
+#   is published: a compromised test dependency can fail the release, not alter it.
+# - `publish` has the OIDC token but runs no repository or dependency code: it
+#   publishes the tarball `build` produced, by artifact ID and SHA-256 handed over
+#   as job outputs, after the `npm-publish` environment gate.
 
 on:
   push:
@@ -18,20 +25,22 @@ permissions: {}
 
 jobs:
   build:
-    name: Build and test
+    name: Build the tarball
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     permissions:
-      contents: read
+      contents: read # checkout only
     outputs:
       name: ${{ steps.plan.outputs.name }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
       tarball: ${{ steps.pack.outputs.tarball }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
 
     steps:
       # Full history: the tag must be an ancestor of main and the release gate
-      # compares the stable commit with the release candidate tag.
+      # compares the stable commit with the release candidate's commit.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,10 +55,12 @@ jobs:
             exit 1
           fi
 
+      # No npm cache in a release: nothing restored from another run.
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          package-manager-cache: false
 
       - name: Release gate
         id: plan
@@ -58,8 +69,12 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Verify
-        run: npm run verify
+      # `tsc` is the only dependency code this job runs: it must be the locked
+      # compiler, not a binary another package linked under the same name.
+      - name: Check the compiler binary
+        run: |
+          set -euo pipefail
+          test "$(readlink -f node_modules/.bin/tsc)" = "$(readlink -f node_modules/typescript/bin/tsc)"
 
       # `npm pack` runs prepack: a clean build without source maps.
       - name: Pack
@@ -74,51 +89,85 @@ jobs:
           TARBALL="${NAME}-${VERSION}.tgz"
           test -f "release-pack/${TARBALL}"
           node scripts/check-pack.js "release-pack/${TARBALL}"
-          (cd release-pack && sha256sum "${TARBALL}" > SHA256SUMS)
+          SHA256="$(sha256sum "release-pack/${TARBALL}" | cut -d' ' -f1)"
           echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+          echo "${TARBALL} sha256 ${SHA256}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload tarball
+        id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-tarball
-          path: |
-            release-pack/*.tgz
-            release-pack/SHA256SUMS
+          path: release-pack/${{ steps.pack.outputs.tarball }}
           if-no-files-found: error
           retention-days: 7
 
+  test:
+    name: Test the tagged commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read # checkout only
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify
+        run: npm run verify
+
   publish:
     name: Publish to npm
-    needs: build
+    needs: [build, test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm-publish
     permissions:
-      contents: read
-      id-token: write
+      contents: read # the ancestry re-check through the API
+      id-token: write # npm trusted publishing and provenance
 
     steps:
+      # By ID, not by name: only the artifact the build job uploaded.
       - name: Download tarball
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-tarball
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
           path: release-pack
+          merge-multiple: true
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
 
+      # The expected digest comes from the build job's outputs, not from a file
+      # travelling in the same artifact as the tarball.
       - name: Verify the tarball is the one that was built
         env:
           NAME: ${{ needs.build.outputs.name }}
           VERSION: ${{ needs.build.outputs.version }}
           TARBALL: ${{ needs.build.outputs.tarball }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
         run: |
           set -euo pipefail
           cd release-pack
-          sha256sum --check SHA256SUMS
+          test "$(ls -A)" = "${TARBALL}"
+          [[ "${SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          echo "${SHA256}  ${TARBALL}" | sha256sum --check --strict
           test "$(tar -xOzf "${TARBALL}" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")" = "${NAME}"
           test "$(tar -xOzf "${TARBALL}" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")" = "${VERSION}"
 
@@ -157,13 +206,15 @@ jobs:
         env:
           TARBALL: ${{ needs.build.outputs.tarball }}
           NPM_TAG: ${{ needs.build.outputs.tag }}
-        run: npm publish "release-pack/${TARBALL}" --tag "${NPM_TAG}" --access public --provenance
+        run: npm publish "release-pack/${TARBALL}" --tag "${NPM_TAG}" --access public --provenance --ignore-scripts
 
       - name: Summary
         env:
           NAME: ${{ needs.build.outputs.name }}
           VERSION: ${{ needs.build.outputs.version }}
           NPM_TAG: ${{ needs.build.outputs.tag }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
         run: |
           echo "Published: ${NAME}@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
           echo "npm tag: ${NPM_TAG}" >> "$GITHUB_STEP_SUMMARY"
+          echo "sha256: ${SHA256}" >> "$GITHUB_STEP_SUMMARY"
