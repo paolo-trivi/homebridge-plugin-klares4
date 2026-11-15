@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
@@ -14,28 +13,29 @@ process.env.KLARES4_MATTER_UNREACHABLE_GRACE_MS = '40';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { Lares4Platform } = require('../dist/platform/index.js');
-const { makeHb24MatterApi } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi } = require('./fixtures/hb-matter-api.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const silentLog = () => ({ info: () => {}, warn: () => {}, debug: () => {}, error: () => {}, success: () => {} });
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const storage = () => fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-reachable-'));
+const storage = (t) => tmpStorage(t, 'klares4-reachable-');
 
 const zone = (id) => ({ id, type: 'zone', name: `Zona ${id}`, description: '', status: { armed: false, bypassed: false, fault: false, open: false } });
 const reachableUpdates = (hb) => hb.updates
     .filter((u) => u.cluster === 'bridgedDeviceBasicInformation')
     .map((u) => [u.uuid, u.attributes.reachable]);
 
-async function setup() {
-    const hb = makeHb24MatterApi();
-    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage() });
+async function setup(t) {
+    const hb = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: storage(t) });
     await registry.addOrUpdateAccessory(zone('zone_1'));
     await registry.addOrUpdateAccessory(zone('zone_2'));
     await delay(60);
     return { hb, registry };
 }
 
-test('losing the panel marks every registered endpoint unreachable once, and reconnecting restores it', async () => {
-    const { hb, registry } = await setup();
+test('losing the panel marks every registered endpoint unreachable once, and reconnecting restores it', async (t) => {
+    const { hb, registry } = await setup(t);
     registry.setPanelReachable(false);
     registry.setPanelReachable(false);
     await delay(80);
@@ -50,8 +50,8 @@ test('losing the panel marks every registered endpoint unreachable once, and rec
     assert.deepEqual(reachableUpdates(hb).slice(2), [['zone_1', true], ['zone_2', true]]);
 });
 
-test('a connection blip shorter than the grace period publishes nothing', async () => {
-    const { hb, registry } = await setup();
+test('a connection blip shorter than the grace period publishes nothing', async (t) => {
+    const { hb, registry } = await setup(t);
     registry.setPanelReachable(false);
     await delay(10);
     registry.setPanelReachable(true);
@@ -59,8 +59,8 @@ test('a connection blip shorter than the grace period publishes nothing', async 
     assert.deepEqual(reachableUpdates(hb), []);
 });
 
-test('an endpoint registered while the panel is unreachable is marked unreachable too', async () => {
-    const { hb, registry } = await setup();
+test('an endpoint registered while the panel is unreachable is marked unreachable too', async (t) => {
+    const { hb, registry } = await setup(t);
     registry.setPanelReachable(false);
     await delay(80);
     await registry.addOrUpdateAccessory(zone('zone_3'));
@@ -78,11 +78,12 @@ function closedPort() {
     });
 }
 
-test('the platform forwards WebSocket connect/disconnect to the Matter registry', async () => {
+test('the platform forwards a lost connection and a completed sync to the Matter registry', async (t) => {
+    const storagePath = storage(t);
     const listeners = new Map();
     const api = {
         hap,
-        user: { storagePath: () => storage() },
+        user: { storagePath: () => storagePath },
         platformAccessory: class {},
         registerPlatformAccessories() {},
         unregisterPlatformAccessories() {},
@@ -98,7 +99,8 @@ test('the platform forwards WebSocket connect/disconnect to the Matter registry'
         listeners.get('didFinishLaunching')();
         for (let i = 0; i < 100 && !platform.wsClient; i++) await delay(10);
         platform.wsClient.onDisconnected();
-        platform.wsClient.onConnected();
+        assert.equal(platform.wsClient.onConnected, undefined, 'a login alone does not make the panel reachable (MATTER-RC1-06)');
+        platform.wsClient.onInitialSyncComplete();
         assert.deepEqual(seen.slice(-2), [false, true]);
     } finally {
         listeners.get('shutdown')();

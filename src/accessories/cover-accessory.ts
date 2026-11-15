@@ -1,8 +1,11 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
-import type { Lares4Platform, Lares4Config } from '../platform';
+import type { Lares4Platform } from '../platform';
 import type { KseniaCover } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
+import { hasObservedState } from '../device-observation';
+import { communicationFailure } from './communication-failure';
+import { toErrorMessage } from '../errors';
 
 /**
  * Cover Accessory Handler
@@ -14,6 +17,11 @@ export class CoverAccessory {
     private targetPosition: number = 0;
     private currentPosition: number = 0;
     private positionState: number = 2; // 2 = stopped
+    /**
+     * `currentPosition` is what the panel reported. False for a placeholder (a cover
+     * never observed) and for the end of a simulated movement, which is only a belief.
+     */
+    private positionReported: boolean;
     private readonly maxSeconds: number;
     private moveInterval?: ReturnType<typeof setInterval>; // Track movement simulation interval
 
@@ -24,7 +32,8 @@ export class CoverAccessory {
         this.device = accessory.context.device as KseniaCover;
         this.currentPosition = this.device.status?.position ?? 0;
         this.targetPosition = this.device.status?.position ?? 0;
-        this.maxSeconds = (this.platform.config as Lares4Config).maxSeconds ?? 30;
+        this.maxSeconds = this.platform.config.maxSeconds ?? 30;
+        this.positionReported = hasObservedState(this.device);
 
         const accessoryInfoService = this.accessory.getService(
             this.platform.Service.AccessoryInformation,
@@ -82,9 +91,10 @@ export class CoverAccessory {
         const targetPosition = value as number;
         const moving = this.moveInterval !== undefined || this.positionState !== 2;
 
-        // Already there and at rest: nothing to send, but the target must follow.
-        // During a movement the command is still sent, so the cover stops here.
-        if (targetPosition === this.currentPosition && !moving) {
+        // Already there and at rest, as the panel reported: nothing to send, but the target
+        // must follow. During a movement, or when the position is only a belief, the
+        // command is still sent, so the cover really ends up here.
+        if (targetPosition === this.currentPosition && !moving && this.positionReported) {
             this.targetPosition = targetPosition;
             this.service.updateCharacteristic(this.platform.Characteristic.TargetPosition, targetPosition);
             return;
@@ -119,7 +129,7 @@ export class CoverAccessory {
         } catch (error: unknown) {
             this.platform.log.error(
                 `Cover control error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             // The command did not take effect: do not leave HomeKit showing a
             // movement toward a target the panel never accepted.
@@ -127,9 +137,7 @@ export class CoverAccessory {
             this.positionState = previousPositionState;
             this.service.updateCharacteristic(this.platform.Characteristic.TargetPosition, this.targetPosition);
             this.service.updateCharacteristic(this.platform.Characteristic.PositionState, this.positionState);
-            throw new this.platform.api.hap.HapStatusError(
-                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-            );
+            throw communicationFailure(this.platform.api, error);
         }
     }
 
@@ -156,7 +164,7 @@ export class CoverAccessory {
         const startPosition = this.currentPosition;
         const distance = Math.abs(targetPosition - startPosition);
         const direction = targetPosition > startPosition ? 1 : -1;
-        const stepSize = (this.platform.config as Lares4Config).coverStepSize ?? 5;
+        const stepSize = this.platform.config.coverStepSize ?? 5;
         const totalTime = (distance / 100) * (this.maxSeconds * 1000);
         const stepTime = totalTime / (distance / stepSize);
 
@@ -175,6 +183,7 @@ export class CoverAccessory {
 
             if (currentStep >= totalSteps) {
                 this.currentPosition = targetPosition;
+                this.positionReported = false;
                 this.positionState = 2; // Stopped
 
                 this.service.updateCharacteristic(
@@ -219,6 +228,7 @@ export class CoverAccessory {
         // The target follows the panel (TPOS) on its own: a movement started
         // from the keypad changes TPOS before POS.
         if (!this.moveInterval) {
+            this.positionReported = hasObservedState(newDevice);
             this.currentPosition = this.device.status?.position ?? 0;
             this.targetPosition = this.device.status?.targetPosition ?? this.currentPosition;
 

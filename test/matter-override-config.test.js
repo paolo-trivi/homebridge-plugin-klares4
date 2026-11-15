@@ -20,16 +20,16 @@ function silentLog() {
 
 test('array form and map form produce the same overrides', () => {
     const fromArray = normalizeMatterOverrides([
-        { deviceId: 'zone_18', name: 'Contatto Studio' },
+        { deviceId: 'zone_18', name: 'Contatto Solaio' },
         { deviceId: 'scenario_14', exposed: false },
     ]);
     const fromMap = normalizeMatterOverrides({
-        zone_18: { name: 'Contatto Studio' },
+        zone_18: { name: 'Contatto Solaio' },
         scenario_14: { exposed: false },
     });
 
     assert.deepEqual(fromArray, fromMap);
-    assert.equal(fromArray.zone_18.name, 'Contatto Studio');
+    assert.equal(fromArray.zone_18.name, 'Contatto Solaio');
     assert.equal(fromArray.scenario_14.exposed, false);
 });
 
@@ -39,11 +39,11 @@ test('malformed override rows are dropped, not thrown on', () => {
         { deviceId: '   ' },
         { deviceId: 'zone_19' },
         { deviceId: 'zone_20', name: '   ' },
-        { deviceId: ' zone_21 ', name: '  Contatto Sala  ' },
+        { deviceId: ' zone_21 ', name: '  Contatto Veranda  ' },
     ]);
 
     assert.deepEqual(Object.keys(normalized), ['zone_21']);
-    assert.equal(normalized.zone_21.name, 'Contatto Sala');
+    assert.equal(normalized.zone_21.name, 'Contatto Veranda');
 });
 
 test('recovery generations accept both shapes and reject invalid values', () => {
@@ -64,16 +64,16 @@ test('recovery generations accept both shapes and reject invalid values', () => 
 
 test('array-form overrides reach the Matter policy without touching shared names', () => {
     const service = new DiscoveryService({
-        matterOverrides: [{ deviceId: 'zone_18', name: 'Contatto Studio' }],
+        matterOverrides: [{ deviceId: 'zone_18', name: 'Contatto Solaio' }],
     }, silentLog());
-    const device = { id: 'zone_18', type: 'zone', name: 'Finestra Studio' };
+    const device = { id: 'zone_18', type: 'zone', name: 'Finestra Solaio' };
 
     const names = service.resolveDeviceNames(device);
-    assert.equal(names.matterName, 'Contatto Studio');
+    assert.equal(names.matterName, 'Contatto Solaio');
     assert.equal(names.nameSource, 'matter-override');
     // HomeKit and MQTT keep the panel's own name.
-    assert.equal(names.effectiveSharedName, 'Finestra Studio');
-    assert.equal(service.applyCustomName(device).name, 'Finestra Studio');
+    assert.equal(names.effectiveSharedName, 'Finestra Solaio');
+    assert.equal(service.applyCustomName(device).name, 'Finestra Solaio');
 });
 
 // ---------------------------------------------------------------------------

@@ -8,8 +8,10 @@ import type {
     ResolvedDeviceNames,
     ResolvedMatterPolicy,
 } from './types';
-import { normalizeMatterOverrides } from './matter-override-config';
-import { isSystemSensorId, normalizeCustomNames, type CustomNamesMap } from './custom-names-config';
+import { ConfigIssues, hasOwn } from './config-values';
+import { isSystemSensorId, lookupCustomName, normalizeCustomNames, type CustomNamesMap } from './custom-names-config';
+import { EXCLUSION_LISTS, normalizeExclusionList, type ExclusionKey } from './exclusion-lists';
+import { resolveRuntimeConfig, type RuntimeConfig } from './runtime-config';
 
 /** Lares4 device.type → matterExposure config key. */
 const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
@@ -22,26 +24,55 @@ const MATTER_EXPOSURE_KEYS: Record<string, keyof MatterExposureConfig> = {
     thermostat: 'thermostats',
 };
 
-export class DiscoveryService {
-    /** Both accepted config shapes, resolved once to a map keyed by device ID. */
-    private readonly matterOverrides: Record<string, MatterDeviceOverride>;
-    /** `customNames` resolved to the category map; recomputed if the KSA import replaces it. */
-    private customNamesSource: Lares4Config['customNames'];
-    private customNamesMap: CustomNamesMap = normalizeCustomNames(undefined);
+/**
+ * What the panel client hid with the fail-closed exposure policy (outputs
+ * of an unrecognized category, scenarios outside the allowlist), by device
+ * ID. Implemented by the client from its latest discovery read.
+ */
+export interface ExposurePolicySource {
+    isHiddenByExposurePolicy(deviceId: string): boolean;
+}
 
+interface Snapshot<T> {
+    /** The config value `value` was derived from; a different one means the config was replaced. */
+    source: unknown;
+    value: T;
+}
+
+export class DiscoveryService {
+    /** Exclusion lists, as sets of panel IDs; re-derived if the KSA import replaces a list. */
+    private readonly exclusions = new Map<ExclusionKey, Snapshot<ReadonlySet<string>>>();
+    /** `customNames` resolved to the category map; re-derived if the KSA import replaces it. */
+    private customNamesSnapshot: Snapshot<CustomNamesMap>;
+    private exposurePolicy: ExposurePolicySource | undefined;
+
+    /**
+     * Reads the validated values of `runtime`; without it the config is
+     * validated here (and its problems reported on `log`), which is what a
+     * standalone service handed a raw config needs.
+     */
     constructor(
         private readonly config: Lares4Config,
         private readonly log: Logger,
+        private readonly runtime: RuntimeConfig = resolveRuntimeConfig(config, log),
     ) {
-        this.matterOverrides = normalizeMatterOverrides(config.matterOverrides);
-        const hidden = Object.keys(this.matterOverrides).filter((id) => this.matterOverrides[id].exposed === false);
-        if (hidden.length > 0) {
-            // A Homebridge UI save before 2.2.0 wrote exposed:false on every override row.
-            this.log.warn(
-                `[Matter] matterOverrides hides ${hidden.length} device(s) from Matter: ${hidden.join(', ')}. `
-                + 'If you did not untick "Esposto su Matter" yourself, tick it again in the plugin settings.',
-            );
+        for (const key of Object.keys(EXCLUSION_LISTS) as ExclusionKey[]) {
+            this.exclusions.set(key, { source: config[key], value: new Set(runtime.exclusions[key]) });
         }
+        this.customNamesSnapshot = { source: config.customNames, value: runtime.customNames };
+    }
+
+    /**
+     * A device the exposure policy hides counts as excluded: a cached
+     * accessory of an earlier version that exposed it is removed like one in
+     * an `exclude*` list, and gets no handlers.
+     */
+    public attachExposurePolicy(source: ExposurePolicySource): void {
+        this.exposurePolicy = source;
+    }
+
+    private isHiddenByExposurePolicy(device: KseniaDevice): boolean {
+        return this.exposurePolicy?.isHiddenByExposurePolicy(device.id) === true;
     }
 
     public getNormalizedId(deviceId: string): string {
@@ -53,24 +84,38 @@ export class DiscoveryService {
      * Safe to call on hot paths (per-status-update Matter eligibility checks).
      */
     public isDeviceExcluded(device: KseniaDevice): boolean {
+        if (this.isHiddenByExposurePolicy(device)) return true;
         const id = this.getNormalizedId(device.id);
 
-        if (device.type === 'zone') return this.config.excludeZones?.includes(id) ?? false;
-        if (isOutputLikeDevice(device)) return this.config.excludeOutputs?.includes(id) ?? false;
-        if (device.type === 'sensor') return this.config.excludeSensors?.includes(id) ?? false;
-        if (device.type === 'scenario') return this.config.excludeScenarios?.includes(id) ?? false;
+        if (device.type === 'zone') return this.exclusionIds('excludeZones').has(id);
+        if (isOutputLikeDevice(device)) return this.exclusionIds('excludeOutputs').has(id);
+        if (device.type === 'sensor') return this.exclusionIds('excludeSensors').has(id);
+        if (device.type === 'scenario') return this.exclusionIds('excludeScenarios').has(id);
         return false;
+    }
+
+    private exclusionIds(key: ExclusionKey): ReadonlySet<string> {
+        const snapshot = this.exclusions.get(key);
+        const current: unknown = this.config[key];
+        if (snapshot && snapshot.source === current) return snapshot.value;
+        const value: ReadonlySet<string> = new Set(normalizeExclusionList(current, key, new ConfigIssues()));
+        this.exclusions.set(key, { source: current, value });
+        return value;
     }
 
     public shouldExcludeDevice(device: KseniaDevice): boolean {
         if (!this.isDeviceExcluded(device)) return false;
 
         const id = this.getNormalizedId(device.id);
+        if (this.isHiddenByExposurePolicy(device)) {
+            this.log.debug(`Not exposed by the exposure policy: ${device.name} (${device.id})`);
+            return true;
+        }
         const label = device.type === 'zone' ? 'Zone'
             : isOutputLikeDevice(device) ? 'Output'
                 : device.type === 'sensor' ? 'Sensor'
                     : 'Scenario';
-        this.log.info(`${label} excluded: ${device.name} (ID: ${id})`);
+        this.log.debug(`${label} excluded: ${device.name} (ID: ${id})`);
         return true;
     }
 
@@ -82,7 +127,7 @@ export class DiscoveryService {
     public isMatterTypeExposed(deviceType: string): boolean {
         const key = MATTER_EXPOSURE_KEYS[deviceType];
         if (!key) return true;
-        return this.config.matterExposure?.[key] !== false;
+        return this.runtime.matterExposure[key];
     }
 
     public resolveMatterPolicy(device: KseniaDevice): ResolvedMatterPolicy {
@@ -90,7 +135,7 @@ export class DiscoveryService {
         if (this.isDeviceExcluded(device)) {
             return { exposed: false, displayName: names.matterName, exposureSource: 'global-exclusion', names };
         }
-        const override = this.matterOverrides[device.id];
+        const override = this.matterOverride(device.id);
         if (typeof override?.exposed === 'boolean') {
             return {
                 exposed: override.exposed,
@@ -100,9 +145,9 @@ export class DiscoveryService {
             };
         }
         const key = MATTER_EXPOSURE_KEYS[device.type];
-        if (key && typeof this.config.matterExposure?.[key] === 'boolean') {
+        if (key && this.runtime.matterExposureExplicit.has(key)) {
             return {
-                exposed: this.config.matterExposure[key] !== false,
+                exposed: this.runtime.matterExposure[key],
                 displayName: names.matterName,
                 exposureSource: 'category',
                 names,
@@ -114,7 +159,7 @@ export class DiscoveryService {
     public resolveDeviceNames(device: KseniaDevice): ResolvedDeviceNames {
         const sourceName = device.name;
         const customName = this.getCustomName(device);
-        const configuredOverride = this.matterOverrides[device.id]?.name;
+        const configuredOverride = this.matterOverride(device.id)?.name;
         const matterOverrideName = typeof configuredOverride === 'string' && configuredOverride.trim()
             ? configuredOverride.trim()
             : undefined;
@@ -129,12 +174,19 @@ export class DiscoveryService {
         };
     }
 
+    /** Own-property lookup: a panel ID such as `constructor` has no override. */
+    private matterOverride(deviceId: string): MatterDeviceOverride | undefined {
+        return hasOwn(this.runtime.matterOverrides, deviceId) ? this.runtime.matterOverrides[deviceId] : undefined;
+    }
+
     private customNames(): CustomNamesMap {
-        if (this.config.customNames !== this.customNamesSource) {
-            this.customNamesSource = this.config.customNames;
-            this.customNamesMap = normalizeCustomNames(this.config.customNames);
+        if (this.config.customNames !== this.customNamesSnapshot.source) {
+            this.customNamesSnapshot = {
+                source: this.config.customNames,
+                value: normalizeCustomNames(this.config.customNames),
+            };
         }
-        return this.customNamesMap;
+        return this.customNamesSnapshot.value;
     }
 
     public getCustomName(device: KseniaDevice): string | undefined {
@@ -142,15 +194,15 @@ export class DiscoveryService {
         const customNames = this.customNames();
 
         if (device.type === 'zone') {
-            return customNames.zones[id];
+            return lookupCustomName(customNames.zones, id);
         }
 
         if (isOutputLikeDevice(device)) {
-            return customNames.outputs[id];
+            return lookupCustomName(customNames.outputs, id);
         }
 
         if (device.type === 'sensor') {
-            const sensorName = customNames.sensors[id];
+            const sensorName = lookupCustomName(customNames.sensors, id);
             // A panel temperature sensor is a single reading: its name is used as-is.
             if (sensorName && isSystemSensorId(id)) return sensorName;
             if (sensorName) {
@@ -161,7 +213,7 @@ export class DiscoveryService {
         }
 
         if (device.type === 'scenario') {
-            return customNames.scenarios[id];
+            return lookupCustomName(customNames.scenarios, id);
         }
 
         return undefined;

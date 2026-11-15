@@ -3,7 +3,8 @@ import type { Logger } from 'homebridge';
 import { LogLevel, getEffectiveLogLevel } from '../log-levels';
 import { markStatusObserved } from '../device-observation';
 import { stripDevicePrefix } from '../device-id';
-import { isIgnoredScenarioCategory } from './device-parsers';
+import { isIgnoredScenarioCategory, scenarioOptInIds } from './device-parsers';
+import { isHiddenByExposurePolicy } from './exposure-report';
 import { CommandDispatcher } from '../websocket/command-dispatcher';
 import { ProtocolRouter } from '../websocket/protocol-router';
 import { OutputCommandConfirmationTracker } from '../websocket/output-command-confirmation';
@@ -15,6 +16,7 @@ import type {
     KseniaWebSocketOptions,
 } from '../types';
 import { createInitialWebSocketClientState } from './state';
+import { runIsolated } from '../isolation';
 import { CommandService } from './command-service';
 import { ConnectionService } from './connection-service';
 import { MessageService } from './message-service';
@@ -45,6 +47,8 @@ export class KseniaWebSocketClient {
     public onConnected?: () => void;
     public onDisconnected?: () => void;
     public onInitialSyncComplete?: () => void;
+    /** Every successful login, before the discovery reads of the new sync are sent. */
+    public onSyncStarted?: () => void;
 
     constructor(
         private readonly ip: string,
@@ -55,17 +59,21 @@ export class KseniaWebSocketClient {
         private readonly log: Logger,
         private readonly options: KseniaWebSocketOptions = {},
     ) {
+        // `??` per key, not a spread of the defaults under `options`: an explicit
+        // `undefined` must fall back to the default, not erase it (an undefined
+        // reconnect interval is a timer that fires at once, forever).
         this.options = {
-            debug: false,
-            logLevel: LogLevel.NORMAL,
-            reconnectInterval: 5000,
-            heartbeatInterval: 30000,
-            commandTimeoutMs: 8000,
-            allowInsecureTls: false,
-            loginTimeoutMs: 10000,
-            connectTimeoutMs: 10000,
-            exposePartialArmScenarios: false,
             ...options,
+            debug: options.debug ?? false,
+            logLevel: options.logLevel ?? LogLevel.NORMAL,
+            reconnectInterval: options.reconnectInterval ?? 5000,
+            heartbeatInterval: options.heartbeatInterval ?? 30000,
+            commandTimeoutMs: options.commandTimeoutMs ?? 8000,
+            // Security switches are opt-in with a real `true` only, whoever builds the client.
+            allowInsecureTls: options.allowInsecureTls === true,
+            loginTimeoutMs: options.loginTimeoutMs ?? 10000,
+            connectTimeoutMs: options.connectTimeoutMs ?? 10000,
+            exposePartialArmScenarios: options.exposePartialArmScenarios === true,
         };
         this.state = createInitialWebSocketClientState(this.options.domusThermostat, this.options.ksaCache);
         this.logLevel = getEffectiveLogLevel(this.options.logLevel, this.options.debug);
@@ -75,7 +83,6 @@ export class KseniaWebSocketClient {
             state: this.state,
             log: this.log,
             logLevel: this.logLevel,
-            debugEnabled: this.options.debug ?? false,
             emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
             observeOutputStatus: (status): void => {
                 this.outputConfirmation.observe(status);
@@ -86,16 +93,14 @@ export class KseniaWebSocketClient {
             state: this.state,
             log: this.log,
             logLevel: this.logLevel,
-            debugEnabled: this.options.debug ?? false,
-            emitDeviceDiscovered: (device: KseniaDevice): void => {
-                this.onDeviceDiscovered?.(device);
-            },
+            emitDeviceDiscovered: (device: KseniaDevice): void => this.emitDiscovered(device),
             emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
         });
 
         this.thermostatStatusUpdater = new ThermostatStatusUpdater({
             state: this.state,
             emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
+            log: this.log,
         });
 
         this.commandService = new CommandService({
@@ -111,22 +116,26 @@ export class KseniaWebSocketClient {
             emitRawMessage: (direction, rawMessage): void => {
                 this.emitRawMessage(direction, rawMessage);
             },
+            emitDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
         });
 
         let routeMessage = (_message: KseniaMessage): void => undefined;
         let onLoginCompleted = (): void => undefined;
+        let connection: ConnectionService | undefined;
 
         this.messageService = new MessageService({
             state: this.state,
             callbacks: {
-                onDeviceDiscovered: (device: KseniaDevice): void => this.onDeviceDiscovered?.(device),
+                onDeviceDiscovered: (device: KseniaDevice): void => this.emitDiscovered(device),
                 onDeviceStatusUpdate: (device: KseniaDevice): void => this.emitStatus(device),
-                onInitialSyncComplete: (): void => this.onInitialSyncComplete?.(),
+                onInitialSyncComplete: (): void => this.emitEvent('onInitialSyncComplete', this.onInitialSyncComplete),
+                onSyncStarted: (): void => this.emitEvent('onSyncStarted', this.onSyncStarted),
             },
             log: this.log,
             logLevel: this.logLevel,
-            debugEnabled: this.options.debug ?? false,
             exposePartialArmScenarios: this.options.exposePartialArmScenarios ?? false,
+            exposeOutputs: this.options.exposeOutputs,
+            exposeScenarios: this.options.exposeScenarios,
             statusUpdater: this.statusUpdater,
             systemTemperatureUpdater: this.systemTemperatureUpdater,
             thermostatStatusUpdater: this.thermostatStatusUpdater,
@@ -136,6 +145,9 @@ export class KseniaWebSocketClient {
                 this.emitRawMessage('in', rawMessage);
             },
             onLoginCompleted: (): void => onLoginCompleted(),
+            failLogin: (error, kind): void => connection?.failLogin(error, kind),
+            abortSession: (reason: string): void => connection?.abortSession(reason),
+            onSyncCompleted: (): void => connection?.syncCompleted(),
         });
 
         this.protocolRouter = new ProtocolRouter({
@@ -155,12 +167,12 @@ export class KseniaWebSocketClient {
                 this.messageService.handleStatusUpdate(message);
             },
             onPing: (): void => {
-                if (this.options.debug) {
+                if (this.logLevel >= LogLevel.DEBUG) {
                     this.log.debug('PING received from system');
                 }
             },
             onUnhandled: (message): void => {
-                if (this.options.debug) {
+                if (this.logLevel >= LogLevel.DEBUG) {
                     this.log.debug(`Unhandled message: ${message.CMD}`);
                 }
             },
@@ -182,26 +194,35 @@ export class KseniaWebSocketClient {
             onRawMessage: (raw: string): void => {
                 this.messageService.handleMessage(raw);
             },
-            onConnected: (): void => {
-                this.onConnected?.();
-            },
+            onConnected: (): void => this.emitEvent('onConnected', this.onConnected),
             onDisconnected: (): void => {
                 this.outputConfirmation.rejectAll(new Error('WebSocket disconnected'));
-                this.onDisconnected?.();
+                this.emitEvent('onDisconnected', this.onDisconnected);
             },
             executeLogin: (): Promise<void> => this.commandService.sendLoginCommand(),
         });
+        connection = this.connectionService;
 
         onLoginCompleted = (): void => {
             this.connectionService.startHeartbeat();
         };
     }
 
-    /** True when the panel lists this scenario in a category the arming policy never exposes. */
+    /** True when the panel lists this scenario in a category the exposure policy does not expose. */
     public isScenarioSuppressed(scenarioId: string): boolean {
-        const category = this.state.scenarioCategoryById.get(stripDevicePrefix(scenarioId));
+        const panelId = stripDevicePrefix(scenarioId);
+        const category = this.state.scenarioCategoryById.get(panelId);
         return category !== undefined
-            && isIgnoredScenarioCategory(category, this.options.exposePartialArmScenarios ?? false);
+            && isIgnoredScenarioCategory(
+                category,
+                this.options.exposePartialArmScenarios ?? false,
+                scenarioOptInIds(this.options.exposeScenarios).has(panelId),
+            );
+    }
+
+    /** True when the latest discovery read hid the output or scenario this device ID names. */
+    public isHiddenByExposurePolicy(deviceId: string): boolean {
+        return isHiddenByExposurePolicy(this.state, deviceId);
     }
 
     public async connect(): Promise<void> {
@@ -254,15 +275,26 @@ export class KseniaWebSocketClient {
         return Array.from(this.state.devices.values());
     }
 
+    // Consumers (platform, debug capture) are isolated from the client: a
+    // throwing consumer is logged with the device id and stack, and never
+    // aborts the frame, the login or the send that emitted the event.
+    private emitDiscovered(device: KseniaDevice): void {
+        runIsolated(this.log, `onDeviceDiscovered handler for ${device.id}`, () => this.onDeviceDiscovered?.(device));
+    }
+
     /** Every real status report goes through here: the device's state is now observed. */
     private emitStatus(device: KseniaDevice): void {
         markStatusObserved(device);
-        this.onDeviceStatusUpdate?.(device);
+        runIsolated(this.log, `onDeviceStatusUpdate handler for ${device.id}`, () => this.onDeviceStatusUpdate?.(device));
+    }
+
+    private emitEvent(name: string, callback: (() => void) | undefined): void {
+        runIsolated(this.log, `${name} handler`, () => callback?.());
     }
 
     private emitRawMessage(direction: RawMessageDirection, rawMessage: string): void {
         for (const listener of this.rawMessageListeners) {
-            listener(direction, rawMessage);
+            runIsolated(this.log, `Raw message listener (${direction})`, () => listener(direction, rawMessage));
         }
     }
 }

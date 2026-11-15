@@ -22,8 +22,8 @@ test('createDeviceStatePayload keeps light payload shape', () => {
 test('createDeviceStatePayload keeps thermostat payload shape', () => {
   const payload = createDeviceStatePayload({
     id: 'thermostat_2',
-    name: 'Termostato Zona Giorno',
-    description: 'Termostato Zona Giorno',
+    name: 'Termostato Ala Est',
+    description: 'Termostato Ala Est',
     type: 'thermostat',
     status: { currentTemperature: 21, targetTemperature: 22, mode: 'heat' },
     currentTemperature: 21,

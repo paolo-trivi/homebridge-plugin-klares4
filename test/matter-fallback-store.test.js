@@ -1,20 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const { MatterFallbackStore } = require('../dist/platform/matter-fallback-store.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const FILE = 'klares4-matter-fallback.json';
 const log = { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
 
-function storage() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-fallback-'));
+function storage(t) {
+  return tmpStorage(t, 'klares4-fallback-');
 }
 
-test('migrates the legacy set to v2 without losing device IDs', () => {
-  const dir = storage();
+test('migrates the legacy set to v2 without losing device IDs', (t) => {
+  const dir = storage(t);
   fs.writeFileSync(path.join(dir, FILE), JSON.stringify({
     thermostatAsTemperatureSensor: ['thermostat_18'],
   }));
@@ -29,8 +29,8 @@ test('migrates the legacy set to v2 without losing device IDs', () => {
   assert.equal(fs.existsSync(`${path.join(dir, FILE)}.v1.bak`), true);
 });
 
-test('a recovery generation is consumed only once', () => {
-  const dir = storage();
+test('a recovery generation is consumed only once', (t) => {
+  const dir = storage(t);
   const store = new MatterFallbackStore(dir, log);
   store.add('thermostat_18');
 
@@ -40,8 +40,8 @@ test('a recovery generation is consumed only once', () => {
   assert.equal(store.beginRecovery('thermostat_18', 2), true);
 });
 
-test('an interrupted recovery deterministically returns to fallback on restart', () => {
-  const dir = storage();
+test('an interrupted recovery deterministically returns to fallback on restart', (t) => {
+  const dir = storage(t);
   const first = new MatterFallbackStore(dir, log);
   first.add('thermostat_18');
   first.beginRecovery('thermostat_18', 1);
@@ -51,8 +51,8 @@ test('an interrupted recovery deterministically returns to fallback on restart',
   assert.equal(restarted.getRecord('thermostat_18').reason, 'interrupted-recovery');
 });
 
-test('successful recovery remains native across restart', () => {
-  const dir = storage();
+test('successful recovery remains native across restart', (t) => {
+  const dir = storage(t);
   const store = new MatterFallbackStore(dir, log);
   store.add('thermostat_18');
   store.beginRecovery('thermostat_18', 1);
@@ -61,8 +61,8 @@ test('successful recovery remains native across restart', () => {
   assert.deepEqual([...new MatterFallbackStore(dir, log).load()], []);
 });
 
-test('F32: a store written by a newer version is left untouched (read-only)', () => {
-  const dir = storage();
+test('F32: a store written by a newer version is left untouched (read-only)', (t) => {
+  const dir = storage(t);
   const file = path.join(dir, FILE);
   const future = JSON.stringify({ version: 3, thermostats: [{ deviceId: 'thermostat_18', mode: 'fallback' }], extra: true });
   fs.writeFileSync(file, future);
@@ -78,8 +78,8 @@ test('F32: a store written by a newer version is left untouched (read-only)', ()
   assert.match(warnings[0], /version 3/);
 });
 
-test('F32: the store is replaced by rename and leaves no temp file', () => {
-  const dir = storage();
+test('F32: the store is replaced by rename and leaves no temp file', (t) => {
+  const dir = storage(t);
   const renames = [];
   const originalRename = fs.renameSync;
   fs.renameSync = (from, to) => { renames.push([from, to]); return originalRename(from, to); };

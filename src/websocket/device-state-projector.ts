@@ -6,12 +6,13 @@ import type {
     KseniaThermostat,
 } from '../types';
 import { createDefaultThermostatState } from '../thermostat-state';
+import { classifyOutput, type ProjectedOutputType } from './output-classifier';
 
-export type ProjectedOutputType = 'light' | 'cover' | 'gate' | 'thermostat';
+export { determineOutputType, OutputTypeMemory, type ProjectedOutputType } from './output-classifier';
 
 /**
  * Normalise a raw Lares4 `DES` label at parse time: trim and collapse
- * internal whitespace runs. The panel ships labels like `"Balcone Sala "`
+ * internal whitespace runs. The panel ships labels like `"Hall Lamp "`
  * (trailing space) which would otherwise leak into HAP names (triggering
  * HAP-NodeJS `checkName` warnings), MQTT payloads and the Matter sanitiser.
  * Domain names must be born clean; ids/UUIDs are never derived from names.
@@ -21,80 +22,15 @@ export function normalizeDeviceName(raw: string | undefined): string {
     return raw.replace(/\s+/g, ' ').trim();
 }
 
-export function determineOutputType(category: string, mode?: string): ProjectedOutputType {
-    const catUpper = category.toUpperCase();
-
-    if (catUpper === 'ROLL') {
-        return 'cover';
-    }
-
-    if (catUpper === 'LIGHT') {
-        return 'light';
-    }
-
-    if (catUpper === 'GATE') {
-        if (mode === 'M') {
-            return 'gate';
-        }
-        return 'cover';
-    }
-
-    if (
-        catUpper.includes('THERM') ||
-        catUpper.includes('CLIMA') ||
-        catUpper.includes('TEMP') ||
-        catUpper.includes('RISCALD') ||
-        catUpper.includes('RAFFRES') ||
-        catUpper.includes('HVAC') ||
-        catUpper.includes('TERMOS')
-    ) {
-        return 'thermostat';
-    }
-
-    return 'light';
-}
-
 /**
- * Determines whether (category, mode) carries enough information to classify
- * an output confidently. CAT is required, and category GATE specifically
- * needs MOD to tell a gate apart from a roller cover (see `determineOutputType`).
+ * Device for a discovered output. `outputType` is the one the exposure policy
+ * decided (`resolveOutputExposure`); without it the category decides.
  */
-function isAmbiguousClassification(category: string, mode?: string): boolean {
-    const catUpper = category.toUpperCase();
-    if (!catUpper) return true;
-    if (catUpper === 'GATE' && !mode) return true;
-    return false;
-}
-
-/**
- * Remembers the last confidently-classified output type per Klares4 system
- * ID, so a later update with missing/ambiguous CAT or MOD (e.g. a partial
- * re-poll during a WS reconnect) can't flip an already-known output's type —
- * which would change its `device.id` prefix (gate_/cover_/...) and make
- * Matter/Alexa perceive a brand-new device for the same physical output.
- */
-export class OutputTypeMemory {
-    private readonly lastKnownType = new Map<string, ProjectedOutputType>();
-
-    resolve(systemId: string, category: string, mode?: string): ProjectedOutputType {
-        const known = this.lastKnownType.get(systemId);
-        if (known && isAmbiguousClassification(category, mode)) {
-            return known;
-        }
-        const computed = determineOutputType(category, mode);
-        this.lastKnownType.set(systemId, computed);
-        return computed;
-    }
-}
-
-const outputTypeMemory = new OutputTypeMemory();
-
 export function parseOutputDevice(
     outputData: KseniaOutputData,
+    outputType: ProjectedOutputType = classifyOutput(outputData),
 ): KseniaLight | KseniaCover | KseniaGate | KseniaThermostat {
-    const category = outputData.CAT ?? outputData.TYPE ?? '';
     const systemId = outputData.ID;
-    const outputType = outputTypeMemory.resolve(systemId, category, outputData.MOD);
     const label = normalizeDeviceName(outputData.DES);
 
     if (outputType === 'light') {
@@ -153,60 +89,74 @@ export function clampValue(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
 }
 
-export function parseIntegerInRange(
-    value: string | undefined,
-    min: number,
-    max: number,
-): number | undefined {
-    if (value === undefined || value === '') {
+const INTEGER_TEXT = /^[+-]?\d+$/;
+const DECIMAL_TEXT = /^[+-]?\d+(?:[.,]\d+)?$/;
+
+/**
+ * A panel reading as a number, or `undefined` when it is not one: absent,
+ * empty, `NA`, garbage, not finite, or outside `[min, max]`. Out-of-range
+ * values are discarded, never clamped: a probe reporting 999 is a fault, and
+ * publishing it as the range limit would be a fabricated measurement.
+ */
+function parseReading(value: unknown, pattern: RegExp, min: number, max: number): number | undefined {
+    let parsed: number;
+    if (typeof value === 'number') {
+        parsed = value;
+    } else if (typeof value === 'string') {
+        const text = value.trim();
+        if (!pattern.test(text)) return undefined;
+        parsed = Number(text.replace(',', '.'));
+    } else {
         return undefined;
     }
-    const parsed = Number.parseInt(value, 10);
-    if (!Number.isFinite(parsed)) {
-        return undefined;
-    }
-    return clampValue(parsed, min, max);
+    if (!Number.isFinite(parsed) || parsed < min || parsed > max) return undefined;
+    return parsed;
 }
 
-export function parseFloatInRange(
-    value: string | undefined,
-    min: number,
-    max: number,
-): number | undefined {
-    if (value === undefined || value === '') {
-        return undefined;
-    }
-    const normalized = value.trim().replace(',', '.').replace('+', '');
-    const parsed = Number.parseFloat(normalized);
-    if (!Number.isFinite(parsed)) {
-        return undefined;
-    }
-    return clampValue(parsed, min, max);
+export function parseIntegerInRange(value: unknown, min: number, max: number): number | undefined {
+    const parsed = parseReading(value, INTEGER_TEXT, min, max);
+    return parsed !== undefined && Number.isInteger(parsed) ? parsed : undefined;
 }
 
-export function mapCoverPosition(sta: string, pos?: string): number {
+export function parseFloatInRange(value: unknown, min: number, max: number): number | undefined {
+    return parseReading(value, DECIMAL_TEXT, min, max);
+}
+
+/** `ON`/`OFF` in any case and spacing; `undefined` for anything else. */
+export function parseOnOff(value: unknown): boolean | undefined {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim().toUpperCase();
+    if (normalized === 'ON') return true;
+    if (normalized === 'OFF') return false;
+    return undefined;
+}
+
+/**
+ * Cover position from `POS`, or from an end-of-travel `STA` when there is no
+ * `POS`. `undefined` (position unknown, keep the last one) for an unreadable
+ * `POS`, for `STOP` without `POS` and for an unknown `STA`.
+ */
+export function mapCoverPosition(sta: unknown, pos?: unknown): number | undefined {
     if (pos !== undefined && pos !== '') {
-        return parseIntegerInRange(pos, 0, 100) ?? 0;
+        return parseIntegerInRange(pos, 0, 100);
     }
 
-    switch (sta?.toUpperCase()) {
+    switch (typeof sta === 'string' ? sta.trim().toUpperCase() : undefined) {
         case 'OPEN':
         case 'UP':
             return 100;
         case 'CLOSE':
         case 'DOWN':
             return 0;
-        case 'STOP':
-            return 50;
         default:
-            return 0;
+            return undefined;
     }
 }
 
 export function mapCoverState(
-    sta: string,
-    pos?: string,
-    tpos?: string,
+    sta: unknown,
+    pos?: unknown,
+    tpos?: unknown,
 ): 'stopped' | 'opening' | 'closing' {
     if (pos !== undefined && tpos !== undefined) {
         const currentPos = parseIntegerInRange(pos, 0, 100);
@@ -225,7 +175,7 @@ export function mapCoverState(
         }
     }
 
-    switch (sta?.toUpperCase()) {
+    switch (typeof sta === 'string' ? sta.trim().toUpperCase() : undefined) {
         case 'UP':
         case 'OPEN':
             return 'opening';

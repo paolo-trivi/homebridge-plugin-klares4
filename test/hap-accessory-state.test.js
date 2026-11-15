@@ -35,7 +35,7 @@ function platform(wsClient, config = {}) {
 
 function thermostatDevice(status) {
     return {
-        id: 'thermostat_18', type: 'thermostat', name: 'Sala', description: '',
+        id: 'thermostat_18', type: 'thermostat', name: 'Veranda', description: '',
         currentTemperature: status.currentTemperature,
         targetTemperature: status.targetTemperature,
         mode: status.mode,
@@ -183,7 +183,7 @@ test('thermostat: the chosen temperature display unit is kept and survives a res
 });
 
 test('zone: a bypassed zone is inactive, not tampered', async () => {
-    const zone = (status) => ({ id: 'zone_4', type: 'zone', name: 'Finestra Cucina', description: '', status: { armed: false, fault: false, open: false, ...status } });
+    const zone = (status) => ({ id: 'zone_4', type: 'zone', name: 'Finestra Taverna', description: '', status: { armed: false, fault: false, open: false, ...status } });
     const accessory = platformAccessory(zone({ bypassed: true }));
     const handler = new ZoneAccessory(platform(undefined), accessory);
     const sensor = accessory.getService(Service.ContactSensor);

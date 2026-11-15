@@ -9,7 +9,6 @@ const {
     getThermostatPresetWorkaroundAttributes,
     thermostatSupportsCooling,
     buildThermostatMatterState,
-    matterSystemModeToKlares4Mode,
     normalizeMatterSetpointC,
     DEFAULT_HEATING_SETPOINT_C,
     DEFAULT_DEADBAND_C,
@@ -25,7 +24,6 @@ const {
     SYSTEM_MODE_HEAT,
     SYSTEM_MODE_COOL,
     SYSTEM_MODE_AUTO,
-    ThermostatEchoGuard,
 } = require('../dist/platform/matter-thermostat-mapper.js');
 
 test('toMatterTemperatureCelsius: numeric values', () => {
@@ -78,11 +76,11 @@ test('getThermostatPresetWorkaroundAttributes: ships exactly one valid preset sl
 });
 
 test('thermostatSupportsCooling: detects Italian + English naming', () => {
-    assert.equal(thermostatSupportsCooling({ name: 'Raffrescamento Sala' }), true);
+    assert.equal(thermostatSupportsCooling({ name: 'Raffrescamento Veranda' }), true);
     assert.equal(thermostatSupportsCooling({ name: 'Raffreddamento Camera' }), true);
     assert.equal(thermostatSupportsCooling({ name: 'Climatizzazione Ufficio' }), true);
     assert.equal(thermostatSupportsCooling({ name: 'Cooling Living' }), true);
-    assert.equal(thermostatSupportsCooling({ name: 'Riscaldamento Bagno' }), false);
+    assert.equal(thermostatSupportsCooling({ name: 'Riscaldamento Atrio' }), false);
     assert.equal(thermostatSupportsCooling({ name: 'Heating Office' }), false);
     assert.equal(thermostatSupportsCooling({ name: undefined }), false);
 });
@@ -90,7 +88,7 @@ test('thermostatSupportsCooling: detects Italian + English naming', () => {
 test('buildThermostatMatterState: heating-only thermostat', () => {
     const device = {
         id: 'thermostat_18',
-        name: 'Riscaldamento Sala',
+        name: 'Riscaldamento Veranda',
         type: 'thermostat',
         currentTemperature: 21.2,
         targetTemperature: 20,
@@ -105,15 +103,15 @@ test('buildThermostatMatterState: heating-only thermostat', () => {
     assert.equal(schemaInvariants.controlSequenceOfOperation, CONTROL_SEQ_HEATING_ONLY);
     assert.ok(schemaInvariants.minHeatSetpointLimit >= TEMP_ABS_MIN_CENTI);
     assert.ok(schemaInvariants.maxHeatSetpointLimit <= TEMP_ABS_MAX_CENTI);
-    assert.equal(schemaInvariants.minSetpointDeadBand, DEFAULT_DEADBAND_C * 10);
-    assert.equal(schemaInvariants.numberOfPresets, 1);
-    assert.equal(schemaInvariants.presetTypes.length, 1);
+    // Heating only (TH-01, TH-09): no cooling, deadband, occupancy or preset attribute.
+    for (const key of ['occupiedCoolingSetpoint', 'unoccupiedHeatingSetpoint', 'unoccupiedCoolingSetpoint']) assert.equal(key in base, false, key);
+    for (const key of ['minSetpointDeadBand', 'numberOfPresets', 'presetTypes', 'minCoolSetpointLimit']) assert.equal(key in schemaInvariants, false, key);
 });
 
 test('buildThermostatMatterState: cooling-capable thermostat exposes both setpoints', () => {
     const device = {
         id: 'thermostat_34',
-        name: 'Raffrescamento Sala',
+        name: 'Raffrescamento Veranda',
         type: 'thermostat',
         currentTemperature: 24,
         targetTemperature: 23,
@@ -131,7 +129,7 @@ test('buildThermostatMatterState: cooling-capable thermostat exposes both setpoi
 test('buildThermostatMatterState: heating-only coerces stale cool/auto mode to heat', () => {
     const device = {
         id: 'thermostat_x',
-        name: 'Riscaldamento Studio',
+        name: 'Riscaldamento Solaio',
         type: 'thermostat',
         currentTemperature: 19,
         targetTemperature: 20,
@@ -146,7 +144,7 @@ test('buildThermostatMatterState: heating-only coerces stale cool/auto mode to h
 test('buildThermostatMatterState: NaN / null current temp falls back to default', () => {
     const device = {
         id: 'thermostat_y',
-        name: 'Riscaldamento Bagno',
+        name: 'Riscaldamento Atrio',
         type: 'thermostat',
         currentTemperature: null,
         targetTemperature: NaN,
@@ -154,7 +152,7 @@ test('buildThermostatMatterState: NaN / null current temp falls back to default'
         status: {},
     };
     const { base } = buildThermostatMatterState(device);
-    assert.equal(typeof base.localTemperature, 'number');
+    assert.equal(base.localTemperature, null, 'LocalTemperature is nullable: an unknown reading is not a number');
     assert.equal(base.occupiedHeatingSetpoint, DEFAULT_HEATING_SETPOINT_C * 100);
 });
 
@@ -175,28 +173,6 @@ test('buildThermostatMatterState: deadband invariant always holds (cooling - hea
         base.occupiedCoolingSetpoint - base.occupiedHeatingSetpoint >= deadbandCenti,
         `cooling(${base.occupiedCoolingSetpoint}) - heating(${base.occupiedHeatingSetpoint}) must be >= deadband(${deadbandCenti})`,
     );
-});
-
-// ---------------------------------------------------------------------------
-// matterSystemModeToKlares4Mode
-// ---------------------------------------------------------------------------
-
-test('matterSystemModeToKlares4Mode: heating-only thermostat', () => {
-    const supportsCooling = false;
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_OFF, supportsCooling), 'off');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_HEAT, supportsCooling), 'heat');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_COOL, supportsCooling), null, 'cool not supported → null');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_AUTO, supportsCooling), null, 'auto not supported → null');
-    assert.equal(matterSystemModeToKlares4Mode(99, supportsCooling), null, 'unknown → null');
-});
-
-test('matterSystemModeToKlares4Mode: cooling-capable thermostat', () => {
-    const supportsCooling = true;
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_OFF, supportsCooling), 'off');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_HEAT, supportsCooling), 'heat');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_COOL, supportsCooling), 'cool');
-    assert.equal(matterSystemModeToKlares4Mode(SYSTEM_MODE_AUTO, supportsCooling), 'auto');
-    assert.equal(matterSystemModeToKlares4Mode(99, supportsCooling), null, 'unknown → null');
 });
 
 // ---------------------------------------------------------------------------
@@ -237,44 +213,4 @@ test('normalizeMatterSetpointC: clamps cooling value below minimum', () => {
     const { value, clamped } = normalizeMatterSetpointC(100, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C);
     assert.equal(value, DEFAULT_MIN_COOL_C);
     assert.equal(clamped, true);
-});
-
-// ThermostatEchoGuard
-
-test('ThermostatEchoGuard: isEcho returns false when nothing was recorded', () => {
-    const guard = new ThermostatEchoGuard();
-    assert.equal(guard.isEcho('heat', 2100), false);
-});
-
-test('ThermostatEchoGuard: isEcho returns true immediately after record', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    assert.equal(guard.isEcho('heat', 2100), true);
-});
-
-test('ThermostatEchoGuard: isEcho returns false for different key', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    assert.equal(guard.isEcho('cool', 2100), false);
-});
-
-test('ThermostatEchoGuard: isEcho returns false for different value', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    assert.equal(guard.isEcho('heat', 2200), false);
-});
-
-test('ThermostatEchoGuard: isEcho returns false after TTL expires', async () => {
-    const guard = new ThermostatEchoGuard(50); // 50 ms TTL
-    guard.record('heat', 2100);
-    await new Promise(r => setTimeout(r, 60));
-    assert.equal(guard.isEcho('heat', 2100), false);
-});
-
-test('ThermostatEchoGuard: record overwrites previous entry for same key', () => {
-    const guard = new ThermostatEchoGuard();
-    guard.record('heat', 2100);
-    guard.record('heat', 2200);
-    assert.equal(guard.isEcho('heat', 2100), false);
-    assert.equal(guard.isEcho('heat', 2200), true);
 });

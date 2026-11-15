@@ -1,4 +1,5 @@
 import type { KseniaMessage } from '../types';
+import { frameResult } from './protocol-result';
 
 export interface ProtocolRouterHandlers {
     onResponseMessage?: (message: KseniaMessage) => void;
@@ -14,8 +15,9 @@ export class ProtocolRouter {
     constructor(private readonly handlers: ProtocolRouterHandlers) {}
 
     public route(message: KseniaMessage): void {
-        const result = message.PAYLOAD?.RESULT?.trim().toUpperCase();
-        const isExplicitFailure = message.PAYLOAD_TYPE?.toUpperCase() === 'ERROR'
+        const result = frameResult(message);
+        const payloadType = typeof message.PAYLOAD_TYPE === 'string' ? message.PAYLOAD_TYPE.toUpperCase() : undefined;
+        const isExplicitFailure = payloadType === 'ERROR'
             || message.CMD.toUpperCase() === 'GENERIC'
             || (result !== undefined && result !== 'OK');
         if (message.CMD.endsWith('_RES') || isExplicitFailure) {

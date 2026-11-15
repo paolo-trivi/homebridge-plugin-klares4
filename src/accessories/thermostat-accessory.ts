@@ -8,7 +8,10 @@ import {
     domainModeToHomeKitTarget,
     homeKitTargetToDomainMode,
 } from '../thermostat-mode';
-import { syncThermostatTopLevelFromStatus, updateThermostatStatus } from '../thermostat-state';
+import { syncThermostatTopLevelFromStatus } from '../thermostat-state';
+import { clampHapHumidity, clampHapTemperature } from './hap-ranges';
+import { MissingValueWarning } from './missing-value-warning';
+import { toErrorMessage } from '../errors';
 
 /**
  * Thermostat Accessory Handler
@@ -19,6 +22,8 @@ export class ThermostatAccessory {
     public device: KseniaThermostat;
     private readonly tempMin: number;
     private readonly tempMax: number;
+    private readonly missingCurrent = new MissingValueWarning();
+    private readonly missingTarget = new MissingValueWarning();
 
     constructor(
         private readonly platform: Lares4Platform,
@@ -79,7 +84,12 @@ export class ThermostatAccessory {
         const tempDefaults = (this.platform.config as Lares4Config).temperatureDefaults ?? {};
         this.tempMin = tempDefaults.min ?? 10;
         this.tempMax = tempDefaults.max ?? 38;
-        this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature).setProps({
+        // hap-nodejs checks the value it holds against the new limits: move it
+        // inside both the default (10..38) and the configured ones first.
+        const targetCharacteristic = this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature);
+        const held = Number(targetCharacteristic.value);
+        targetCharacteristic.updateValue(Math.max(Math.max(this.tempMin, 10), Math.min(Math.min(this.tempMax, 38), held)));
+        targetCharacteristic.setProps({
             minValue: this.tempMin,
             maxValue: this.tempMax,
             minStep: tempDefaults.step ?? 0.5,
@@ -103,14 +113,15 @@ export class ThermostatAccessory {
             if (!this.platform.wsClient) {
                 throw new Error('WebSocket client not initialized');
             }
+            // The client updates the shared state once the panel acknowledged
+            // it, and tells HomeKit, Matter and MQTT through its status event.
             await this.platform.wsClient.setThermostatMode(this.device.id, newMode);
-            updateThermostatStatus(this.device, { mode: newMode });
 
             this.platform.log.info(`${this.device.name}: Mode ${newMode}`);
         } catch (error: unknown) {
             this.platform.log.error(
                 `Thermostat control error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             throw new this.platform.api.hap.HapStatusError(
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
@@ -126,12 +137,13 @@ export class ThermostatAccessory {
             // Use last persisted value from cache to avoid showing 0°C to Matter at startup.
             const lastKnown = this.accessory.context.lastKnownTemp as number | undefined;
             const fallback = lastKnown ?? 21;
-            this.platform.log.warn(
-                `${this.device.name}: Current temperature not available, using ${fallback}C`,
-            );
-            return Math.max(-270, Math.min(100, fallback));
+            if (this.missingCurrent.shouldWarn(true)) {
+                this.platform.log.warn(`${this.device.name}: Current temperature not available, using ${fallback}C`);
+            }
+            return clampHapTemperature(fallback);
         }
-        return Math.max(-270, Math.min(100, this.device.currentTemperature));
+        this.missingCurrent.shouldWarn(false);
+        return clampHapTemperature(this.device.currentTemperature);
     }
 
     public async getTargetTemperature(): Promise<CharacteristicValue> {
@@ -143,29 +155,52 @@ export class ThermostatAccessory {
                 (this.platform.config as Lares4Config).temperatureDefaults?.target ?? 21;
             // Clamp the default to the configured bounds so Matter bounds validation passes.
             const defaultTemp = Math.max(this.tempMin, Math.min(this.tempMax, configTarget));
-            this.platform.log.warn(
-                `${this.device.name}: Target temperature not available, using ${defaultTemp}C as default`,
-            );
+            if (this.missingTarget.shouldWarn(true)) {
+                this.platform.log.warn(`${this.device.name}: Target temperature not available, using ${defaultTemp}C as default`);
+            }
             return defaultTemp;
         }
-        return this.device.targetTemperature;
+        this.missingTarget.shouldWarn(false);
+        return this.clampTarget(this.device.targetTemperature);
+    }
+
+    /**
+     * Reached by HomeKit (already held to the characteristic's limits) and by
+     * MQTT commands: a setpoint outside temperatureDefaults.min/max is refused.
+     */
+    public isTargetTemperatureAllowed(value: unknown): value is number {
+        return typeof value === 'number' && Number.isFinite(value) && value >= this.tempMin && value <= this.tempMax;
     }
 
     public async setTargetTemperature(value: CharacteristicValue): Promise<void> {
         const targetTemperature = value as number;
+        if (!this.isTargetTemperatureAllowed(value)) {
+            this.platform.log.warn(
+                `${this.device.name}: setpoint ${String(value)} refused, outside ${this.tempMin}..${this.tempMax} (temperatureDefaults)`,
+            );
+            throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.INVALID_VALUE_IN_REQUEST);
+        }
 
         try {
             if (!this.platform.wsClient) {
                 throw new Error('WebSocket client not initialized');
             }
             await this.platform.wsClient.setThermostatTemperature(this.device.id, targetTemperature);
-            updateThermostatStatus(this.device, { targetTemperature });
 
             this.platform.log.info(`${this.device.name}: Target temperature ${targetTemperature}C`);
+            if (this.device.mode !== 'heat' && this.device.mode !== 'cool') {
+                // In AUTO or OFF the panel keeps its own target. HAP stores the
+                // written value once this handler returns, so the real one is
+                // put back right after.
+                setImmediate(() => this.service.updateCharacteristic(
+                    this.platform.Characteristic.TargetTemperature,
+                    this.clampTarget(this.device.targetTemperature),
+                ));
+            }
         } catch (error: unknown) {
             this.platform.log.error(
                 `Thermostat temperature error ${this.device.name}:`,
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
             throw new this.platform.api.hap.HapStatusError(
                 this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
@@ -187,7 +222,7 @@ export class ThermostatAccessory {
 
     public async getCurrentRelativeHumidity(): Promise<CharacteristicValue> {
         if (this.device.humidity !== undefined) {
-            return Math.max(0, Math.min(100, this.device.humidity));
+            return clampHapHumidity(this.device.humidity);
         }
         return 50; // Default value
     }
@@ -212,16 +247,17 @@ export class ThermostatAccessory {
         const currentTemp =
             this.device.currentTemperature !== undefined &&
                 this.device.currentTemperature !== null
-                ? Math.max(-270, Math.min(100, this.device.currentTemperature))
+                ? clampHapTemperature(this.device.currentTemperature)
                 : 0;
 
         const defaultTemp =
             (this.platform.config as Lares4Config).temperatureDefaults?.target ?? 21;
-        const targetTemp =
+        const targetTemp = this.clampTarget(
             this.device.targetTemperature !== undefined &&
                 this.device.targetTemperature !== null
                 ? this.device.targetTemperature
-                : defaultTemp;
+                : defaultTemp,
+        );
 
         this.service.updateCharacteristic(
             this.platform.Characteristic.CurrentTemperature,
@@ -235,7 +271,7 @@ export class ThermostatAccessory {
         if (this.device.humidity !== undefined) {
             this.service.updateCharacteristic(
                 this.platform.Characteristic.CurrentRelativeHumidity,
-                Math.max(0, Math.min(100, this.device.humidity)),
+                clampHapHumidity(this.device.humidity),
             );
         }
     }
@@ -243,18 +279,22 @@ export class ThermostatAccessory {
     public updateStatus(newDevice: KseniaThermostat): void {
         syncThermostatTopLevelFromStatus(newDevice);
         this.device = newDevice;
-        // Persist so the next cold-start can return a realistic fallback from cache.
-        if (newDevice.currentTemperature !== undefined && newDevice.currentTemperature !== null) {
+        // A temperature the panel has not reported is not pushed: HomeKit keeps the last value
+        // (the getters answer with the fallback) instead of being handed a NaN.
+        if (Number.isFinite(newDevice.currentTemperature)) {
+            // Persist so the next cold-start can return a realistic fallback from cache.
             this.accessory.context.lastKnownTemp = newDevice.currentTemperature;
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.CurrentTemperature,
+                clampHapTemperature(newDevice.currentTemperature),
+            );
         }
-        this.service.updateCharacteristic(
-            this.platform.Characteristic.CurrentTemperature,
-            Math.max(-270, Math.min(100, newDevice.currentTemperature)),
-        );
-        this.service.updateCharacteristic(
-            this.platform.Characteristic.TargetTemperature,
-            newDevice.targetTemperature,
-        );
+        if (Number.isFinite(newDevice.targetTemperature)) {
+            this.service.updateCharacteristic(
+                this.platform.Characteristic.TargetTemperature,
+                this.clampTarget(newDevice.targetTemperature),
+            );
+        }
         this.service.updateCharacteristic(
             this.platform.Characteristic.TargetHeatingCoolingState,
             domainModeToHomeKitTarget(newDevice.mode),
@@ -266,13 +306,22 @@ export class ThermostatAccessory {
         if (newDevice.humidity !== undefined) {
             this.service.updateCharacteristic(
                 this.platform.Characteristic.CurrentRelativeHumidity,
-                Math.max(0, Math.min(100, newDevice.humidity)),
+                clampHapHumidity(newDevice.humidity),
             );
         }
 
         this.platform.log.debug(
             `Updated thermostat ${this.device.name}: ${this.device.currentTemperature}C -> ${this.device.targetTemperature}C (${this.device.mode})`,
         );
+    }
+
+    /**
+     * The panel accepts setpoints (5..40) wider than the characteristic's
+     * limits (temperatureDefaults.min/max): HomeKit gets the nearest limit
+     * instead of a value hap-nodejs would reject with a warning at every update.
+     */
+    private clampTarget(value: number): number {
+        return Math.max(this.tempMin, Math.min(this.tempMax, value));
     }
 
     /** 0 = Celsius (default), 1 = Fahrenheit. */
@@ -290,6 +339,7 @@ export class ThermostatAccessory {
             device.currentTemperature,
             device.targetTemperature,
             device.status.hvacOutputActive,
+            device.status.season,
         );
     }
 }

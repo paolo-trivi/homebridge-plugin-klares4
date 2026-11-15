@@ -8,7 +8,6 @@ const ABBREVIATIONS: Record<string, string> = {
     term: 'termostato',
     cab: 'cabina',
     balc: 'balcone',
-    matrim: 'matrimoniale',
     tv: 'televisione',
 };
 
@@ -20,7 +19,6 @@ const SINGULAR: Record<string, string> = {
     cancelli: 'cancello',
     scenari: 'scenario',
     termostati: 'termostato',
-    volumetrici: 'volumetrico',
 };
 
 const ACTION_VERBS = new Set(['accendi', 'spegni', 'apri', 'chiudi', 'attiva', 'inserisci']);
@@ -113,23 +111,35 @@ function severity(score: number): VoiceCollisionFinding['severity'] {
     return 'LOW';
 }
 
+// Lengths in UTF-16 units, as the Matter name limit is counted.
 function hasTruncationLoss(device: KseniaDevice, entry: MatterNameMapEntry): boolean {
-    const finalAtLimit = Array.from(entry.name).length === 32 && entry.name !== entry.base;
-    const baseAtLimit = Array.from(entry.base).length === 32
-        && Array.from(device.name.normalize('NFKC')).length > Array.from(entry.base).length;
+    const finalAtLimit = entry.name.length === 32 && entry.name !== entry.base;
+    const baseAtLimit = entry.base.length === 32 && device.name.normalize('NFKC').length > entry.base.length;
     return finalAtLimit || baseAtLimit;
 }
 
-function analyzePair(
-    left: KseniaDevice,
-    right: KseniaDevice,
-    entries: Map<string, MatterNameMapEntry>,
-): VoiceCollisionFinding | undefined {
-    const leftEntry = entries.get(left.id);
-    const rightEntry = entries.get(right.id);
-    if (!leftEntry || !rightEntry || leftEntry.reserved || rightEntry.reserved) return undefined;
-    const a = normalizeVoiceName(leftEntry.name);
-    const b = normalizeVoiceName(rightEntry.name);
+/** Everything a pair comparison needs about one device, computed once per device. */
+interface AnalyzedDevice {
+    device: KseniaDevice;
+    entry: MatterNameMapEntry;
+    name: NormalizedVoiceName;
+    baseSingular: string;
+    truncationLoss: boolean;
+}
+
+function analyzeDevice(device: KseniaDevice, entry: MatterNameMapEntry): AnalyzedDevice {
+    return {
+        device,
+        entry,
+        name: normalizeVoiceName(entry.name),
+        baseSingular: normalizeVoiceName(entry.base).singular,
+        truncationLoss: hasTruncationLoss(device, entry),
+    };
+}
+
+function analyzePair(leftItem: AnalyzedDevice, rightItem: AnalyzedDevice): VoiceCollisionFinding | undefined {
+    const { device: left, entry: leftEntry, name: a } = leftItem;
+    const { device: right, entry: rightEntry, name: b } = rightItem;
     const evidence: LexicalEvidence[] = [];
     let base = 0;
 
@@ -145,7 +155,7 @@ function analyzePair(
     } else if (a.singular === b.singular) {
         evidence.push('singular-plural');
         base = 88;
-    } else if (normalizeVoiceName(leftEntry.base).singular === normalizeVoiceName(rightEntry.base).singular) {
+    } else if (leftItem.baseSingular === rightItem.baseSingular) {
         evidence.push('artificial-suffix-root');
         base = 94;
     } else if (isPrefix(a.tokens, b.tokens)) {
@@ -157,7 +167,7 @@ function analyzePair(
     }
     if (base === 0) return undefined;
 
-    const truncationLoss = hasTruncationLoss(left, leftEntry) || hasTruncationLoss(right, rightEntry);
+    const truncationLoss = leftItem.truncationLoss || rightItem.truncationLoss;
     if (truncationLoss) evidence.push('truncation-loss');
 
     const risks: VoiceRiskReason[] = [];
@@ -166,7 +176,7 @@ function analyzePair(
     if (left.type !== right.type) risks.push('cross-type-conflict');
     const scenario = left.type === 'scenario' ? a : right.type === 'scenario' ? b : undefined;
     const entity = left.type === 'scenario' ? b : a;
-    if (scenario && ACTION_VERBS.has(scenario.tokens[0])
+    if (scenario && ACTION_VERBS.has(scenario.tokens[0] ?? '')
         && scenario.tokens.slice(1).join(' ') === entity.singular) {
         risks.push('scenario-verb-entity');
         base = Math.max(base, 92);
@@ -194,22 +204,28 @@ export function analyzeMatterVoiceCollisions(
 ): VoiceAnalysisResult {
     const liveDevices = [...devices].filter((device) => !entries.get(device.id)?.reserved)
         .sort((a, b) => a.id.localeCompare(b.id));
+    const analyzed: AnalyzedDevice[] = [];
+    for (const device of liveDevices) {
+        const entry = entries.get(device.id);
+        if (entry) analyzed.push(analyzeDevice(device, entry));
+    }
     const findings: VoiceCollisionFinding[] = [];
-    for (let left = 0; left < liveDevices.length; left += 1) {
-        for (let right = left + 1; right < liveDevices.length; right += 1) {
-            const finding = analyzePair(liveDevices[left], liveDevices[right], entries);
+    for (let left = 0; left < analyzed.length; left += 1) {
+        for (let right = left + 1; right < analyzed.length; right += 1) {
+            const a = analyzed[left];
+            const b = analyzed[right];
+            const finding = a && b ? analyzePair(a, b) : undefined;
             if (finding) findings.push(finding);
         }
     }
-    for (const device of liveDevices) {
-        const entry = entries.get(device.id);
-        if (!entry) continue;
-        const normalized = normalizeVoiceName(entry.name).singular;
+    const roomKeys = roomNames.map((room) => ({ room, key: normalizeVoiceName(room).singular }));
+    for (const { device, entry, name } of analyzed) {
+        const normalized = name.singular;
         if (device.type === 'scenario' && GLOBAL_INTENTS.has(normalized)) {
             findings.push(namespaceFinding(device, entry.name, 'intent:global', normalized, 100, 'intent-collision'));
         }
-        for (const room of roomNames) {
-            if (normalized === normalizeVoiceName(room).singular) {
+        for (const { room, key } of roomKeys) {
+            if (normalized === key) {
                 findings.push(namespaceFinding(device, entry.name, `room:${room}`, room, 100, 'room-equality'));
             }
         }

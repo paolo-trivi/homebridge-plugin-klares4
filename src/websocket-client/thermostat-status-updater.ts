@@ -1,3 +1,4 @@
+import type { Logger } from 'homebridge';
 import { stripDevicePrefix } from '../device-id';
 import type { ThermostatMode } from '../thermostat-mode';
 import { updateThermostatStatus } from '../thermostat-state';
@@ -6,49 +7,55 @@ import type {
     KseniaTemperatureStatusRaw,
 } from '../types';
 import { parseFloatInRange } from '../websocket/device-state-projector';
+import { forEachIsolated } from '../isolation';
+import { nextThermostatEventSeq } from './thermostat-sequence';
 import type { WebSocketClientState } from './types';
 
 interface ThermostatStatusUpdaterDeps {
     state: WebSocketClientState;
     emitDeviceStatusUpdate: (device: KseniaDevice) => void;
+    /** When set, a failing entry is logged and skipped instead of aborting the batch. */
+    log?: Logger;
 }
 
 export class ThermostatStatusUpdater {
+    private readonly reportedUnknownModels = new Set<string>();
+
     constructor(private readonly deps: ThermostatStatusUpdaterDeps) {}
 
     public updateTemperatureStatuses(entries: KseniaTemperatureStatusRaw[]): void {
-        for (const entry of entries) {
+        forEachIsolated(this.deps.log, 'STATUS_TEMPERATURES entry', entries, (entry: KseniaTemperatureStatusRaw): void => {
+            const seq = nextThermostatEventSeq(this.deps.state);
             this.recordRealtimeSnapshot(entry);
             const thermostatOutputIds = this.resolveThermostatOutputIds(entry.ID);
             if (thermostatOutputIds.length === 0) {
                 this.deps.state.pendingTemperatureStatuses.set(entry.ID, entry);
-                continue;
+                return;
             }
 
             this.deps.state.pendingTemperatureStatuses.delete(entry.ID);
+            this.reportUnknownModel(entry);
             const patch = buildThermostatPatch(entry);
             for (const outputThermostatId of thermostatOutputIds) {
-                this.recordRealtimeSeason(outputThermostatId, entry);
+                this.recordRealtimeSeason(outputThermostatId, entry, seq);
                 const thermostatDevice = this.deps.state.devices.get(`thermostat_${outputThermostatId}`);
                 if (!thermostatDevice || thermostatDevice.type !== 'thermostat') {
                     continue;
                 }
 
                 const changed = updateThermostatStatus(thermostatDevice, patch);
-                // NOTE: previously we wrote `thermostatCommandIdByOutputId[outputId] = entry.ID`
-                // here, but `entry.ID` from STATUS_TEMPERATURES is the DOMUS sensor id,
-                // NOT the cfg/program id that `thermostatCommandIdByOutputId` is supposed
-                // to hold. That write poisoned the cache used by the command resolver
-                // (command-service.ts) and the config-sync path, which then routed
-                // WRITE_CFG to a stale/sensor id. Removed entirely: the only legitimate
-                // writers of this map are `command-service.ts` and `thermostat-config-sync.ts`,
-                // both of which already write the cfg id.
-                this.deps.state.thermostatRealtimeByOutputId.set(outputThermostatId, Date.now());
+                // Never `thermostatCommandIdByOutputId[outputId] = entry.ID`: entry.ID is
+                // the DOMUS sensor id, not a cfg id; only the command resolver and the
+                // cfg sync write that map.
+                const now = Date.now();
+                this.deps.state.thermostatRealtimeByOutputId.set(outputThermostatId, now);
+                thermostatDevice.status.observedAt = now;
+                thermostatDevice.status.observedSeq = seq;
                 if (changed) {
                     this.deps.emitDeviceStatusUpdate(thermostatDevice);
                 }
             }
-        }
+        });
     }
 
     public applyPendingTemperatureStatuses(): void {
@@ -70,11 +77,11 @@ export class ThermostatStatusUpdater {
      * The previous implementation compared `statusId` against the thermostat's
      * `manualCommandId` / `programCommandId` / `cachedCommandId` — all of which are
      * cfg ids — producing a numeric collision in setups where two thermostats have
-     * "swapped" sensor/program pairs (e.g. Matrimoniale: cfg=3 sensor=4, Bagno:
+     * "swapped" sensor/program pairs (e.g. room A: cfg=3 sensor=4, room B:
      * cfg=4 sensor=3). On those setups, a STATUS_TEMPERATURES targeted at one
-     * thermostat would silently patch the *other*: change Matrimoniale setpoint to
-     * 25 °C and Bagno's targetTemperature ended up at 25 °C too. Devices whose
-     * (cfg, sensor) pair coincides numerically (e.g. Studio cfg=5 sensor=5) were
+     * thermostat would silently patch the *other*: change room A's setpoint to
+     * 25 °C and room B's targetTemperature ended up at 25 °C too. Devices whose
+     * (cfg, sensor) pair coincides numerically (e.g. room C: cfg=5 sensor=5) were
      * spared by accident, masking the bug.
      *
      * The fix: for each thermostat compute its **expected DOMUS sensor id** and
@@ -135,12 +142,27 @@ export class ThermostatStatusUpdater {
         return undefined;
     }
 
-    private recordRealtimeSeason(outputThermostatId: string, entry: KseniaTemperatureStatusRaw): void {
+    private recordRealtimeSeason(outputThermostatId: string, entry: KseniaTemperatureStatusRaw, seq: number): void {
         const season = parseSeason(entry);
         if (!season) return;
-        const seasons = this.deps.state.thermostatRealtimeSeasonByOutputId;
-        if (seasons.get(outputThermostatId)?.season === season) return;
-        seasons.set(outputThermostatId, { season, updatedAt: Date.now() });
+        // Stamped at every observation, not only on change: a season seen again
+        // after one of our writes is newer than that write's ACK.
+        this.deps.state.thermostatRealtimeSeasonByOutputId.set(outputThermostatId, { season, updatedAt: Date.now(), seq });
+    }
+
+    /** One warning per ACT_MODEL value the plugin does not know (see parseThermostatMode). */
+    private reportUnknownModel(entry: KseniaTemperatureStatusRaw): void {
+        const model = entry.THERM?.ACT_MODEL;
+        if (typeof model !== 'string' || model.trim() === '' || KNOWN_MODELS.has(model.trim().toUpperCase())) return;
+        const key = model.trim().toUpperCase();
+        if (this.reportedUnknownModels.has(key)) return;
+        this.reportedUnknownModels.add(key);
+        const mapped = parseThermostatMode(entry);
+        this.deps.log?.warn(
+            `Thermostat realtime mode ACT_MODEL=${JSON.stringify(key.slice(0, 16))} is not known to the plugin: `
+            + (mapped ? `shown as ${mapped} (it has an active setpoint)` : 'mode left unchanged')
+            + '. Please report it with a debug capture.',
+        );
     }
 
     private recordRealtimeSnapshot(entry: KseniaTemperatureStatusRaw): void {
@@ -181,14 +203,18 @@ function buildThermostatPatch(entry: KseniaTemperatureStatusRaw): Partial<{
     targetTemperature: number;
     mode: ThermostatMode;
     hvacOutputActive: boolean;
+    season: 'WIN' | 'SUM';
 }> {
     return {
         currentTemperature: parseFloatInRange(entry.TEMP, -50, 100),
         targetTemperature: parseFloatInRange(entry.THERM?.TEMP_THR?.VAL, 5, 40),
         mode: parseThermostatMode(entry),
         hvacOutputActive: parseThermostatOutputActive(entry.THERM?.OUT_STATUS),
+        season: parseSeason(entry),
     };
 }
+
+const KNOWN_MODELS = new Set(['OFF', 'AUTO', 'MAN']);
 
 function parseSeason(entry: KseniaTemperatureStatusRaw): 'WIN' | 'SUM' | undefined {
     const actSea = entry.THERM?.ACT_SEA?.toUpperCase();
@@ -203,8 +229,14 @@ function parseThermostatMode(entry: KseniaTemperatureStatusRaw): ThermostatMode 
     if (actModel === 'AUTO') {
         return 'auto';
     }
+    const season = entry.THERM?.ACT_SEA?.toUpperCase() === 'SUM' ? 'cool' : 'heat';
     if (actModel === 'MAN') {
-        return entry.THERM?.ACT_SEA?.toUpperCase() === 'SUM' ? 'cool' : 'heat';
+        return season;
+    }
+    // Unknown model (a timed manual, a special day...): with a live setpoint the
+    // thermostat is regulating, so it is shown as heating/cooling rather than off.
+    if (actModel && parseFloatInRange(entry.THERM?.TEMP_THR?.VAL, 5, 40) !== undefined) {
+        return season;
     }
     return undefined;
 }

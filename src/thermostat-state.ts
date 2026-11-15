@@ -39,6 +39,7 @@ export function updateThermostatStatus(
         mode: ThermostatMode;
         humidity: number | undefined;
         hvacOutputActive: boolean;
+        season: 'WIN' | 'SUM';
     }>,
 ): boolean {
     let changed = false;
@@ -74,6 +75,11 @@ export function updateThermostatStatus(
         partial.hvacOutputActive !== device.status.hvacOutputActive
     ) {
         device.status.hvacOutputActive = partial.hvacOutputActive;
+        changed = true;
+    }
+
+    if (partial.season !== undefined && partial.season !== device.status.season) {
+        device.status.season = partial.season;
         changed = true;
     }
 

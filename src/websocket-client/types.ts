@@ -14,6 +14,8 @@ import type {
 export interface WebSocketConnectionOptions {
     rejectUnauthorized: boolean;
     agent?: import('https').Agent;
+    /** Largest inbound frame in bytes; a bigger one closes the socket (1009). */
+    maxPayload?: number;
 }
 
 export interface PendingLoginRequest {
@@ -83,6 +85,8 @@ export interface CallbackRegistry {
     onConnected?: () => void;
     onDisconnected?: () => void;
     onInitialSyncComplete?: () => void;
+    /** A login succeeded and the discovery reads of a new sync are about to be sent. */
+    onSyncStarted?: () => void;
 }
 
 export interface WebSocketClientState {
@@ -94,10 +98,14 @@ export interface WebSocketClientState {
     heartbeatPending: boolean;
     lastPongReceived: number;
     reconnectAttempts: number;
-    /** Explicit LOGIN_RES rejections since the last successful login. */
+    /** Explicit login refusals by the panel since the last successful login. */
     loginRejections: number;
-    /** Set after too many rejected logins: no automatic reconnection until restart. */
+    /** Logins left without a verdict (timeout, socket closed) in a row; normal backoff. */
+    unansweredLogins?: number;
+    /** Set after too many refused logins: reconnection slows to `suspendedLoginRetryMs`. */
     reconnectSuspended: boolean;
+    /** Consecutive syncs in which each discovery read (ZONES, MULTI_TYPES) was refused. */
+    refusedDiscoveryReads?: Map<string, number>;
     isManualClose: boolean;
     pendingLogin?: PendingLoginRequest;
     hasCompletedInitialSync: boolean;
@@ -109,6 +117,11 @@ export interface WebSocketClientState {
     domusThermostatConfig: Required<DomusThermostatConfig>;
     thermostatOutputs: Map<string, KseniaOutputData>;
     thermostatProgramById: Map<string, KseniaProgramThermostatRaw>;
+    /**
+     * The thermostat programs are settled: `PRG_THERMOSTATS` answered (OK or
+     * refused) at least once, or the `.ksa` backup provided them.
+     */
+    thermostatProgramsSettled: boolean;
     thermostatProgramIdByOutputId: Map<string, string>;
     domusSensorIdByThermostatProgramId: Map<string, string>;
     thermostatCommandIdByOutputId: Map<string, string>;
@@ -130,13 +143,56 @@ export interface WebSocketClientState {
      * changed. STATUS_TEMPERATURES is keyed by DOMUS sensor id, which can equal
      * another thermostat's cfg id, so the season is only looked up by output.
      */
-    thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number }>;
+    thermostatRealtimeSeasonByOutputId: Map<string, { season: 'WIN' | 'SUM'; updatedAt: number; seq?: number }>;
+    /**
+     * Last number handed out by nextThermostatEventSeq: thermostat events (realtime
+     * observation, cfg read, ACK) are ordered by it, never by the clock.
+     */
+    thermostatEventSeq?: number;
     missingThermostatProgramWarningOutputIds: Set<string>;
+    /** CFG_THERMOSTATS cache bookkeeping; created on first use (thermostat-cfg-freshness.ts). */
+    thermostatCfgFreshness?: ThermostatCfgFreshness;
     /** Normalized CAT of every scenario listed by MULTI_TYPES, exposed or not. */
     scenarioCategoryById: Map<string, string>;
+    /**
+     * Outputs and scenarios of the latest discovery read that the exposure
+     * policy kept out of `devices`, by the device ID they would have had.
+     * Created by the first discovery read (`exposure-report.ts`).
+     */
+    hiddenByExposurePolicy?: Map<string, HiddenDevice>;
+}
+
+/** An output or scenario the exposure policy does not expose (see `device-parsers.ts`). */
+export interface HiddenDevice {
+    /** The device ID it would have had (`light_7`, `scenario_4`), as in 2.2.0. */
+    deviceId: string;
+    kind: 'output' | 'scenario';
+    panelId: string;
+    name: string;
+    /** Normalized category as listed by the panel; empty when absent. */
+    category: string;
+    mode?: string;
+    /** False for ARM/DISARM and PARTIAL, which no per-device opt-in can expose. */
+    optInAllowed: boolean;
 }
 
 export interface MessagePipeline {
     routeMessage: (message: KseniaMessage) => void;
     resolvePending: (message: KseniaMessage) => void;
+}
+
+/**
+ * Whether the CFG_THERMOSTATS cache still matches the panel. Every READ_RES and
+ * NM_CHANGES carries `PRG_CHECK.CFG`, a counter the panel bumps at every cfg
+ * change; each acknowledged write of ours bumps it by one.
+ */
+export interface ThermostatCfgFreshness {
+    /** Last `PRG_CHECK.CFG` known to match the cache. */
+    counter?: number;
+    /** Own writes acknowledged since `counter` was learned. */
+    ownWritesSinceCounter: number;
+    /** When each cfg id was last read from the panel (epoch ms, informative). */
+    readAt: Map<string, number>;
+    /** Event sequence number (nextThermostatEventSeq) of each cfg id's last read: decides ordering. */
+    readSeq?: Map<string, number>;
 }

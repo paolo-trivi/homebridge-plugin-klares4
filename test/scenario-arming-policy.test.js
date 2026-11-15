@@ -12,8 +12,9 @@ const SCENARIOS = [
     { ID: '2', DES: 'Disinserimento', CAT: 'DISARM', PIN: 'P' },
     { ID: '3', DES: 'Inserisci perimetrali', CAT: 'PARTIAL', PIN: 'P' },
     { ID: '4', DES: 'Inserisci notte', CAT: 'partial', PIN: 'P' },
-    { ID: '5', DES: 'Luci giardino', CAT: 'GENERIC' },
+    { ID: '5', DES: 'Luci giardino', CAT: 'GEN', PIN: 'N' },
     { ID: '6', DES: 'Buonanotte' },
+    { ID: '7', DES: 'Uscita notturna', CAT: 'ARM_AWAY', PIN: 'P' },
 ];
 
 function createClient(options = {}) {
@@ -45,28 +46,39 @@ test('arming categories are recognised case-insensitively; PARTIAL is hidden by 
     assert.equal(isIgnoredScenarioCategory('PARTIAL'), true);
     assert.equal(isIgnoredScenarioCategory('Partial'), true);
     assert.equal(isIgnoredScenarioCategory('PARTIAL', true), false);
-    assert.equal(isIgnoredScenarioCategory('GENERIC'), false);
-    assert.equal(isIgnoredScenarioCategory(undefined), false);
+    assert.equal(isIgnoredScenarioCategory('GEN'), false);
+    assert.equal(isIgnoredScenarioCategory(' gen '), false);
+});
+
+test('WS-02: a scenario category outside the allowlist is ignored unless the scenario is opted in', () => {
+    for (const category of [undefined, '', null, 2, 'GENERIC', 'ARM_AWAY', 'ARMING', 'TOTAL', 'DIS']) {
+        assert.equal(isIgnoredScenarioCategory(category), true, String(category));
+        assert.equal(isIgnoredScenarioCategory(category, true), true, `${category} with partial exposure`);
+        assert.equal(isIgnoredScenarioCategory(category, false, true), false, `${category} opted in`);
+    }
+    // No opt-in ever exposes arming scenarios; PARTIAL follows only exposePartialArmScenarios.
+    assert.equal(isIgnoredScenarioCategory('ARM', true, true), true);
+    assert.equal(isIgnoredScenarioCategory('DISARM', true, true), true);
+    assert.equal(isIgnoredScenarioCategory('PARTIAL', false, true), true);
 });
 
 test('partial-arm scenarios are not discovered unless exposePartialArmScenarios is on', () => {
     const hidden = createClient();
-    assert.deepEqual(hidden.discovered, ['scenario_5', 'scenario_6']);
+    assert.deepEqual(hidden.discovered, ['scenario_5']);
 
     const exposed = createClient({ exposePartialArmScenarios: true });
-    assert.deepEqual(exposed.discovered, ['scenario_3', 'scenario_4', 'scenario_5', 'scenario_6']);
+    assert.deepEqual(exposed.discovered, ['scenario_3', 'scenario_4', 'scenario_5']);
 });
 
 test('triggerScenario refuses arming scenarios before anything is sent with the PIN', async () => {
     const { client, sent } = createClient();
-    for (const id of ['scenario_1', 'scenario_2', 'scenario_3', 'scenario_4']) {
+    for (const id of ['scenario_1', 'scenario_2', 'scenario_3', 'scenario_4', 'scenario_6', 'scenario_7']) {
         await assert.rejects(() => client.triggerScenario(id), /refus/i, id);
     }
     assert.equal(sent.length, 0);
 
     await client.triggerScenario('scenario_5');
-    await client.triggerScenario('scenario_6');
-    assert.deepEqual(sent.map((m) => m.PAYLOAD.SCENARIO.ID), ['5', '6']);
+    assert.deepEqual(sent.map((m) => m.PAYLOAD.SCENARIO.ID), ['5']);
 });
 
 test('triggerScenario refuses a scenario whose category was never seen', async () => {

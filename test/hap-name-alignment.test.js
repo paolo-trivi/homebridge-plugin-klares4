@@ -101,26 +101,26 @@ test('cached accessory with a legacy invalid name is re-aligned before publish',
 test('a device renamed on the panel updates every HAP name of the cached accessory', (t) => {
     silenceHapWarnings(t);
     const { registry, accessories } = registryHarness();
-    const oldDevice = { id: 'cover_2', type: 'cover', name: 'Tapparella Sala', description: '', status: { position: 0, state: 'stopped' } };
-    const accessory = cachedAccessory('Tapparella Sala', oldDevice, Service.WindowCovering);
+    const oldDevice = { id: 'cover_2', type: 'cover', name: 'Tapparella Veranda', description: '', status: { position: 0, state: 'stopped' } };
+    const accessory = cachedAccessory('Tapparella Veranda', oldDevice, Service.WindowCovering);
     registry.configureAccessory(accessory);
     assert.equal(accessories.get(accessory.UUID), accessory);
 
-    registry.addAccessory({ ...oldDevice, name: 'Tapparella Cucina' });
+    registry.addAccessory({ ...oldDevice, name: 'Tapparella Taverna' });
 
     assert.deepEqual(names(accessory, Service.WindowCovering), {
-        displayName: 'Tapparella Cucina',
-        hapDisplayName: 'Tapparella Cucina',
-        information: 'Tapparella Cucina',
-        primary: 'Tapparella Cucina',
+        displayName: 'Tapparella Taverna',
+        hapDisplayName: 'Tapparella Taverna',
+        information: 'Tapparella Taverna',
+        primary: 'Tapparella Taverna',
     });
 });
 
 test('an unchanged name leaves the cached accessory untouched', (t) => {
     silenceHapWarnings(t);
     const { registry } = registryHarness();
-    const device = { id: 'light_9', type: 'light', name: 'Luce Studio', description: '', status: { on: false, dimmable: false } };
-    const accessory = cachedAccessory('Luce Studio', device);
+    const device = { id: 'light_9', type: 'light', name: 'Luce Solaio', description: '', status: { on: false, dimmable: false } };
+    const accessory = cachedAccessory('Luce Solaio', device);
     const info = accessory.getService(Service.AccessoryInformation).getCharacteristic(Characteristic.Name);
     let changes = 0;
     info.on('change', () => { changes += 1; });
@@ -129,5 +129,5 @@ test('an unchanged name leaves the cached accessory untouched', (t) => {
     registry.addAccessory(device);
 
     assert.equal(changes, 0);
-    assert.equal(names(accessory).primary, 'Luce Studio');
+    assert.equal(names(accessory).primary, 'Luce Solaio');
 });

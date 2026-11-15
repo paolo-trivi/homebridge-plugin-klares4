@@ -4,14 +4,13 @@ import { stripDevicePrefix } from '../device-id';
 import { LogLevel } from '../log-levels';
 import { updateThermostatStatus } from '../thermostat-state';
 import { parseFloatInRange } from '../websocket/device-state-projector';
-import { hasFreshThermostatRealtimeState } from './thermostat-status-updater';
+import { forEachIsolated } from '../isolation';
 import type { SystemTemperatureData, WebSocketClientState } from './types';
 
 interface SystemTemperatureUpdaterDeps {
     state: WebSocketClientState;
     log: Logger;
     logLevel: LogLevel;
-    debugEnabled: boolean;
     emitDeviceDiscovered: (device: KseniaDevice) => void;
     emitDeviceStatusUpdate: (device: KseniaDevice) => void;
 }
@@ -20,8 +19,8 @@ export class SystemTemperatureUpdater {
     constructor(private readonly deps: SystemTemperatureUpdaterDeps) {}
 
     public updateSystemTemperatures(systemData: SystemTemperatureData[]): void {
-        systemData.forEach((system: SystemTemperatureData): void => {
-            if (this.deps.debugEnabled) {
+        forEachIsolated(this.deps.log, 'STATUS_SYSTEM entry', systemData, (system: SystemTemperatureData): void => {
+            if (this.deps.logLevel >= LogLevel.DEBUG) {
                 this.deps.log.debug(`System data ${system.ID}: ${JSON.stringify(system)}`);
             }
 
@@ -64,54 +63,7 @@ export class SystemTemperatureUpdater {
                     this.deps.emitDeviceStatusUpdate(tempDevice);
                 }
 
-                this.deps.state.devices.forEach((device: KseniaDevice): void => {
-                    if (device.type !== 'thermostat') {
-                        return;
-                    }
-
-                    const thermostatOutputId = stripDevicePrefix(device.id);
-                    if (hasFreshThermostatRealtimeState(this.deps.state, thermostatOutputId)) {
-                        return;
-                    }
-
-                    const mappedSensorId = this.deps.state.thermostatToDomus.get(thermostatOutputId);
-                    const freshnessMs = this.deps.state.domusThermostatConfig.sensorFreshnessMs;
-                    const latestDomus = mappedSensorId
-                        ? this.deps.state.domusLatest.get(mappedSensorId)
-                        : undefined;
-                    const isDomusFresh =
-                        latestDomus !== undefined &&
-                        Date.now() - latestDomus.ts <= freshnessMs;
-
-                    if (this.deps.state.domusThermostatConfig.enabled && mappedSensorId && isDomusFresh) {
-                        return;
-                    }
-
-                    if (
-                        this.deps.debugEnabled &&
-                        this.deps.state.domusThermostatConfig.enabled &&
-                        mappedSensorId &&
-                        !isDomusFresh
-                    ) {
-                        this.deps.log.debug(
-                            `DOMUS stale fallback for thermostat_${thermostatOutputId}: sensor_${mappedSensorId}`,
-                        );
-                    }
-
-                    if (
-                        device.status.targetTemperature === undefined ||
-                        device.status.targetTemperature === null
-                    ) {
-                        updateThermostatStatus(device, {
-                            targetTemperature: Math.round(internalTemp + 1),
-                        });
-                    }
-
-                    updateThermostatStatus(device, {
-                        currentTemperature: internalTemp,
-                    });
-                    this.deps.emitDeviceStatusUpdate(device);
-                });
+                this.applyPanelTemperatureFallback(internalTemp);
             }
 
             if (externalTemp !== undefined && !isNaN(externalTemp)) {
@@ -142,5 +94,30 @@ export class SystemTemperatureUpdater {
                 this.deps.log.debug('System temperatures updated');
             }
         });
+    }
+
+    /**
+     * The panel's internal temperature stands in only for a thermostat that has
+     * no source at all, known only once the initial realtime has arrived: never reported in STATUS_TEMPERATURES and no mapped DOMUS
+     * sensor that has reported. The panel sends those only when a value changes,
+     * so a source that stays silent is a stable room, not a lost one.
+     */
+    private applyPanelTemperatureFallback(internalTemp: number): void {
+        const state = this.deps.state;
+        // Until the initial realtime (REALTIME_RES) has been applied nobody can
+        // tell a thermostat without a source from one not reported yet.
+        if (!state.hasCompletedInitialSync) return;
+        for (const device of state.devices.values()) {
+            if (device.type !== 'thermostat') continue;
+            const thermostatOutputId = stripDevicePrefix(device.id);
+            if (state.thermostatRealtimeByOutputId.has(thermostatOutputId)) continue;
+            const mappedSensorId = state.domusThermostatConfig.enabled
+                ? state.thermostatToDomus.get(thermostatOutputId)
+                : undefined;
+            if (mappedSensorId !== undefined && state.domusLatest.get(mappedSensorId)?.temp !== undefined) continue;
+            if (updateThermostatStatus(device, { currentTemperature: internalTemp })) {
+                this.deps.emitDeviceStatusUpdate(device);
+            }
+        }
     }
 }

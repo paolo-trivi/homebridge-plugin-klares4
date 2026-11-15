@@ -30,7 +30,7 @@ test('applies thermostat config from PRG_THERMOSTATS program id', () => {
   });
   const updates = [];
 
-  const thermostat = createThermostat('19', 'Riscaldamento Studio');
+  const thermostat = createThermostat('19', 'Riscaldamento Solaio');
   state.devices.set(thermostat.id, thermostat);
   state.thermostatProgramById.set('5', { ID: '5', PERIPH: { PID: '5' }, HEATING_OUT: '19' });
   state.thermostatProgramIdByOutputId.set('19', '5');
@@ -62,7 +62,7 @@ test('manual command id override has precedence in config sync', () => {
     sensorFreshnessMs: 300000,
   });
 
-  const thermostat = createThermostat('21', 'Riscaldamento Matrimoniale');
+  const thermostat = createThermostat('21', 'Riscaldamento Foresteria');
   state.devices.set(thermostat.id, thermostat);
   state.thermostatProgramById.set('3', { ID: '3', PERIPH: { PID: '4' }, HEATING_OUT: '21' });
   state.thermostatProgramIdByOutputId.set('21', '3');

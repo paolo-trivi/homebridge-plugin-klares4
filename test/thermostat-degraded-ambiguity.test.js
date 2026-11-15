@@ -17,8 +17,16 @@ function makeService({ thermostats, cfgIds, manualCommandPairs = [] }) {
         });
         if (sensorId) state.thermostatToDomus.set(outputId, sensorId);
     }
+    // Distinct setpoints: a guess is accepted only when exactly one cfg matches the realtime (M2).
+    const tmOf = (id) => (18 + Number(id)).toFixed(1);
+    const cfgOf = (id) => ({ ID: id, ACT_MODE: 'MAN', ACT_SEA: 'WIN', WIN: { TM: tmOf(id) }, SUM: { TM: '26.0' } });
     for (const id of cfgIds) {
-        state.thermostatCfgById.set(id, { ID: id, ACT_MODE: 'MAN', ACT_SEA: 'WIN', WIN: { TM: '21.0' }, SUM: { TM: '26.0' } });
+        state.thermostatCfgById.set(id, cfgOf(id));
+    }
+    // TH-04: a guessed cfg is used only if it matches the thermostat's realtime state.
+    for (const [outputId, sensorId] of Object.entries(thermostats)) {
+        const key = sensorId ?? outputId;
+        state.thermostatRealtimeSnapshotById.set(key, { mode: 'heat', season: 'WIN', targetTemperature: Number(tmOf(key)), updatedAt: 0 });
     }
     const errors = [];
     const log = { info() {}, warn() {}, debug() {}, error: (...args) => errors.push(args.join(' ')) };
@@ -31,6 +39,8 @@ function makeService({ thermostats, cfgIds, manualCommandPairs = [] }) {
     });
     service.sendKseniaCommand = async (cmd, _type, payload) => {
         if (cmd === 'WRITE_CFG') writes.push(payload.CFG_THERMOSTATS[0]);
+        // TH-02: setpoints re-read their cfg; the panel answers with it.
+        if (cmd === 'READ' && cfgIds.includes(payload.ID_READ)) state.thermostatCfgById.set(payload.ID_READ, cfgOf(payload.ID_READ));
     };
     return { service, writes, errors };
 }

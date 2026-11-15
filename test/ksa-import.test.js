@@ -9,12 +9,12 @@ test('parseKsaProgramFromBuffer extracts program arrays from embedded payload', 
   const payload = {
     INFO: { TYPE: 'BCK' },
     DATA: {
-      PRG_OUTPUTS: [{ ID: '21', DES: 'Riscaldamento Matrimoniale', CAT: 'THERMO' }],
-      PRG_ZONES: [{ ID: '24', DES: 'Finestra Matrimoniale', CAT: 'PMC' }],
-      PRG_SCENARIOS: [{ ID: '7', DES: 'Apri Zona Giorno' }],
-      PRG_BUS_HAS: [{ ID: '4', DOMUS: { DES: 'Term. Matrimoniale' } }],
-      PRG_THERMOSTATS: [{ ID: '3', DES: 'Termostato Matrimoniale', PERIPH: { PID: '4' }, HEATING_OUT: '21' }],
-      PRG_ROOMS: [{ ID: '5', DES: 'Matrimoniale' }],
+      PRG_OUTPUTS: [{ ID: '21', DES: 'Riscaldamento Foresteria', CAT: 'THERMO' }],
+      PRG_ZONES: [{ ID: '24', DES: 'Finestra Foresteria', CAT: 'PMC' }],
+      PRG_SCENARIOS: [{ ID: '7', DES: 'Apri Ala Est' }],
+      PRG_BUS_HAS: [{ ID: '4', DOMUS: { DES: 'Term. Foresteria' } }],
+      PRG_THERMOSTATS: [{ ID: '3', DES: 'Termostato Foresteria', PERIPH: { PID: '4' }, HEATING_OUT: '21' }],
+      PRG_ROOMS: [{ ID: '5', DES: 'Foresteria' }],
       PRG_MAPS: [{ ROOM: '5', OT: 'prgOutputs', OID: '21' }],
     },
     CRC_16: '0x0000',
@@ -38,20 +38,20 @@ test('parseKsaProgramFromBuffer extracts program arrays from embedded payload', 
 test('deriveKsaImportResult generates expected thermostat routing', () => {
   const program = {
     outputs: [
-      { ID: '20', DES: 'Riscaldamento Bagno', CAT: 'THERMO' },
-      { ID: '21', DES: 'Riscaldamento Matrimoniale', CAT: 'THERMO' },
+      { ID: '20', DES: 'Riscaldamento Atrio', CAT: 'THERMO' },
+      { ID: '21', DES: 'Riscaldamento Foresteria', CAT: 'THERMO' },
     ],
     zones: [],
     scenarios: [],
     busHas: [
-      { ID: '3', DOMUS: { DES: 'Term. Bagno Grande' } },
-      { ID: '4', DOMUS: { DES: 'Term. Matrimoniale' } },
+      { ID: '3', DOMUS: { DES: 'Term. Atrio Grande' } },
+      { ID: '4', DOMUS: { DES: 'Term. Foresteria' } },
     ],
     thermostats: [
-      { ID: '3', DES: 'Termostato Matrimoniale', PERIPH: { PID: '4' }, HEATING_OUT: '21' },
-      { ID: '4', DES: 'Termostato Bagno', PERIPH: { PID: '3' }, HEATING_OUT: '20' },
+      { ID: '3', DES: 'Termostato Foresteria', PERIPH: { PID: '4' }, HEATING_OUT: '21' },
+      { ID: '4', DES: 'Termostato Atrio', PERIPH: { PID: '3' }, HEATING_OUT: '20' },
     ],
-    rooms: [{ ID: '5', DES: 'Matrimoniale' }, { ID: '4', DES: 'Bagno' }],
+    rooms: [{ ID: '5', DES: 'Foresteria' }, { ID: '4', DES: 'Atrio' }],
     maps: [
       { ROOM: '5', OT: 'prgOutputs', OID: '21' },
       { ROOM: '4', OT: 'prgOutputs', OID: '20' },
@@ -80,7 +80,7 @@ test('initial websocket state preloads thermostat program maps from KSA cache', 
   const state = createInitialWebSocketClientState(undefined, {
     sourceFileHash: 'abc',
     parsedAt: '2026-03-13T00:00:00.000Z',
-    thermostatPrograms: [{ id: '3', description: 'Termostato Matrimoniale', heatingOutputId: '21', domusSensorId: '4' }],
+    thermostatPrograms: [{ id: '3', description: 'Termostato Foresteria', heatingOutputId: '21', domusSensorId: '4' }],
     thermostatProgramIdByOutputId: { '21': '3' },
     domusSensorIdByThermostatProgramId: { '3': '4' },
     outputNamesById: {},
@@ -104,7 +104,7 @@ test('F35: IDs named like Object.prototype members never resolve to inherited va
   const program = emptyProgram({
     outputs: [{ ID: '21', DES: 'Riscaldamento Test', CAT: 'THERMO' }],
     thermostats: [{ ID: 'constructor', DES: 'Termostato', HEATING_OUT: '21' }],
-    rooms: [{ ID: '5', DES: 'Sala' }],
+    rooms: [{ ID: '5', DES: 'Veranda' }],
     maps: [{ ROOM: 'toString', OT: 'prgOutputs', OID: '21' }],
   });
   const result = deriveKsaImportResult(program, undefined, Buffer.from('x'));
@@ -122,7 +122,7 @@ test('F35: a null or non-object entry is skipped instead of aborting the import'
     scenarios: [null],
     busHas: [null, { ID: '3' }],
     thermostats: [null],
-    rooms: [null, { ID: '4', DES: 'Sala' }],
+    rooms: [null, { ID: '4', DES: 'Veranda' }],
     maps: [null, { ROOM: '4', OT: 'prgZones', OID: '2' }],
   });
   const result = deriveKsaImportResult(program, undefined, Buffer.from('x'));

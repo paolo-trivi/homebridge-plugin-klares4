@@ -1,6 +1,8 @@
 export interface ParsedCommandTopic {
     deviceType: string;
     deviceIdentifier: string;
+    /** The room level of `<prefix>/<room>/<type>/<id>/set`, absent on the direct form. */
+    room?: string;
 }
 
 /**
@@ -13,49 +15,26 @@ export function parseCommandTopic(topic: string, topicPrefix?: string): ParsedCo
         // Same raw prefix as the subscription filter `${topicPrefix}/+/+/set`.
         const prefix = `${topicPrefix}/`;
         if (!topic.startsWith(prefix)) return null;
-        const levels = topic.slice(prefix.length).split('/');
-        if (levels.length === 3 && levels[2] === 'set') {
-            return { deviceType: levels[0], deviceIdentifier: levels[1] };
-        }
-        if (levels.length === 4 && levels[3] === 'set') {
-            return { deviceType: levels[1], deviceIdentifier: levels[2] };
-        }
-        return null;
+        return parseCommandLevels(topic.slice(prefix.length).split('/'));
     }
+    return parseCommandLevels(topic.split('/').slice(2));
+}
 
-    const topicParts = topic.split('/');
-
-    if (topicParts.length === 5 && topicParts[4] === 'set') {
-        return {
-            deviceType: topicParts[2],
-            deviceIdentifier: topicParts[3],
-        };
+/** The levels after the prefix: `<type>/<id>/set` or `<room>/<type>/<id>/set`. */
+function parseCommandLevels(levels: string[]): ParsedCommandTopic | null {
+    if (levels.at(-1) !== 'set') return null;
+    if (levels.length === 3) {
+        const [deviceType, deviceIdentifier] = levels;
+        if (deviceType !== undefined && deviceIdentifier !== undefined) return { deviceType, deviceIdentifier };
     }
-
-    if (topicParts.length === 6 && topicParts[5] === 'set') {
-        return {
-            deviceType: topicParts[3],
-            deviceIdentifier: topicParts[4],
-        };
+    if (levels.length === 4) {
+        const [room, deviceType, deviceIdentifier] = levels;
+        if (room !== undefined && deviceType !== undefined && deviceIdentifier !== undefined) return { room, deviceType, deviceIdentifier };
     }
-
     return null;
 }
 
-export function createDeviceSlug(deviceName: string): string {
-    return deviceName
-        .toLowerCase()
-        .replace(/\s+/g, '_')
-        .replace(/[àáâãäå]/g, 'a')
-        .replace(/[èéêë]/g, 'e')
-        .replace(/[ìíîï]/g, 'i')
-        .replace(/[òóôõö]/g, 'o')
-        .replace(/[ùúûü]/g, 'u')
-        .replace(/[ç]/g, 'c')
-        .replace(/[^a-z0-9_]/g, '')
-        .replace(/_+/g, '_')
-        .replace(/^_|_$/g, '');
-}
+export { createDeviceSlug } from '../device-slug';
 
 /**
  * Makes a free-text value (e.g. a room name) safe as a single topic level:
@@ -78,4 +57,17 @@ export function buildStateTopic(
     }
 
     return `${topicPrefix}/${deviceType}/${deviceSlug}/state`;
+}
+
+/** `<prefix>/status`: retained availability of the bridge and of the panel connection. */
+export function buildStatusTopic(topicPrefix: string): string {
+    return `${topicPrefix}/status`;
+}
+
+/**
+ * The prefix is published to verbatim, so it must be a valid topic name:
+ * `+`, `#` and NUL are not allowed (MQTT-3.3.2-2, MQTT-4.7.3-2).
+ */
+export function isValidTopicPrefix(topicPrefix: string): boolean {
+    return topicPrefix !== '' && !/[+#\u0000]/.test(topicPrefix);
 }

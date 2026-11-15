@@ -14,6 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The job names are the branch-protection check names: keep "Validate (Node N)".
   validate:
     name: Validate (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
@@ -21,42 +22,155 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24']
+        # 22, 24 and 26 are the Node lines Homebridge 2.x supports; the official
+        # Homebridge image runs 26.
+        node: ['22', '24', '26']
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Source size gate
-        run: npm run check:max-lines
+      # Source size gate, strict type check (unused locals and parameters
+      # included) and the whole test suite, including the real-stack contract
+      # tests against the Homebridge pinned in the lockfile.
+      - name: Verify
+        run: npm run verify
 
-      - name: TypeScript strict checks
-        run: npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+  engines-floor:
+    name: Engines floor (Node 22.12.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
-      - name: Test suite
-        run: npm test
-
-      - name: Build package
-        run: npm run build
-
-      - name: Upload dist artifact
-        if: matrix.node == '22'
-        uses: actions/upload-artifact@v7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: dist-node22
-          path: |
-            dist/**
-            config.schema.json
-            package.json
-            README.md
-            CHANGELOG.md
-          retention-days: 7
+          persist-credentials: false
+
+      # Keep this equal to the lower bound of "engines.node" in package.json.
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.12.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # matter.js 0.18 (the Matter stack of Homebridge 2.5) installs only on Node 22.13 or
+      # later, so at the floor the tests that boot the real Matter stack cannot run.
+      # Everything else does: the line gate, the type check, the build and the other tests.
+      - name: Verify (without the real Matter stack)
+        run: |
+          npm run check:max-lines
+          npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+          npm run build
+          node scripts/run-tests.js --no-real-stack
+
+  contract:
+    name: Contract (Homebridge ${{ matrix.homebridge }}.x)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        homebridge: ['2.4', '2.5']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # The lockfile pins one Homebridge. Swap it for the version under test in
+      # node_modules only: package.json and the lockfile stay as committed.
+      - name: Install Homebridge ${{ matrix.homebridge }}.x
+        run: npm install --no-save --no-package-lock --ignore-scripts "homebridge@~${{ matrix.homebridge }}.0"
+
+      - name: Show installed versions
+        run: |
+          node -e "
+            const read = (p) => JSON.parse(require('node:fs').readFileSync(p, 'utf8')).version;
+            console.log('homebridge', read('node_modules/homebridge/package.json'));
+            console.log('@matter/main', read('node_modules/@matter/main/package.json'));
+          "
+
+      # Every test file that boots the real Homebridge Matter stack (the ones
+      # loading test/fixtures/real-matter-stack), one at a time, not only the
+      # contract file.
+      - name: Real Homebridge Matter stack tests
+        run: npm run test:real-stack
+
+      - name: Explain a contract failure
+        if: failure()
+        run: |
+          echo "::error title=Real-stack tests failed on Homebridge ${{ matrix.homebridge }}.x::The plugin does not work with this Homebridge/matter.js line, or the test harness (test/fixtures/real-matter-stack.js and the tests that use it) relies on behaviour that differs in it. Read the first failing test above."
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Fails below the thresholds set in the test:coverage script.
+      - name: Test suite with coverage thresholds
+        run: npm run test:coverage
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Packs with the clean release build and checks the tarball against the
+      # allowlist: no source maps, no sources, no install-time scripts.
+      - name: Check the npm tarball
+        run: npm run check:pack

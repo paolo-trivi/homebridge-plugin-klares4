@@ -37,6 +37,7 @@ function createRegistryHarness() {
 
   const log = {
     info: () => undefined,
+    debug: () => undefined,
     warn: () => undefined,
   };
 

@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
+import { toErrorMessage } from '../errors';
 
 export class WsTransport {
     constructor(private readonly log: Logger) {}
@@ -29,7 +30,7 @@ export class WsTransport {
         } catch (error: unknown) {
             this.log.error(
                 'Heartbeat ping error:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }
@@ -49,10 +50,11 @@ export class WsTransport {
         if (!ws) {
             return;
         }
+        // Unref'd: a socket still closing must not keep the process alive at shutdown.
         setTimeout((): void => {
             if (ws.readyState !== WebSocket.CLOSED) {
                 ws.terminate();
             }
-        }, delayMs);
+        }, delayMs).unref();
     }
 }

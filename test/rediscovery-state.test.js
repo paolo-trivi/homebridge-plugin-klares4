@@ -6,6 +6,7 @@ const { StatusUpdater } = require('../dist/websocket-client/status-updater.js');
 const { SystemTemperatureUpdater } = require('../dist/websocket-client/system-temperature-updater.js');
 const { ThermostatStatusUpdater } = require('../dist/websocket-client/thermostat-status-updater.js');
 const { MessageService } = require('../dist/websocket-client/message-service.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 const log = { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined };
 
@@ -31,10 +32,9 @@ function makePipeline() {
         },
         log,
         logLevel: 1,
-        debugEnabled: false,
-        statusUpdater: new StatusUpdater({ state, log, logLevel: 1, debugEnabled: false, emitDeviceStatusUpdate: emitStatus }),
+        statusUpdater: new StatusUpdater({ state, log, logLevel: 1, emitDeviceStatusUpdate: emitStatus }),
         systemTemperatureUpdater: new SystemTemperatureUpdater({
-            state, log, logLevel: 1, debugEnabled: false, emitDeviceDiscovered: () => undefined, emitDeviceStatusUpdate: emitStatus,
+            state, log, logLevel: 1, emitDeviceDiscovered: () => undefined, emitDeviceStatusUpdate: emitStatus,
         }),
         thermostatStatusUpdater: new ThermostatStatusUpdater({ state, emitDeviceStatusUpdate: emitStatus }),
         commandService: { requestSystemData: async () => undefined },
@@ -52,7 +52,7 @@ function makePipeline() {
     return { state, events, discover, observe };
 }
 
-test('F03: a reconnect re-discovery keeps the observed state instead of the parser defaults', () => {
+test('F03: a reconnect re-discovery keeps the observed state instead of the parser defaults', (t) => {
     const p = makePipeline();
     p.discover();
     p.observe();
@@ -70,7 +70,7 @@ test('F03: a reconnect re-discovery keeps the observed state instead of the pars
     assert.equal(p.state.devices.get('cover_7').status.position, 80);
 });
 
-test('F03: a renamed device keeps its state and takes the new name', () => {
+test('F03: a renamed device keeps its state and takes the new name', (t) => {
     const p = makePipeline();
     p.discover();
     p.observe();
@@ -85,7 +85,7 @@ test('F03: a renamed device keeps its state and takes the new name', () => {
     assert.equal(light.status.on, true);
 });
 
-test('F03: freshly parsed devices are flagged as not yet observed until a real status arrives', () => {
+test('F03: freshly parsed devices are flagged as not yet observed until a real status arrives', (t) => {
     const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
     const { hasObservedState } = require('../dist/device-observation.js');
     const client = new KseniaWebSocketClient('127.0.0.1', 1, false, 'hb', '0000', log, {});
@@ -104,22 +104,21 @@ test('F03: freshly parsed devices are flagged as not yet observed until a real s
     assert.equal(hasObservedState(devices.get('sensor_temp_1')), true);
 });
 
-test('F03: at boot a Matter endpoint restored from cache is not overwritten with discovery placeholders', async () => {
+test('F03: at boot a Matter endpoint restored from cache is not overwritten with discovery placeholders', async (t) => {
     process.env.KLARES4_MATTER_STATE_BOOTSTRAP_MS = '20';
     process.env.KLARES4_MATTER_REGISTER_POLL_MS = '10';
     const fs = require('node:fs');
-    const os = require('node:os');
-    const path = require('node:path');
+        const path = require('node:path');
     const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
     const { markStatusPlaceholder } = require('../dist/device-observation.js');
-    const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+    const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
 
-    const hb = makeHb24MatterApi({
+    const hb = makeHbMatterApi({
         restored: [{ UUID: 'cover_7', deviceType: deviceTypes.WindowCovering, clusters: { windowCovering: {} } }],
     });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: log, getWsClient: () => undefined,
-        storagePath: fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-boot-')),
+        storagePath: tmpStorage(t, 'klares4-boot-'),
     });
     registry.configureCachedAccessory({
         UUID: 'cover_7', displayName: 'Tapparella Test', deviceType: deviceTypes.WindowCovering,
@@ -135,7 +134,7 @@ test('F03: at boot a Matter endpoint restored from cache is not overwritten with
     assert.ok(!positions.includes(10000), `placeholder "closed" pushed to Matter: ${JSON.stringify(positions)}`);
 });
 
-test('F03: at boot a cached HomeKit accessory keeps its cached state until the panel reports one', () => {
+test('F03: at boot a cached HomeKit accessory keeps its cached state until the panel reports one', (t) => {
     const { AccessoryRegistry } = require('../dist/platform/accessory-registry.js');
     const { markStatusPlaceholder } = require('../dist/device-observation.js');
     const cached = { UUID: 'uuid-light_5', displayName: 'Faretti', context: { device: { id: 'light_5', type: 'light', name: 'Faretti', description: '', status: { on: true, dimmable: false } } } };

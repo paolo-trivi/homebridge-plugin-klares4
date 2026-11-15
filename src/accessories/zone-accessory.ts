@@ -15,6 +15,7 @@ export class ZoneAccessory {
     private lastActive: boolean;
     private lastFault: boolean;
     private lastBypassed: boolean;
+    private lastTampered: boolean;
 
     constructor(
         private readonly platform: Lares4Platform,
@@ -25,6 +26,7 @@ export class ZoneAccessory {
         this.lastActive = this.isZoneActive(this.device);
         this.lastFault = this.device.status.fault;
         this.lastBypassed = this.device.status.bypassed;
+        this.lastTampered = this.isTampered(this.device);
 
         const accessoryInfoService = this.accessory.getService(
             this.platform.Service.AccessoryInformation,
@@ -80,11 +82,11 @@ export class ZoneAccessory {
     }
 
     /**
-     * 0 = not tampered. The zone status exposes no tamper field, so this is
-     * never 1: a bypass is not a tamper and is expressed by StatusActive=false.
+     * 0 = not tampered, 1 = tampered, from the zone's `T` field. A bypass is
+     * not a tamper: it is expressed by StatusActive=false.
      */
     public async getStatusTampered(): Promise<CharacteristicValue> {
-        return 0;
+        return this.isTampered(this.device) ? 1 : 0;
     }
 
     private updateCharacteristics(): void {
@@ -103,7 +105,10 @@ export class ZoneAccessory {
             this.device.status.fault ? 1 : 0,
         );
 
-        this.service.updateCharacteristic(this.platform.Characteristic.StatusTampered, 0);
+        this.service.updateCharacteristic(
+            this.platform.Characteristic.StatusTampered,
+            this.isTampered(this.device) ? 1 : 0,
+        );
     }
 
     public updateStatus(newDevice: KseniaZone): void {
@@ -119,7 +124,7 @@ export class ZoneAccessory {
         );
 
         if (this.lastOpen !== newOpen) {
-            this.platform.log.info(
+            this.platform.log.debug(
                 `${this.device.name}: ${newOpen ? 'Open' : 'Closed'}`,
             );
         }
@@ -130,7 +135,7 @@ export class ZoneAccessory {
         );
 
         if (this.lastActive !== newActive) {
-            this.platform.log.info(
+            this.platform.log.debug(
                 `${this.device.name}: ${newActive ? 'Active' : 'Inactive'}`,
             );
         }
@@ -148,13 +153,26 @@ export class ZoneAccessory {
             this.platform.log.warn(`${this.device.name}: Zone bypassed`);
         }
 
+        const newTampered = this.isTampered(newDevice);
+        this.service.updateCharacteristic(this.platform.Characteristic.StatusTampered, newTampered ? 1 : 0);
+        if (this.lastTampered !== newTampered && newTampered) {
+            this.platform.log.warn(`${this.device.name}: Tamper detected`);
+        }
+
         this.lastOpen = newOpen;
         this.lastActive = newActive;
         this.lastFault = newFault;
         this.lastBypassed = newBypassed;
+        this.lastTampered = newTampered;
         this.platform.log.debug(`Updated zone state ${this.device.name}: ${this.getZoneStatusString()}`);
     }
-    private isZoneActive(device: KseniaZone): boolean { return !device.status.bypassed; }
+    private isZoneActive(device: KseniaZone): boolean {
+        return !device.status.bypassed;
+    }
+
+    private isTampered(device: KseniaZone): boolean {
+        return device.status.tampered === true;
+    }
 
     private getZoneStatusString(): string {
         const status: string[] = [];
@@ -162,6 +180,7 @@ export class ZoneAccessory {
         if (this.device.status.armed) status.push('Armed');
         if (this.device.status.fault) status.push('Fault');
         if (this.device.status.bypassed) status.push('Bypassed');
+        if (this.isTampered(this.device)) status.push('Tampered');
 
         return status.length > 0 ? status.join(', ') : 'OK';
     }

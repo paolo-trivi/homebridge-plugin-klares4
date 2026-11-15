@@ -38,7 +38,6 @@ function createStatusUpdater(state, updates = []) {
     state,
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     emitDeviceStatusUpdate: (device) => updates.push(device.id),
   });
 }
@@ -48,7 +47,6 @@ function createSystemTemperatureUpdater(state, updates = []) {
     state,
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: true,
     emitDeviceDiscovered: () => undefined,
     emitDeviceStatusUpdate: (device) => updates.push(device.id),
   });
@@ -128,7 +126,7 @@ test('STATUS_SYSTEM does not overwrite thermostat when mapped DOMUS sensor is fr
   assert.equal(thermostat.status.currentTemperature, 22);
 });
 
-test('STATUS_SYSTEM applies fallback when mapping is missing or stale', () => {
+test('STATUS_SYSTEM applies fallback only when the thermostat has no source (TH-03: a silent sensor is a stable room)', () => {
   const state = createInitialWebSocketClientState({
     enabled: true,
     manualPairs: [],
@@ -147,10 +145,11 @@ test('STATUS_SYSTEM applies fallback when mapping is missing or stale', () => {
 
   state.thermostatToDomus.set('18', '1');
   state.domusLatest.set('1', { temp: 23, hum: 50, ts: Date.now() - 600000 });
+  state.hasCompletedInitialSync = true; // L1: the fallback waits for the initial realtime
 
   updater.updateSystemTemperatures([{ ID: '1', TEMP: { IN: '19.0', OUT: 'NA' } }]);
 
-  assert.equal(mappedThermostat.status.currentTemperature, 19);
+  assert.equal(mappedThermostat.status.currentTemperature, 23);
   assert.equal(unmappedThermostat.status.currentTemperature, 19);
 });
 
@@ -169,7 +168,6 @@ test('integration sequence MULTI_TYPES -> STATUS_BUS_HA_SENSORS -> STATUS_SYSTEM
     callbacks: {},
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
     thermostatStatusUpdater,
@@ -189,10 +187,10 @@ test('integration sequence MULTI_TYPES -> STATUS_BUS_HA_SENSORS -> STATUS_SYSTEM
     PAYLOAD_TYPE: 'MULTI_TYPES',
     PAYLOAD: {
       OUTPUTS: [
-        { ID: '18', DES: 'Riscaldamento Sala', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
-        { ID: '34', DES: 'Raffrescamento Sala', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
+        { ID: '18', DES: 'Riscaldamento Veranda', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
+        { ID: '34', DES: 'Raffrescamento Veranda', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' },
       ],
-      BUS_HAS: [{ ID: '1', DES: 'Term. Sala', TYPE: 'DOMUS', ENABLED: 'YES' }],
+      BUS_HAS: [{ ID: '1', DES: 'Term. Veranda', TYPE: 'DOMUS', ENABLED: 'YES' }],
     },
   });
 
@@ -250,7 +248,6 @@ test('integration normalizes DOMUS ids between BUS_HAS and STATUS_BUS_HA_SENSORS
     callbacks: {},
     log: createLogger(),
     logLevel: 2,
-    debugEnabled: false,
     statusUpdater,
     systemTemperatureUpdater,
     thermostatStatusUpdater,
@@ -269,8 +266,8 @@ test('integration normalizes DOMUS ids between BUS_HAS and STATUS_BUS_HA_SENSORS
     CRC_16: '0x0000',
     PAYLOAD_TYPE: 'MULTI_TYPES',
     PAYLOAD: {
-      OUTPUTS: [{ ID: '18', DES: 'Riscaldamento Sala', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' }],
-      BUS_HAS: [{ ID: '01', DES: 'Term. Sala', TYPE: 'DOMUS', ENABLED: 'YES' }],
+      OUTPUTS: [{ ID: '18', DES: 'Riscaldamento Veranda', TYPE: 'THERM', STATUS: '0', ENABLED: 'YES', CAT: 'THERMO' }],
+      BUS_HAS: [{ ID: '01', DES: 'Term. Veranda', TYPE: 'DOMUS', ENABLED: 'YES' }],
     },
   });
 

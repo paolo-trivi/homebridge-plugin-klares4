@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -13,93 +12,11 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
 const { waitFor } = require('./fixtures/wait-for.js');
-
-function tmpStorage() {
-    return fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-test-'));
-}
-
-// Mirrors api.matter.deviceTypes — we don't need the real Matter device types, just placeholder
-// objects (the registry forwards them blindly to the mock register).
-const fakeDeviceTypes = {
-    OnOffLight: { _t: 'OnOffLight' },
-    DimmableLight: { _t: 'DimmableLight' },
-    WindowCovering: { _t: 'WindowCovering' },
-    Thermostat: { _t: 'Thermostat' },
-    TemperatureSensor: { _t: 'TemperatureSensor' },
-    HumiditySensor: { _t: 'HumiditySensor' },
-    LightSensor: { _t: 'LightSensor' },
-    MotionSensor: { _t: 'MotionSensor' },
-    ContactSensor: { _t: 'ContactSensor' },
-    OnOffSwitch: { _t: 'OnOffSwitch' },
-    OnOffOutlet: { _t: 'OnOffOutlet' },
-};
+const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
 
 function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
-}
-
-function makeApi({ registerImpl, updateImpl, unregisterImpl, initiallyQueryable = [] } = {}) {
-    const registered = [];
-    // Endpoints restored from the Homebridge Matter cache are live (and
-    // queryable) before the plugin registers anything in this session.
-    const queryable = new Set(initiallyQueryable);
-    const updates = [];
-    const metadataUpdates = [];
-    const unregistered = [];
-
-    const matter = {
-        deviceTypes: fakeDeviceTypes,
-        registerPlatformAccessories: async (_p, _pl, accessories) => {
-            for (const a of accessories) {
-                if (registerImpl) {
-                    const res = registerImpl(a);
-                    if (res === 'throw') throw new Error('synthetic registration failure');
-                    if (res !== 'missing-state') queryable.add(a.UUID);
-                } else {
-                    queryable.add(a.UUID);
-                }
-                registered.push({
-                    UUID: a.UUID,
-                    displayName: a.displayName,
-                    manufacturer: a.manufacturer,
-                    model: a.model,
-                    serialNumber: a.serialNumber,
-                    firmwareRevision: a.firmwareRevision,
-                    deviceType: a.deviceType,
-                });
-            }
-        },
-        updatePlatformAccessories: async (accessories) => {
-            for (const a of accessories) {
-                metadataUpdates.push({
-                    UUID: a.UUID,
-                    displayName: a.displayName,
-                    manufacturer: a.manufacturer,
-                    model: a.model,
-                    serialNumber: a.serialNumber,
-                    firmwareRevision: a.firmwareRevision,
-                    deviceType: a.deviceType,
-                });
-            }
-        },
-        updateAccessoryState: async (uuid, clusterName, attributes, partId) => {
-            if (updateImpl) updateImpl(uuid, clusterName, attributes, partId);
-            updates.push({ uuid, clusterName, attributes, partId });
-        },
-        getAccessoryState: async (uuid) => {
-            return queryable.has(uuid) ? {} : undefined;
-        },
-        unregisterPlatformAccessories: async (_p, _pl, accessories) => {
-            if (unregisterImpl) unregisterImpl(accessories);
-            for (const a of accessories) {
-                queryable.delete(a.UUID);
-                unregistered.push(a.UUID);
-            }
-        },
-    };
-
-    const api = { matter };
-    return { api, registered, updates, metadataUpdates, unregistered };
 }
 
 function lightDevice(id = 'light_1', extras = {}) {
@@ -116,7 +33,7 @@ function thermostatDevice(id = 'thermostat_18', extras = {}) {
     return {
         id,
         type: 'thermostat',
-        name: 'Riscaldamento Sala',
+        name: 'Riscaldamento Veranda',
         description: '',
         currentTemperature: 21,
         targetTemperature: 20,
@@ -137,9 +54,9 @@ const FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS = 2400;
 
 // ---------------------------------------------------------------------------
 
-test('does not crash when api.matter is undefined', async () => {
+test('does not crash when api.matter is undefined', async (t) => {
     const api = { matter: undefined };
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     assert.equal(registry.isEnabled, false);
     await registry.addOrUpdateAccessory(lightDevice());
     await registry.updateAccessoryState(lightDevice());
@@ -148,9 +65,9 @@ test('does not crash when api.matter is undefined', async () => {
     assert.equal(registry.getStatus('light_1'), undefined);
 });
 
-test('addOrUpdateAccessory: register → pending → settled → registered', async () => {
-    const { api, registered, metadataUpdates } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('addOrUpdateAccessory: register → pending → settled → registered', async (t) => {
+    const { api, registerCalls: registered, metadataUpdates } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(lightDevice());
     assert.equal(registered.length, 1);
     assert.equal(registry.getStatus('light_1'), 'pending');
@@ -164,9 +81,9 @@ test('addOrUpdateAccessory: register → pending → settled → registered', as
     assert.match(registered[0].firmwareRevision, /^\d+\.\d+\.\d+$/);
 });
 
-test('status updates received during the settle window are queued, not pushed', async () => {
-    const { api, updates } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('status updates received during the settle window are queued, not pushed', async (t) => {
+    const { api, updates } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(lightDevice('light_2'));
     assert.equal(registry.getStatus('light_2'), 'pending');
     assert.equal(updates.length, 0);
@@ -175,22 +92,22 @@ test('status updates received during the settle window are queued, not pushed', 
     assert.equal(registry.getPendingCount('light_2'), 1, 'state should be queued');
 });
 
-test('queued updates are flushed after the settle window', async () => {
-    const { api, updates } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('queued updates are flushed after the settle window', async (t) => {
+    const { api, updates } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(lightDevice('light_3'));
     await registry.updateAccessoryState({ ...lightDevice('light_3'), status: { on: false, dimmable: false } });
     assert.equal(updates.length, 0);
     await delay(SETTLE_AND_UPDATE_FLUSH_MS);
     assert.ok(updates.length >= 1, 'queued update should be flushed after settle');
     assert.equal(updates[0].uuid, 'light_3');
-    assert.equal(updates[0].clusterName, 'onOff');
+    assert.equal(updates[0].cluster, 'onOff');
     assert.deepEqual(updates[0].attributes, { onOff: false });
 });
 
-test('queue dedupes by (clusterName, partId): only latest payload is kept', async () => {
-    const { api, updates } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('queue dedupes by (clusterName, partId): only latest payload is kept', async (t) => {
+    const { api, updates } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(lightDevice('light_4'));
     // Three updates for the same cluster — only the last one should remain queued
     await registry.updateAccessoryState({ ...lightDevice('light_4'), status: { on: false, dimmable: false } });
@@ -198,14 +115,14 @@ test('queue dedupes by (clusterName, partId): only latest payload is kept', asyn
     await registry.updateAccessoryState({ ...lightDevice('light_4'), status: { on: false, dimmable: false } });
     assert.equal(registry.getPendingCount('light_4'), 1);
     await delay(SETTLE_AND_UPDATE_FLUSH_MS);
-    const onOffUpdates = updates.filter((u) => u.uuid === 'light_4' && u.clusterName === 'onOff');
+    const onOffUpdates = updates.filter((u) => u.uuid === 'light_4' && u.cluster === 'onOff');
     assert.equal(onOffUpdates.length, 1);
     assert.deepEqual(onOffUpdates[0].attributes, { onOff: false });
 });
 
-test('post-settle: updates are pushed immediately', async () => {
-    const { api, updates } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('post-settle: updates are pushed immediately', async (t) => {
+    const { api, updates } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(lightDevice('light_5'));
     await delay(SETTLE_AND_UPDATE_FLUSH_MS); // settle + state update bootstrap
     updates.length = 0;
@@ -215,80 +132,61 @@ test('post-settle: updates are pushed immediately', async () => {
     assert.deepEqual(updates[0].attributes, { onOff: false });
 });
 
-test('thermostat: registers as Thermostat when matter accepts it', async () => {
-    const { api, registered } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('thermostat: registers as Thermostat when matter accepts it', async (t) => {
+    const { api, registerCalls: registered } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_50'));
     await delay(200);
     await waitFor(() => registry.getStatus('thermostat_50') === 'registered');
     assert.equal(registry.getStatus('thermostat_50'), 'registered');
-    assert.equal(registered[0].deviceType._t, 'Thermostat');
+    assert.equal(registered[0].deviceType, 'Thermostat');
 });
 
-test('thermostat: falls back to TemperatureSensor when matter rejects the Thermostat', async () => {
-    let rejectedOnce = false;
-    const { api, registered } = makeApi({
-        registerImpl: (acc) => {
-            if (!rejectedOnce && acc.deviceType._t === 'Thermostat') {
-                rejectedOnce = true;
-                return 'throw';
-            }
-            return undefined;
-        },
+test('thermostat: falls back to TemperatureSensor when Homebridge refuses the Thermostat endpoint', async (t) => {
+    // Homebridge 2.5 only logs a refused endpoint (e.g. a matter.js conformance
+    // error): the register call resolves and the probe finds nothing. Both
+    // Thermostat payloads are refused (TH-01: the 2.2.0 one is tried second).
+    const hb = makeHbMatterApi({
+        failRegistration: (acc) => acc.deviceType.name === 'Thermostat',
     });
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    const registry = new MatterAccessoryRegistry({ api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_60'));
-    // After failure, fallback should have been registered
-    assert.equal(registered.length, 1, 'first attempt failed, fallback was retried with TemperatureSensor');
-    assert.equal(registered[0].deviceType._t, 'TemperatureSensor');
-    await delay(200);
-    await waitFor(() => registry.getStatus('thermostat_60') === 'registered');
-    assert.equal(registry.getStatus('thermostat_60'), 'registered');
+    await waitFor(() => registry.getStatus('thermostat_60') === 'registered', FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
+    assert.deepEqual(hb.registerCalls.map((r) => r.deviceType), ['Thermostat', 'Thermostat', 'TemperatureSensor']);
+    assert.equal(hb.endpoints.get('thermostat_60').deviceType.name, 'TemperatureSensor');
 });
 
-test('thermostat: async missing registration falls back before state updates', async () => {
-    let missingOnce = false;
-    const { api, registered, updates } = makeApi({
-        registerImpl: (acc) => {
-            if (!missingOnce && acc.deviceType._t === 'Thermostat') {
-                missingOnce = true;
-                return 'missing-state';
-            }
-            return undefined;
-        },
-    });
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('thermostat: async missing registration falls back before state updates', async (t) => {
+    // Neither Thermostat payload answers (TH-01: the second attempt comes before the fallback).
+    const { api, registerCalls: registered, updates } = makeHbMatterApi({ unqueryableTimes: { thermostat_async_missing: 2 } });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_async_missing'));
     await registry.updateAccessoryState(thermostatDevice('thermostat_async_missing', { currentTemperature: 19.5 }));
     await delay(FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
 
     await waitFor(() => registry.getStatus('thermostat_async_missing') === 'registered');
     assert.equal(registry.getStatus('thermostat_async_missing'), 'registered');
-    assert.equal(registered[0].deviceType._t, 'Thermostat');
-    assert.equal(registered[1].deviceType._t, 'TemperatureSensor');
-    assert.equal(updates.length, 1);
-    assert.equal(updates[0].clusterName, 'temperatureMeasurement');
-    assert.equal(updates[0].attributes.measuredValue, 1950);
+    assert.deepEqual(registered.map((r) => r.deviceType), ['Thermostat', 'Thermostat', 'TemperatureSensor']);
+    // State updates only: the second Thermostat endpoint also took the first one's uniqueId (identity, not state).
+    const stateUpdates = updates.filter((u) => u.cluster !== 'bridgedDeviceBasicInformation');
+    assert.equal(stateUpdates.length, 1);
+    assert.equal(stateUpdates[0].cluster, 'temperatureMeasurement');
+    assert.equal(stateUpdates[0].attributes.measuredValue, 1950);
 });
 
-test('stale matter.js endpoint: every recovery attempt unregisters before re-registering (UUID preserved)', async () => {
+test('stale matter.js endpoint: every recovery attempt unregisters before re-registering (UUID preserved)', async (t) => {
     // Production scenario after the 32-char nodeLabel fix (2.1.3-rc.3): a previous
     // boot left an endpoint in matter.js with the over-limit displayName; new
     // register() succeeds but getAccessoryState() keeps returning undefined
     // because matter.js holds the stale record. The recovery path's second
     // attempts purge the stale endpoint via unregister and then re-register
-    // (Homebridge 2.4 rejects a register of a UUID it still holds).
-    let registerCount = 0;
-    const { api, registered, unregistered } = makeApi({
-        registerImpl: (acc) => {
-            registerCount += 1;
-            // First two registers don't make the accessory queryable (stale state).
-            // The third (after unregister) does.
-            if (registerCount <= 2) return 'missing-state';
-            return undefined;
-        },
+    // (Homebridge rejects a register of a UUID it still holds).
+    // The first two endpoints don't answer reads (stale state); the third,
+    // registered after an unregister, does.
+    const { api, registerCalls: registered, unregisterCalls: unregistered } = makeHbMatterApi({
+        unqueryableTimes: { scenario_stale: 2 },
     });
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     // Use a non-thermostat device so the thermostat fallback path is bypassed.
     await registry.addOrUpdateAccessory({
         id: 'scenario_stale',
@@ -301,17 +199,17 @@ test('stale matter.js endpoint: every recovery attempt unregisters before re-reg
 
     await waitFor(() => registry.getStatus('scenario_stale') === 'registered');
     assert.equal(registry.getStatus('scenario_stale'), 'registered');
-    assert.equal(registerCount, 3, 'three register calls: initial + recovery#1 + recovery#2-after-purge');
+    assert.equal(registered.length, 3, 'three register calls: initial + recovery#1 + recovery#2-after-purge');
     assert.deepEqual(unregistered, ['scenario_stale', 'scenario_stale'], 'each recovery attempt unregisters before re-registering');
     // UUID is preserved across all attempts — Apple Home rooms survive.
     for (const r of registered) assert.equal(r.UUID, 'scenario_stale');
 });
 
-test('register log includes sanitised displayName + length when name was sanitised', async () => {
+test('register log includes sanitised displayName + length when name was sanitised', async (t) => {
     const logs = [];
-    const log = { info: (m) => logs.push(m), warn: () => {}, debug: () => {}, error: () => {} };
-    const { api } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log, getWsClient: () => undefined, storagePath: tmpStorage() });
+    const log = { info: (m) => logs.push(m), warn: () => {}, debug: (m) => logs.push(m), error: () => {} };
+    const { api } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log, getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory({
         id: 'scenario_long',
         type: 'scenario',
@@ -329,9 +227,9 @@ test('register log includes sanitised displayName + length when name was sanitis
     assert.match(registerLine, /uuid=scenario_long/, 'log must include the UUID');
 });
 
-test('rediscovery updates in-memory Matter identity without updatePlatformAccessories', async () => {
-    const { api, metadataUpdates } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('rediscovery updates in-memory Matter identity without updatePlatformAccessories', async (t) => {
+    const { api, metadataUpdates } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(lightDevice('light_meta'));
     await delay(200);
     metadataUpdates.length = 0;
@@ -341,37 +239,31 @@ test('rediscovery updates in-memory Matter identity without updatePlatformAccess
 
     await registry.addOrUpdateAccessory({
         ...lightDevice('light_meta', { on: false }),
-        name: 'Luce Sala',
+        name: 'Luce Veranda',
     });
     assert.equal(metadataUpdates.length, 0, 'metadata changes must not overwrite Homebridge internal endpoint state');
 });
 
-test('thermostat fallback: state updates go to temperatureMeasurement, not thermostat cluster', async () => {
-    let rejectedOnce = false;
-    const { api, updates } = makeApi({
-        registerImpl: (acc) => {
-            if (!rejectedOnce && acc.deviceType._t === 'Thermostat') {
-                rejectedOnce = true;
-                return 'throw';
-            }
-        },
+test('thermostat fallback: state updates go to temperatureMeasurement, not thermostat cluster', async (t) => {
+    const { api, updates } = makeHbMatterApi({
+        failRegistration: (acc) => acc.deviceType.name === 'Thermostat',
     });
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     await registry.addOrUpdateAccessory(thermostatDevice('thermostat_70'));
     await delay(FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
     updates.length = 0;
     await registry.updateAccessoryState(thermostatDevice('thermostat_70', { currentTemperature: 19.5 }));
     await delay(20);
     assert.equal(updates.length, 1);
-    assert.equal(updates[0].clusterName, 'temperatureMeasurement');
+    assert.equal(updates[0].cluster, 'temperatureMeasurement');
     assert.equal(updates[0].attributes.measuredValue, 1950);
 });
 
-test('failed device: no further attempts, no log spam', async () => {
-    const { api, registered } = makeApi({
-        registerImpl: () => 'throw',
-    });
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('failed device: no further attempts, no log spam', async (t) => {
+    // The register call itself rejects (here: no Matter manager attached,
+    // MatterAPIImpl.assertMatterReady), which is not a transient condition.
+    const { api, registerCalls: registered } = makeHbMatterApi({ matterReady: false });
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     // Use a non-thermostat device (no fallback) to test the "failed" terminal state
     await registry.addOrUpdateAccessory(lightDevice('light_99'));
     assert.equal(registry.getStatus('light_99'), 'failed');
@@ -382,9 +274,9 @@ test('failed device: no further attempts, no log spam', async () => {
     assert.equal(registered.length, callsAfterFail, 'no further register attempts after failure');
 });
 
-test('prune: a single incomplete discovery cycle does NOT unregister a missing accessory', async () => {
-    const { api, unregistered } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('prune: a single incomplete discovery cycle does NOT unregister a missing accessory', async (t) => {
+    const { api, unregisterCalls: unregistered } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(lightDevice('light_a'));
     await registry.addOrUpdateAccessory(lightDevice('light_b'));
@@ -399,9 +291,9 @@ test('prune: a single incomplete discovery cycle does NOT unregister a missing a
     assert.equal(registry.getStatus('light_b'), 'registered', 'accessory must remain registered after one missing cycle');
 });
 
-test('prune: stays skipped while missing cycles remain below the threshold', async () => {
-    const { api, unregistered } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('prune: stays skipped while missing cycles remain below the threshold', async (t) => {
+    const { api, unregisterCalls: unregistered } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(lightDevice('light_a'));
     await registry.addOrUpdateAccessory(lightDevice('light_b'));
@@ -418,9 +310,9 @@ test('prune: stays skipped while missing cycles remain below the threshold', asy
     assert.equal(registry.getStatus('light_b'), 'registered');
 });
 
-test('prune: unregisters only after N consecutive complete cycles where the device is missing', async () => {
-    const { api, unregistered } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('prune: unregisters only after N consecutive complete cycles where the device is missing', async (t) => {
+    const { api, unregisterCalls: unregistered } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(lightDevice('light_a'));
     await registry.addOrUpdateAccessory(lightDevice('light_b'));
@@ -443,9 +335,9 @@ test('prune: unregisters only after N consecutive complete cycles where the devi
     assert.deepEqual(unregistered, ['light_b'], 'no duplicate unregister calls for an already-removed accessory');
 });
 
-test('prune: missing-cycle counter resets when the device reappears before the threshold', async () => {
-    const { api, unregistered } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('prune: missing-cycle counter resets when the device reappears before the threshold', async (t) => {
+    const { api, unregisterCalls: unregistered } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(lightDevice('light_a'));
     await registry.addOrUpdateAccessory(lightDevice('light_b'));
@@ -477,24 +369,24 @@ test('prune: missing-cycle counter resets when the device reappears before the t
     assert.equal(registry.getStatus('light_b'), 'registered');
 });
 
-test('two simulated boots: same device keeps UUID/serialNumber/displayName stable, no unregister, state still flows', async () => {
+test('two simulated boots: same device keeps UUID/serialNumber/displayName stable, no unregister, state still flows', async (t) => {
     // Two boots = two independent MatterAccessoryRegistry instances sharing the
     // same storagePath (mirrors a real Homebridge restart: a fresh plugin
     // instance, Homebridge's own accessory cache replayed via
     // configureCachedAccessory, then a fresh WS discovery cycle).
-    const storagePath = tmpStorage();
+    const storagePath = tmpStorage(t);
     const device = lightDevice('light_boot');
 
-    const boot1 = makeApi();
+    const boot1 = makeHbMatterApi();
     const registry1 = new MatterAccessoryRegistry({ api: boot1.api, log: silentLog(), getWsClient: () => undefined, storagePath });
     registry1.startDiscoveryCycle();
     await registry1.addOrUpdateAccessory(device);
     await delay(200);
     await waitFor(() => registry1.getStatus('light_boot') === 'registered');
     assert.equal(registry1.getStatus('light_boot'), 'registered');
-    const firstRegistration = boot1.registered[0];
+    const firstRegistration = boot1.registerCalls[0];
 
-    const boot2 = makeApi();
+    const boot2 = makeHbMatterApi({ restored: boot1.cacheSnapshot() });
     const registry2 = new MatterAccessoryRegistry({ api: boot2.api, log: silentLog(), getWsClient: () => undefined, storagePath });
     registry2.configureCachedAccessory({ UUID: 'light_boot', displayName: firstRegistration.displayName });
     registry2.startDiscoveryCycle();
@@ -503,14 +395,14 @@ test('two simulated boots: same device keeps UUID/serialNumber/displayName stabl
 
     await waitFor(() => registry2.getStatus('light_boot') === 'registered');
     assert.equal(registry2.getStatus('light_boot'), 'registered');
-    const secondRegistration = boot2.registered[0];
+    const secondRegistration = boot2.registerCalls[0];
     assert.equal(secondRegistration.UUID, firstRegistration.UUID, 'UUID must survive across boots');
     assert.equal(secondRegistration.serialNumber, firstRegistration.serialNumber, 'serialNumber must survive across boots');
     assert.equal(secondRegistration.displayName, firstRegistration.displayName, 'displayName must survive across boots');
-    assert.equal(boot2.unregistered.length, 0, 'a fresh boot rehydrating a known device must never unregister it');
+    assert.equal(boot2.unregisterCalls.length, 0, 'a fresh boot rehydrating a known device must never unregister it');
 
     await registry2.pruneStaleAccessories();
-    assert.equal(boot2.unregistered.length, 0, 'prune right after rehydration must not remove it');
+    assert.equal(boot2.unregisterCalls.length, 0, 'prune right after rehydration must not remove it');
 
     boot2.updates.length = 0;
     await registry2.updateAccessoryState({ ...device, status: { on: false, dimmable: false } });
@@ -555,13 +447,22 @@ function capturingLog() {
     };
 }
 
-test('name-map: first boot resolves the cover/zone collision at finalize; second boot registers final names immediately with zero metadata churn', async () => {
-    const storagePath = tmpStorage();
-    const zone = zoneDevice('zone_19', 'Finestra Cucina');
-    const cover = coverDevice('cover_1', 'Finestra Cucina');
+// What Homebridge restores from its Matter cache for a zone registered by a
+// previous session, and what it hands to configureMatterAccessory.
+function cachedZone(id, name, device) {
+    return {
+        restored: { UUID: id, displayName: name, deviceType: deviceTypes.ContactSensor, clusters: { booleanState: { stateValue: true } } },
+        cached: { UUID: id, displayName: name, deviceType: { name: 'ContactSensor', code: 21 }, context: { device } },
+    };
+}
+
+test('name-map: first boot resolves the cover/zone collision at finalize; second boot registers final names immediately with zero metadata churn', async (t) => {
+    const storagePath = tmpStorage(t);
+    const zone = zoneDevice('zone_19', 'Finestra Taverna');
+    const cover = coverDevice('cover_1', 'Finestra Taverna');
 
     // ---- Boot 1 (no persisted map yet): ZONES arrive before MULTI_TYPES ----
-    const boot1 = makeApi();
+    const boot1 = makeHbMatterApi();
     const registry1 = new MatterAccessoryRegistry({ api: boot1.api, log: silentLog(), getWsClient: () => undefined, storagePath });
     registry1.startDiscoveryCycle();
     await registry1.addOrUpdateAccessory(zone);
@@ -569,20 +470,21 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
     await delay(200);
 
     // Incremental fallback: the zone grabbed the clean name first.
-    assert.equal(boot1.registered[0].displayName, 'Finestra Cucina');
-    assert.equal(boot1.registered[1].displayName, 'Finestra Cucina');
+    assert.equal(boot1.registerCalls[0].displayName, 'Finestra Taverna');
+    assert.equal(boot1.registerCalls[1].displayName, 'Finestra Taverna');
 
     // Sync complete → batch name-map + targeted refresh of the outlier zone.
     await registry1.finalizeNameMap([zone, cover]);
     await delay(200);
-    assert.deepEqual(boot1.unregistered, ['zone_19'], 'only the renamed zone is re-registered');
-    const renamed = boot1.registered[2];
-    assert.equal(renamed.UUID, 'zone_19');
-    assert.equal(renamed.displayName, 'Finestra Cucina - Sens.');
+    // MAT-04: the zone is renamed in place, nothing is unregistered or registered again.
+    assert.deepEqual(boot1.unregisterCalls, []);
+    assert.equal(boot1.registerCalls.length, 2);
+    assert.equal(boot1.endpoints.get('zone_19').nodeLabel, 'Finestra Taverna - Sens.');
+    assert.deepEqual(boot1.metadataUpdates, [{ UUID: 'zone_19', displayName: 'Finestra Taverna - Sens.' }]);
     assert.equal(registry1.getStatus('zone_19'), 'registered');
 
     // ---- Boot 2 (map persisted): same discovery order, fresh process ----
-    const boot2 = makeApi();
+    const boot2 = makeHbMatterApi({ restored: boot1.cacheSnapshot() });
     const { lines, log } = capturingLog();
     const registry2 = new MatterAccessoryRegistry({ api: boot2.api, log, getWsClient: () => undefined, storagePath });
     registry2.startDiscoveryCycle();
@@ -590,9 +492,9 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
     await registry2.addOrUpdateAccessory(cover);
     await delay(200);
 
-    assert.equal(boot2.registered[0].displayName, 'Finestra Cucina - Sens.',
+    assert.equal(boot2.registerCalls[0].displayName, 'Finestra Taverna - Sens.',
         'zone must register with its final suffixed name from the FIRST register call');
-    assert.equal(boot2.registered[1].displayName, 'Finestra Cucina',
+    assert.equal(boot2.registerCalls[1].displayName, 'Finestra Taverna',
         'cover owns the clean voice name from the first instant');
 
     // Re-discovery pass (production re-emits devices during the same sync).
@@ -601,8 +503,8 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
 
     await registry2.finalizeNameMap([zone, cover]);
     await delay(200);
-    assert.equal(boot2.unregistered.length, 0, 'steady state: no renames, no unregisters');
-    assert.equal(boot2.registered.length, 2, 'steady state: no extra register calls');
+    assert.equal(boot2.unregisterCalls.length, 0, 'steady state: no renames, no unregisters');
+    assert.equal(boot2.registerCalls.length, 2, 'steady state: no extra register calls');
 
     await registry2.pruneStaleAccessories();
     const summary = lines.find((l) => l.includes('cycle #'));
@@ -616,12 +518,12 @@ test('name-map: first boot resolves the cover/zone collision at finalize; second
     assert.ok(!lines.some((l) => l.includes('DUPLICATE display name')), 'no duplicate names may survive');
 });
 
-test('name-map: discovery order does not matter once the map is persisted (covers-first boot after zones-first boot)', async () => {
-    const storagePath = tmpStorage();
-    const zone = zoneDevice('zone_18', 'Finestra Studio');
-    const cover = coverDevice('cover_4', 'Finestra Studio');
+test('name-map: discovery order does not matter once the map is persisted (covers-first boot after zones-first boot)', async (t) => {
+    const storagePath = tmpStorage(t);
+    const zone = zoneDevice('zone_18', 'Finestra Solaio');
+    const cover = coverDevice('cover_4', 'Finestra Solaio');
 
-    const boot1 = makeApi();
+    const boot1 = makeHbMatterApi();
     const registry1 = new MatterAccessoryRegistry({ api: boot1.api, log: silentLog(), getWsClient: () => undefined, storagePath });
     registry1.startDiscoveryCycle();
     await registry1.addOrUpdateAccessory(zone);
@@ -631,34 +533,34 @@ test('name-map: discovery order does not matter once the map is persisted (cover
     await delay(200);
 
     // Boot 2 flips the arrival order — the map must make it irrelevant.
-    const boot2 = makeApi();
+    const boot2 = makeHbMatterApi({ restored: boot1.cacheSnapshot() });
     const registry2 = new MatterAccessoryRegistry({ api: boot2.api, log: silentLog(), getWsClient: () => undefined, storagePath });
     registry2.startDiscoveryCycle();
     await registry2.addOrUpdateAccessory(cover);
     await registry2.addOrUpdateAccessory(zone);
     await delay(200);
 
-    const byUuid = Object.fromEntries(boot2.registered.map((r) => [r.UUID, r.displayName]));
-    assert.equal(byUuid.cover_4, 'Finestra Studio');
-    assert.equal(byUuid.zone_18, 'Finestra Studio - Sens.');
-    assert.equal(boot2.unregistered.length, 0);
+    const byUuid = Object.fromEntries(boot2.registerCalls.map((r) => [r.UUID, r.displayName]));
+    assert.equal(byUuid.cover_4, 'Finestra Solaio');
+    assert.equal(byUuid.zone_18, 'Finestra Solaio - Sens.');
+    assert.equal(boot2.unregisterCalls.length, 0);
 });
 
 // ---------------------------------------------------------------------------
 // matterExposure: per-type opt-out + prune discipline (2.1.4-rc.6)
 // ---------------------------------------------------------------------------
 
-test('matterExposure: disabled type is never registered, and status updates cannot sneak it back in', async () => {
-    const { api, registered } = makeApi();
+test('matterExposure: disabled type is never registered, and status updates cannot sneak it back in', async (t) => {
+    const { api, registerCalls: registered } = makeHbMatterApi();
     const registry = new MatterAccessoryRegistry({
         api,
         log: silentLog(),
         getWsClient: () => undefined,
-        storagePath: tmpStorage(),
+        storagePath: tmpStorage(t),
         isDeviceExposed: (device) => device.type !== 'zone',
     });
     registry.startDiscoveryCycle();
-    await registry.addOrUpdateAccessory(zoneDevice('zone_1', 'Finestra Bagno'));
+    await registry.addOrUpdateAccessory(zoneDevice('zone_1', 'Finestra Atrio'));
     await registry.addOrUpdateAccessory(lightDevice('light_1'));
     await delay(200);
 
@@ -667,21 +569,21 @@ test('matterExposure: disabled type is never registered, and status updates cann
     assert.equal(registry.getStatus('zone_1'), undefined);
 
     // The status-update path must be gated too (no register-on-update leak).
-    await registry.updateAccessoryState(zoneDevice('zone_1', 'Finestra Bagno'));
+    await registry.updateAccessoryState(zoneDevice('zone_1', 'Finestra Atrio'));
     assert.equal(registered.length, 1, 'updateAccessoryState must not register a non-exposed device');
 });
 
-test('matterExposure: a registered type disabled later is pruned after 3 consecutive sync cycles', async () => {
-    const { api, unregistered } = makeApi();
+test('matterExposure: a registered type disabled later is pruned after 3 consecutive sync cycles', async (t) => {
+    const { api, unregisterCalls: unregistered } = makeHbMatterApi();
     let zonesExposed = true;
     const registry = new MatterAccessoryRegistry({
         api,
         log: silentLog(),
         getWsClient: () => undefined,
-        storagePath: tmpStorage(),
+        storagePath: tmpStorage(t),
         isDeviceExposed: (device) => device.type !== 'zone' || zonesExposed,
     });
-    const zone = zoneDevice('zone_1', 'Finestra Bagno');
+    const zone = zoneDevice('zone_1', 'Finestra Atrio');
 
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(zone);
@@ -708,18 +610,19 @@ test('matterExposure: a registered type disabled later is pruned after 3 consecu
     assert.equal(registry.getStatus('light_1'), 'registered', 'exposed devices are untouched');
 });
 
-test('matterExposure: cached-only endpoints of a disabled type (config changed across restarts) are pruned in 3 cycles', async () => {
-    const { api, registered, unregistered } = makeApi();
+test('matterExposure: cached-only endpoints of a disabled type (config changed across restarts) are pruned in 3 cycles', async (t) => {
     const zombie = zoneDevice('zone_9', 'Porta Garage');
+    const cache = cachedZone('zone_9', 'Porta Garage', zombie);
+    const { api, registerCalls: registered, unregisterCalls: unregistered } = makeHbMatterApi({ restored: [cache.restored] });
     const registry = new MatterAccessoryRegistry({
         api,
         log: silentLog(),
         getWsClient: () => undefined,
-        storagePath: tmpStorage(),
+        storagePath: tmpStorage(t),
         isDeviceExposed: (device) => device.type !== 'zone',
     });
     // Previous session registered the zone; this session only sees it in cache.
-    registry.configureCachedAccessory({ UUID: 'zone_9', displayName: 'Porta Garage', context: { device: zombie } });
+    registry.configureCachedAccessory(cache.cached);
 
     for (let cycle = 1; cycle <= 3; cycle++) {
         registry.startDiscoveryCycle();
@@ -738,9 +641,9 @@ test('matterExposure: cached-only endpoints of a disabled type (config changed a
 // Conservative prune hardening (2.1.4 review)
 // ---------------------------------------------------------------------------
 
-test('prune: realtime status updates keep a device alive even when discovery misses it', async () => {
-    const { api, unregistered } = makeApi();
-    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage() });
+test('prune: realtime status updates keep a device alive even when discovery misses it', async (t) => {
+    const { api, unregisterCalls: unregistered } = makeHbMatterApi();
+    const registry = new MatterAccessoryRegistry({ api, log: silentLog(), getWsClient: () => undefined, storagePath: tmpStorage(t) });
     registry.startDiscoveryCycle();
     await registry.addOrUpdateAccessory(lightDevice('light_a'));
     await registry.addOrUpdateAccessory(lightDevice('light_b'));
@@ -759,8 +662,8 @@ test('prune: realtime status updates keep a device alive even when discovery mis
     assert.equal(registry.getStatus('light_b'), 'registered');
 });
 
-test('prune: missing-cycle counters persist across boots (stable setups run one cycle per boot)', async () => {
-    const storagePath = tmpStorage();
+test('prune: missing-cycle counters persist across boots (stable setups run one cycle per boot)', async (t) => {
+    const storagePath = tmpStorage(t);
     const zombie = zoneDevice('zone_9', 'Porta Garage');
     let lastBoot;
 
@@ -768,7 +671,8 @@ test('prune: missing-cycle counters persist across boots (stable setups run one 
     // per boot. Each boot is a fresh registry instance; without persisted
     // counters the 3-cycle threshold could never be crossed across restarts.
     for (let boot = 1; boot <= 3; boot++) {
-        const bootCtx = makeApi();
+        const cache = cachedZone('zone_9', 'Porta Garage', zombie);
+        const bootCtx = makeHbMatterApi({ restored: [cache.restored] });
         const registry = new MatterAccessoryRegistry({
             api: bootCtx.api,
             log: silentLog(),
@@ -776,74 +680,79 @@ test('prune: missing-cycle counters persist across boots (stable setups run one 
             storagePath,
             isDeviceExposed: (device) => device.type !== 'zone',
         });
-        registry.configureCachedAccessory({ UUID: 'zone_9', displayName: 'Porta Garage', context: { device: zombie } });
+        registry.configureCachedAccessory(cache.cached);
         registry.startDiscoveryCycle();
         await registry.addOrUpdateAccessory(lightDevice('light_1'));
         await delay(200);
         await registry.pruneStaleAccessories();
         lastBoot = bootCtx;
         if (boot < 3) {
-            assert.deepEqual(bootCtx.unregistered, [], `boot ${boot}: below threshold, cached zombie kept`);
+            assert.deepEqual(bootCtx.unregisterCalls, [], `boot ${boot}: below threshold, cached zombie kept`);
         }
     }
 
-    assert.deepEqual(lastBoot.unregistered, ['zone_9'], 'third boot crosses the persisted threshold and unregisters');
+    assert.deepEqual(lastBoot.unregisterCalls, ['zone_9'], 'third boot crosses the persisted threshold and unregisters');
 });
 
-test('prune: persisted counter is cleared when the device reappears on a later boot', async () => {
-    const storagePath = tmpStorage();
-    const zone = zoneDevice('zone_5', 'Finestra Bagno');
+test('prune: persisted counter is cleared when the device reappears on a later boot', async (t) => {
+    const storagePath = tmpStorage(t);
+    const zone = zoneDevice('zone_5', 'Finestra Atrio');
+    const cache = cachedZone('zone_5', 'Finestra Atrio', zone);
     let zonesExposed = false;
     const exposure = (device) => device.type !== 'zone' || zonesExposed;
 
     // Boot 1+2: zone disabled → two persisted misses.
     for (let boot = 1; boot <= 2; boot++) {
-        const bootCtx = makeApi();
+        const bootCtx = makeHbMatterApi({ restored: [cache.restored] });
         const registry = new MatterAccessoryRegistry({
             api: bootCtx.api, log: silentLog(), getWsClient: () => undefined, storagePath, isDeviceExposed: exposure,
         });
-        registry.configureCachedAccessory({ UUID: 'zone_5', displayName: 'Finestra Bagno', context: { device: zone } });
+        registry.configureCachedAccessory(cache.cached);
         registry.startDiscoveryCycle();
         await registry.addOrUpdateAccessory(lightDevice('light_1'));
         await delay(200);
         await registry.pruneStaleAccessories();
-        assert.deepEqual(bootCtx.unregistered, [], `boot ${boot}: below threshold`);
+        assert.deepEqual(bootCtx.unregisterCalls, [], `boot ${boot}: below threshold`);
     }
 
     // Boot 3: user re-enables zones → device is discovered again, counter resets.
     zonesExposed = true;
-    const boot3 = makeApi();
+    const boot3 = makeHbMatterApi({ restored: [cache.restored] });
     const registry3 = new MatterAccessoryRegistry({
         api: boot3.api, log: silentLog(), getWsClient: () => undefined, storagePath, isDeviceExposed: exposure,
     });
-    registry3.configureCachedAccessory({ UUID: 'zone_5', displayName: 'Finestra Bagno', context: { device: zone } });
+    registry3.configureCachedAccessory(cache.cached);
     registry3.startDiscoveryCycle();
     await registry3.addOrUpdateAccessory(zone);
     await registry3.addOrUpdateAccessory(lightDevice('light_1'));
     await delay(200);
     await registry3.pruneStaleAccessories();
-    assert.deepEqual(boot3.unregistered, [], 'reappeared device must not be unregistered');
+    assert.deepEqual(boot3.unregisterCalls, [], 'reappeared device must not be unregistered');
 
     // Boot 4: disabled again → must start counting from 1, not resume from 2.
     zonesExposed = false;
-    const boot4 = makeApi();
+    const boot4 = makeHbMatterApi({ restored: [cache.restored] });
     const registry4 = new MatterAccessoryRegistry({
         api: boot4.api, log: silentLog(), getWsClient: () => undefined, storagePath, isDeviceExposed: exposure,
     });
-    registry4.configureCachedAccessory({ UUID: 'zone_5', displayName: 'Finestra Bagno', context: { device: zone } });
+    registry4.configureCachedAccessory(cache.cached);
     registry4.startDiscoveryCycle();
     await registry4.addOrUpdateAccessory(lightDevice('light_1'));
     await delay(200);
     await registry4.pruneStaleAccessories();
-    assert.deepEqual(boot4.unregistered, [], 'counter must have restarted after the reappearance');
+    assert.deepEqual(boot4.unregisterCalls, [], 'counter must have restarted after the reappearance');
 });
 
-test('explicit thermostat recovery keeps the device ID and records native success', async () => {
-    const storagePath = tmpStorage();
+test('explicit thermostat recovery keeps the device ID and records native success', async (t) => {
+    const storagePath = tmpStorage(t);
     fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
         thermostatAsTemperatureSensor: ['thermostat_18'],
     }));
-    const { api, registered, unregistered } = makeApi();
+    // The previous session's fallback endpoint, restored by Homebridge.
+    const { api, registerCalls: registered, unregisterCalls: unregistered } = makeHbMatterApi({
+        restored: [{ UUID: 'thermostat_18', displayName: 'Riscaldamento Veranda', deviceType: deviceTypes.TemperatureSensor,
+            clusters: { temperatureMeasurement: { measuredValue: 2100 } } }],
+    });
     const registry = new MatterAccessoryRegistry({
         api,
         log: silentLog(),
@@ -851,25 +760,33 @@ test('explicit thermostat recovery keeps the device ID and records native succes
         storagePath,
         recoveryRequests: { thermostat_18: 1 },
     });
+    // Homebridge hands the cached endpoint to configureMatterAccessory first.
+    registry.configureCachedAccessory({
+        UUID: 'thermostat_18',
+        displayName: 'Riscaldamento Veranda',
+        deviceType: { name: 'TemperatureSensor', code: 770 },
+        context: { device: thermostatDevice() },
+    });
 
     await registry.addOrUpdateAccessory(thermostatDevice());
-    await delay(250);
+    await waitFor(() => registry.getStatus('thermostat_18') === 'registered');
 
     assert.deepEqual(unregistered, ['thermostat_18']);
     assert.equal(registered[0].UUID, 'thermostat_18');
-    assert.equal(registered[0].deviceType._t, 'Thermostat');
+    assert.equal(registered[0].deviceType, 'Thermostat');
     const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
     assert.equal(saved.thermostats[0].mode, 'native');
     assert.equal(saved.thermostats[0].lastProcessedRecoveryRequest, 1);
 });
 
-test('failed explicit thermostat recovery rolls back once to TemperatureSensor', async () => {
-    const storagePath = tmpStorage();
+test('failed explicit thermostat recovery rolls back once to TemperatureSensor', async (t) => {
+    const storagePath = tmpStorage(t);
     fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
         thermostatAsTemperatureSensor: ['thermostat_18'],
     }));
-    const { api, registered } = makeApi({
-        registerImpl: (accessory) => accessory.deviceType._t === 'Thermostat' ? 'throw' : undefined,
+    // Homebridge refuses the Thermostat endpoint every time (logged only).
+    const { api, registerCalls: registered } = makeHbMatterApi({
+        failRegistration: (accessory) => accessory.deviceType.name === 'Thermostat',
     });
     const registry = new MatterAccessoryRegistry({
         api,
@@ -880,23 +797,24 @@ test('failed explicit thermostat recovery rolls back once to TemperatureSensor',
     });
 
     await registry.addOrUpdateAccessory(thermostatDevice());
-    await delay(250);
+    await waitFor(() => registered.at(-1)?.deviceType === 'TemperatureSensor'
+        && registry.getStatus('thermostat_18') === 'registered', FALLBACK_SETTLE_AND_UPDATE_FLUSH_MS);
 
-    assert.equal(registered.at(-1).deviceType._t, 'TemperatureSensor');
     const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
     assert.equal(saved.thermostats[0].mode, 'fallback');
     assert.equal(saved.thermostats[0].lastProcessedRecoveryRequest, 1);
 });
 
-test('explicit thermostat recovery removes a cache-restored fallback endpoint under Homebridge 2.4 unregister semantics', async () => {
-    const storagePath = tmpStorage();
+test('explicit thermostat recovery removes a cache-restored fallback endpoint (unregister reads deviceType.deviceType)', async (t) => {
+    const storagePath = tmpStorage(t);
     fs.writeFileSync(path.join(storagePath, 'klares4-matter-fallback.json'), JSON.stringify({
         thermostatAsTemperatureSensor: ['thermostat_18'],
     }));
-    const { api, registered } = makeApi({
-        // Homebridge 2.4.0 dereferences `accessory.deviceType.deviceType` before removing anything.
-        unregisterImpl: (accessories) => accessories.forEach((a) => a.deviceType.deviceType),
-        initiallyQueryable: ['thermostat_18'],
+    // Homebridge restored the fallback endpoint from its cache; its unregister
+    // dereferences `accessory.deviceType.deviceType` before removing anything.
+    const { api, registerCalls: registered } = makeHbMatterApi({
+        restored: [{ UUID: 'thermostat_18', displayName: 'Riscaldamento Veranda', deviceType: deviceTypes.TemperatureSensor,
+            clusters: { temperatureMeasurement: { measuredValue: 2100 } } }],
     });
     const registry = new MatterAccessoryRegistry({
         api,
@@ -907,7 +825,7 @@ test('explicit thermostat recovery removes a cache-restored fallback endpoint un
     });
     registry.configureCachedAccessory({
         UUID: 'thermostat_18',
-        displayName: 'Riscaldamento Sala',
+        displayName: 'Riscaldamento Veranda',
         deviceType: { name: 'TemperatureSensor', code: 770 },
         context: { device: thermostatDevice() },
     });
@@ -915,7 +833,7 @@ test('explicit thermostat recovery removes a cache-restored fallback endpoint un
     await registry.addOrUpdateAccessory(thermostatDevice());
     await delay(250);
 
-    assert.equal(registered.at(-1).deviceType._t, 'Thermostat');
+    assert.equal(registered.at(-1).deviceType, 'Thermostat');
     const saved = JSON.parse(fs.readFileSync(path.join(storagePath, 'klares4-matter-fallback.json')));
     assert.equal(saved.thermostats[0].mode, 'native');
 });

@@ -1,16 +1,23 @@
 import type { Logger } from 'homebridge';
 
+import { CaptureBuffer, DEFAULT_CAPTURE_LIMITS, type CaptureLimits } from './capture-buffer';
 import { DebugFileGenerator } from './file-generator';
 import { captureRawMessage } from './raw-message-capture';
-import type { DeviceSnapshot, RawMessage } from './types';
+import { redactSnapshot } from './redaction';
+import type { DeviceSnapshot } from './types';
 import type { KseniaWebSocketClient, RawMessageDirection } from '../websocket-client';
+import { toErrorMessage } from '../errors';
+
+const MAX_INTERVAL_SNAPSHOTS = 60;
 
 export class DebugCaptureManager {
-    private rawMessages: RawMessage[] = [];
+    private buffer: CaptureBuffer;
     private isCapturing = false;
     private captureTimer?: NodeJS.Timeout;
     private snapshotInterval?: NodeJS.Timeout;
     private deviceSnapshots: DeviceSnapshot[] = [];
+    private lastSnapshotJson?: string;
+    private intervalSnapshots = 0;
     private rawMessageUnsubscribe?: () => void;
     private captureDurationMs = 60000;
     private activeClient?: KseniaWebSocketClient;
@@ -19,7 +26,9 @@ export class DebugCaptureManager {
     constructor(
         private readonly log: Logger,
         private readonly storagePath: string,
+        private readonly options: { limits?: Partial<CaptureLimits> } = {},
     ) {
+        this.buffer = this.newBuffer();
         this.fileGenerator = new DebugFileGenerator(this.log, this.storagePath);
     }
 
@@ -41,14 +50,17 @@ export class DebugCaptureManager {
         this.log.warn('   - Change zones');
         this.log.warn('   - Adjust thermostats');
         this.log.warn(`[TIMER] You have ${durationSeconds} seconds...`);
+        this.log.warn('[PRIVACY] The file will be confidential: it lists your devices and the state of your alarm system.');
         this.log.warn('═══════════════════════════════════════════════════════════');
         this.log.warn('');
 
         this.isCapturing = true;
         this.activeClient = wsClient;
         this.captureDurationMs = durationMs;
-        this.rawMessages = [];
+        this.buffer = this.newBuffer();
         this.deviceSnapshots = [];
+        this.lastSnapshotJson = undefined;
+        this.intervalSnapshots = 0;
         this.captureDeviceSnapshot(wsClient, 'START');
         this.hookWebSocket(wsClient);
 
@@ -103,19 +115,34 @@ export class DebugCaptureManager {
 
         this.captureDeviceSnapshot(wsClient, 'END');
         this.unhookWebSocket();
-        this.fileGenerator.generate(this.rawMessages, this.deviceSnapshots, this.captureDurationMs, options);
+        this.fileGenerator.generate(this.buffer.messages, this.deviceSnapshots, this.captureDurationMs, {
+            ...options,
+            droppedMessages: this.buffer.dropped,
+        });
     }
 
+    /**
+     * START and END are always taken; an INTERVAL one only when the devices changed since the
+     * last stored snapshot, and at most MAX_INTERVAL_SNAPSHOTS of them: a snapshot is the
+     * largest part of the file.
+     */
     private captureDeviceSnapshot(
         wsClient: KseniaWebSocketClient,
         label: 'START' | 'INTERVAL' | 'END',
     ): void {
         const devices = wsClient.getAllDevices ? wsClient.getAllDevices() : [];
+        const redacted = redactSnapshot(JSON.parse(JSON.stringify(devices)));
+        const serialized = JSON.stringify(redacted);
+        if (label === 'INTERVAL') {
+            if (serialized === this.lastSnapshotJson || this.intervalSnapshots >= MAX_INTERVAL_SNAPSHOTS) return;
+            this.intervalSnapshots += 1;
+        }
+        this.lastSnapshotJson = serialized;
         this.deviceSnapshots.push({
             timestamp: new Date().toISOString(),
             label,
             deviceCount: devices.length,
-            devices: JSON.parse(JSON.stringify(devices)),
+            devices: redacted,
         });
     }
 
@@ -139,7 +166,7 @@ export class DebugCaptureManager {
         } catch (error: unknown) {
             this.log.error(
                 'Failed to hook WebSocket:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }
@@ -154,20 +181,29 @@ export class DebugCaptureManager {
         } catch (error: unknown) {
             this.log.error(
                 'Failed to unhook WebSocket listener:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         } finally {
             this.rawMessageUnsubscribe = undefined;
         }
     }
 
+    private newBuffer(): CaptureBuffer {
+        return new CaptureBuffer({ ...DEFAULT_CAPTURE_LIMITS, ...this.options.limits });
+    }
+
     private captureRawMessage(direction: 'in' | 'out', rawData: string): void {
         try {
-            this.rawMessages.push(captureRawMessage(direction, rawData));
+            const stored = this.buffer.tryAdd(captureRawMessage(direction, rawData));
+            if (!stored && this.buffer.dropped === 1) {
+                this.log.warn(
+                    '[DEBUG] Capture buffer full: later traffic is counted but not recorded; the capture still ends on time.',
+                );
+            }
         } catch (error: unknown) {
             this.log.error(
                 'Failed to capture message:',
-                error instanceof Error ? error.message : String(error),
+                toErrorMessage(error),
             );
         }
     }

@@ -3,6 +3,8 @@ import type { Lares4Platform } from '../platform';
 import type { KseniaSensor } from '../types';
 import { PLUGIN_VERSION } from '../plugin-version';
 import { sanitizeHapDisplayName } from '../display-name';
+import { hasObservedState } from '../device-observation';
+import { clampHapHumidity, clampHapLux, clampHapTemperature } from './hap-ranges';
 
 /**
  * Sensor Accessory Handler
@@ -116,31 +118,40 @@ export class SensorAccessory {
         return service;
     }
 
-    public async getCurrentTemperature(): Promise<CharacteristicValue> {
+    /**
+     * The panel's reading. A sensor the panel has never reported (discovery only
+     * carries placeholders such as 0 °C or 50 %) has no reading: HomeKit shows
+     * "No Response" instead of a number that was never measured.
+     */
+    private reading(): number {
         const value = this.device.status.value;
-        // HomeKit requires temperature between -270 and 100C
-        return Math.max(-270, Math.min(100, value));
+        if (!hasObservedState(this.device) || typeof value !== 'number' || !Number.isFinite(value)) {
+            throw new this.platform.api.hap.HapStatusError(
+                this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+            );
+        }
+        return value;
+    }
+
+    public async getCurrentTemperature(): Promise<CharacteristicValue> {
+        return clampHapTemperature(this.reading());
     }
 
     public async getCurrentHumidity(): Promise<CharacteristicValue> {
-        const value = this.device.status.value;
-        // HomeKit requires humidity between 0 and 100%
-        return Math.max(0, Math.min(100, value));
+        return clampHapHumidity(this.reading());
     }
 
     public async getCurrentLightLevel(): Promise<CharacteristicValue> {
-        const value = this.device.status.value;
-        // HomeKit requires lux between 0.0001 and 100000
-        return Math.max(0.0001, Math.min(100000, value));
+        return clampHapLux(this.reading());
     }
 
     public async getMotionDetected(): Promise<CharacteristicValue> {
-        return this.device.status.value > 0;
+        return this.reading() > 0;
     }
 
     public async getContactState(): Promise<CharacteristicValue> {
         // 0 = contact detected (closed), 1 = contact not detected (open)
-        return this.device.status.value > 0 ? 1 : 0;
+        return this.reading() > 0 ? 1 : 0;
     }
 
     private getSensorTypeLabel(): string {
@@ -163,41 +174,36 @@ export class SensorAccessory {
     public updateStatus(newDevice: KseniaSensor): void {
         this.device = newDevice;
 
+        // A placeholder is not a measurement: leave the characteristic as it is.
+        if (!hasObservedState(this.device)) {
+            this.platform.log.debug(`Sensor ${this.device.name}: no reading from the panel yet`);
+            return;
+        }
+        const value = this.device.status.value;
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+            this.platform.log.debug(`Sensor ${this.device.name}: ignoring a reading that is not a number`);
+            return;
+        }
+        const { Characteristic } = this.platform;
+
         switch (this.device.status.sensorType) {
             case 'temperature':
-                this.service.updateCharacteristic(
-                    this.platform.Characteristic.CurrentTemperature,
-                    Math.max(-270, Math.min(100, this.device.status.value)),
-                );
+                this.service.updateCharacteristic(Characteristic.CurrentTemperature, clampHapTemperature(value));
                 break;
             case 'humidity':
-                this.service.updateCharacteristic(
-                    this.platform.Characteristic.CurrentRelativeHumidity,
-                    Math.max(0, Math.min(100, this.device.status.value)),
-                );
+                this.service.updateCharacteristic(Characteristic.CurrentRelativeHumidity, clampHapHumidity(value));
                 break;
             case 'light':
-                this.service.updateCharacteristic(
-                    this.platform.Characteristic.CurrentAmbientLightLevel,
-                    Math.max(0.0001, Math.min(100000, this.device.status.value)),
-                );
+                this.service.updateCharacteristic(Characteristic.CurrentAmbientLightLevel, clampHapLux(value));
                 break;
             case 'motion':
-                this.service.updateCharacteristic(
-                    this.platform.Characteristic.MotionDetected,
-                    this.device.status.value > 0,
-                );
+                this.service.updateCharacteristic(Characteristic.MotionDetected, value > 0);
                 break;
             case 'contact':
-                this.service.updateCharacteristic(
-                    this.platform.Characteristic.ContactSensorState,
-                    this.device.status.value > 0 ? 1 : 0,
-                );
+                this.service.updateCharacteristic(Characteristic.ContactSensorState, value > 0 ? 1 : 0);
                 break;
         }
 
-        this.platform.log.debug(
-            `Updated sensor ${this.device.name}: ${this.device.status.value}${this.device.status.unit ?? ''}`,
-        );
+        this.platform.log.debug(`Updated sensor ${this.device.name}: ${value}${this.device.status.unit ?? ''}`);
     }
 }

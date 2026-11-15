@@ -10,12 +10,12 @@ const HAP_CHECK_NAME = /^[\p{L}\p{N}][\p{L}\p{N}\p{Zs}\u2019'&!._:;()/,-]*[\p{L}
 
 test('sanitizeHapDisplayName: production offenders satisfy the HAP checkName regex', () => {
     const offenders = [
-        'Balcone Sala ',
+        'Balcone Veranda ',
         'Inserisci Finestre+Tapparelle',
         'Inserisci Tapparelle+Volumetrici',
         'Inserisci Finestre+Volumetrici',
-        'Apri Mattina (estate)',
-        'Apri Pomeriggio (estate)',
+        'Alza Tende (estate)',
+        'Ombra Pomeriggio (estate)',
     ];
     for (const raw of offenders) {
         const clean = sanitizeHapDisplayName(raw);
@@ -24,9 +24,9 @@ test('sanitizeHapDisplayName: production offenders satisfy the HAP checkName reg
 });
 
 test('sanitizeHapDisplayName: same word-level transformations as the Matter sanitiser', () => {
-    assert.equal(sanitizeHapDisplayName('Balcone Sala '), 'Balcone Sala');
+    assert.equal(sanitizeHapDisplayName('Balcone Veranda '), 'Balcone Veranda');
     assert.equal(sanitizeHapDisplayName('Inserisci Finestre+Tapparelle'), 'Inserisci Finestre e Tapparelle');
-    assert.equal(sanitizeHapDisplayName('Apri Mattina (estate)'), 'Apri Mattina estate');
+    assert.equal(sanitizeHapDisplayName('Alza Tende (estate)'), 'Alza Tende estate');
     assert.equal(sanitizeHapDisplayName("Chiudi l'ingresso"), "Chiudi l'ingresso");
     assert.equal(sanitizeHapDisplayName('Caffè è qui'), 'Caffè è qui');
 });
@@ -83,8 +83,8 @@ test('HAP-only name rules leave Matter names byte-for-byte unchanged', () => {
         7: '7',
         '’A’': 'A’',
         'x-': 'x',
-        'Balcone Sala ': 'Balcone Sala',
-        'Apri Mattina (estate)': 'Apri Mattina estate',
+        'Balcone Veranda ': 'Balcone Veranda',
+        'Alza Tende (estate)': 'Alza Tende estate',
         'Inserisci Finestre+Tapparelle': 'Inserisci Finestre e Tapparelle',
     };
     for (const [raw, name] of Object.entries(expected)) {
@@ -98,7 +98,7 @@ test('sanitizeHapDisplayName: the real HAP-NodeJS checkName accepts every saniti
     const { checkName } = require('@homebridge/hap-nodejs/dist/lib/util/checkName.js');
     const warnings = [];
     t.mock.method(console, 'warn', (message) => { warnings.push(message); });
-    for (const raw of ['Luce po’', "Luce po'", 'A', '7', 'x-', '’A’', '', '***', 'Balcone Sala ', 'Apri Mattina (estate)']) {
+    for (const raw of ['Luce po’', "Luce po'", 'A', '7', 'x-', '’A’', '', '***', 'Balcone Veranda ', 'Alza Tende (estate)']) {
         checkName('test', 'Name', sanitizeHapDisplayName(raw, 'zone_3'));
     }
     assert.deepEqual(warnings, []);

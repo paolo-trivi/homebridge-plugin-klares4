@@ -8,39 +8,43 @@ import type {
     Service,
 } from 'homebridge';
 
-import { getEffectiveLogLevel } from '../log-levels';
+import { createLeveledLogger } from '../leveled-logger';
 import { MqttBridge } from '../mqtt-bridge';
-import { PLUGIN_VERSION_RAW } from '../plugin-version';
 import { PLATFORM_NAME, PLUGIN_NAME } from '../settings';
-import { initTelemetry, captureError, closeTelemetry } from '../telemetry';
-import { tlsConfigurationHint } from '../websocket-client/tls-error-hint';
 import type { KseniaDevice } from '../types';
-import { KseniaWebSocketClient } from '../websocket-client';
-import { DebugCaptureManager } from '../debug-capture';
+import type { KseniaWebSocketClient } from '../websocket-client';
+import type { DebugCaptureManager } from '../debug-capture';
 import { AccessoryRegistry } from './accessory-registry';
 import { AccessoryHandlerService } from './accessory-handler-service';
+import { clientExposurePolicy, createWebSocketClient, hasConnectionConfig } from './client-options';
+import { startRequestedDebugCapture } from './debug-capture-start';
 import { MatterAccessoryRegistry } from './matter-accessory-registry';
-import { PlatformConfigFileService } from './config-file-service';
+import { PlatformConfigFileService, type PlatformBlockSelector } from './config-file-service';
 import { DeviceListService } from './device-list-service';
+import { DeviceEventRouter } from './device-event-router';
 import { DiscoveryService } from './discovery-service';
 import { KsaImportService } from './ksa-import-service';
-import { normalizeMatterRecoveryRequests } from './matter-override-config';
+import { reportConfigOverrides } from './override-reconciliation';
 import { PlatformLifecycleService } from './platform-lifecycle-service';
-import type { AccessoryHandler, Lares4Config } from './types';
+import { refreshKsaSections, reportDeprecatedKeys, resolveRuntimeConfig, toPlatformConfig, type RuntimeConfig } from './runtime-config';
+import { SyncLifecycle } from './sync-lifecycle';
+import type { AccessoryHandler, Lares4Config, RawLares4Config } from './types';
+import { toErrorMessage } from '../errors';
 
-export type { AccessoryHandler, Lares4Config, MatterExposureConfig, DeviceListItem, DevicesList } from './types';
+export type { AccessoryHandler, Lares4Config, MatterExposureConfig, DeviceListItem, DevicesList, RawLares4Config } from './types';
+export type { RuntimeConfig } from './runtime-config';
 
 export class Lares4Platform implements DynamicPlatformPlugin {
     public readonly Service: typeof Service;
     public readonly Characteristic: typeof Characteristic;
     public readonly accessories: Map<string, PlatformAccessory> = new Map();
     public readonly accessoryHandlers: Map<string, AccessoryHandler> = new Map();
+    /** The user's config with every key this plugin reads already validated (see `runtimeConfig`). */
+    public readonly config: Lares4Config;
 
     public wsClient?: KseniaWebSocketClient;
     public mqttBridge?: MqttBridge;
 
-    private readonly discoveredDevices: Map<string, KseniaDevice> = new Map();
-    private readonly matterDevices: Map<string, KseniaDevice> = new Map();
     private readonly activeDiscoveredUUIDs: Set<string> = new Set();
     private readonly accessoryRegistry: AccessoryRegistry;
     private readonly matterRegistry: MatterAccessoryRegistry;
@@ -50,16 +54,29 @@ export class Lares4Platform implements DynamicPlatformPlugin {
     private readonly handlerService: AccessoryHandlerService;
     private readonly configFileService: PlatformConfigFileService;
     private readonly ksaImportService: KsaImportService;
+    private readonly deviceEvents: DeviceEventRouter;
+    private readonly syncLifecycle: SyncLifecycle;
+    private runtime: RuntimeConfig;
     private debugCapture?: DebugCaptureManager;
+    /** Set at shutdown: an initialization still in progress must not connect afterwards. */
+    private shuttingDown = false;
+
+    /** Homebridge's logger held to the configured `logLevel`: every service logs through it. */
+    public readonly log: Logger;
 
     constructor(
-        public readonly log: Logger,
-        public readonly config: Lares4Config,
+        log: Logger,
+        config: RawLares4Config,
         public readonly api: API,
     ) {
         this.Service = api.hap.Service;
         this.Characteristic = api.hap.Characteristic;
-        this.discoveryService = new DiscoveryService(this.config, this.log);
+        // The only place the raw config is interpreted: problems are logged here, once.
+        this.runtime = resolveRuntimeConfig(config, log);
+        this.log = createLeveledLogger(log, this.runtime.logLevel);
+        reportDeprecatedKeys(config, this.log);
+        this.config = toPlatformConfig(config, this.runtime);
+        this.discoveryService = new DiscoveryService(this.config, this.log, this.runtime);
         this.lifecycleService = new PlatformLifecycleService(this.log);
         this.deviceListService = new DeviceListService({
             log: this.log,
@@ -90,48 +107,48 @@ export class Lares4Platform implements DynamicPlatformPlugin {
             log: this.log,
             getWsClient: () => this.wsClient,
             storagePath: this.api.user.storagePath(),
-            momentaryAutoOffMs: this.config?.scenarioAutoOffDelay,
+            momentaryAutoOffMs: this.runtime.scenarioAutoOffDelay,
             isDeviceExposed: (device: KseniaDevice): boolean => this.isMatterEligible(device),
-            recoveryRequests: normalizeMatterRecoveryRequests(this.config.matterRecoveryRequests),
-            unregisterTimeoutMs: this.config.matterUnregisterTimeoutMs,
+            recoveryRequests: this.runtime.matterRecoveryRequests,
+            unregisterTimeoutMs: this.runtime.matterUnregisterTimeoutMs,
+        });
+        this.deviceEvents = new DeviceEventRouter({
+            log: this.log,
+            discoveryService: this.discoveryService,
+            deviceListService: this.deviceListService,
+            accessoryRegistry: this.accessoryRegistry,
+            matterRegistry: this.matterRegistry,
+            getMqttBridge: () => this.mqttBridge,
+        });
+        this.syncLifecycle = new SyncLifecycle({
+            log: this.log,
+            accessoryRegistry: this.accessoryRegistry,
+            matterRegistry: this.matterRegistry,
+            eligibleMatterDevices: (): KseniaDevice[] => [...this.deviceEvents.matterSnapshots]
+                .filter((device: KseniaDevice): boolean => this.isMatterEligible(device)),
+            onFirstSyncComplete: (discoveredIds: ReadonlySet<string>): void =>
+                reportConfigOverrides(this.runtime, discoveredIds, this.log),
+            onPanelConnection: (connected: boolean): void => this.mqttBridge?.setPanelConnected(connected),
         });
 
-        if (!config) {
-            this.log.error('No configuration found');
-            return;
-        }
-        if (!config.ip) {
-            this.log.error('IP address missing in configuration');
-            return;
-        }
-        if (!config.pin) {
-            this.log.error('PIN missing in configuration');
-            return;
-        }
-        // A PIN typed as a number in the JSON editor would escape every string-based mask and scrub.
-        this.config.pin = String(config.pin);
-
-        initTelemetry(this.config.telemetry, PLUGIN_VERSION_RAW, [
-            this.config.ip,
-            this.config.pin,
-            this.config.sender,
-        ].filter((v): v is string => typeof v === 'string'));
+        if (!hasConnectionConfig(config, this.runtime, this.log)) return;
 
         this.log.debug('Platform initialization completed:', this.config.name);
 
         this.api.on('didFinishLaunching', (): void => {
             this.log.debug('didFinishLaunching callback executed');
             this.initializeLares4().catch((error: unknown): void => {
-                this.log.error(
-                    'Failed to initialize Lares4:',
-                    error instanceof Error ? error.message : String(error),
-                );
-                captureError(error, { context: 'didFinishLaunching' });
+                this.log.error('Failed to initialize Lares4:', toErrorMessage(error));
             });
         });
         this.api.on('shutdown', (): void => {
             this.cleanupConnections();
         });
+    }
+
+    /** Validated config with nothing optional where a default exists; prefer it to `config`. */
+    public get runtimeConfig(): RuntimeConfig {
+        return this.runtime;
     }
 
     public configureMatterAccessory(accessory: MatterAccessory): void {
@@ -140,95 +157,53 @@ export class Lares4Platform implements DynamicPlatformPlugin {
 
     private async initializeLares4(): Promise<void> {
         try {
+            if (this.initAborted()) return;
             this.log.info('Initializing Ksenia Lares4 connection...');
-            this.accessoryRegistry.startDiscoveryCycle();
-            this.matterRegistry.startDiscoveryCycle();
 
-            const useHttps = this.config.https !== false;
-            const port = this.config.port ?? (useHttps ? 443 : 80);
-            if (!this.config.ip || !this.config.pin) {
-                this.log.error('Configurazione mancante: IP e PIN sono obbligatori');
+            if (!this.runtime.ip || !this.runtime.pin) {
+                this.log.error('Configuration missing: IP and PIN are required');
                 return;
             }
 
+            // The first thing a start does with the storage directory: clear what a crashed write left.
+            await this.configFileService.removeOrphanedTemporaryFiles();
+            if (this.initAborted()) return;
+
             const ksaCache = await this.ksaImportService.prepare(this.config, PLATFORM_NAME);
+            // Nothing below awaits until connect(): one check covers the client,
+            // the MQTT bridge, the debug capture and the connection.
+            if (this.initAborted()) return;
 
-            this.wsClient = new KseniaWebSocketClient(
-                this.config.ip,
-                port,
-                useHttps,
-                this.config.sender ?? 'homebridge',
-                this.config.pin,
-                this.log,
-                {
-                    debug: this.config.debug ?? false,
-                    logLevel: getEffectiveLogLevel(this.config.logLevel, this.config.debug),
-                    reconnectInterval: this.config.reconnectInterval ?? 5000,
-                    heartbeatInterval: this.config.heartbeatInterval ?? 30000,
-                    commandTimeoutMs: this.config.commandTimeoutMs ?? 8000,
-                    allowInsecureTls: this.config.allowInsecureTls ?? false,
-                    exposePartialArmScenarios: this.config.exposePartialArmScenarios === true,
-                    domusThermostat: this.config.domusThermostat,
-                    ksaCache,
-                },
-            );
+            // The KSA import may have replaced mappings in `this.config`: read those sections back.
+            this.runtime = refreshKsaSections(this.runtime, this.config, this.log);
+            const { ip, pin } = this.runtime;
+            if (!ip || !pin) return;
+            this.wsClient = createWebSocketClient({ ...this.runtime, ip, pin }, this.log, ksaCache);
+            // A cached accessory of a device the exposure policy now hides is treated as excluded.
+            this.discoveryService.attachExposurePolicy(clientExposurePolicy(this.wsClient));
 
-            if (this.config.allowInsecureTls) {
-                this.log.warn(
-                    'TLS certificate verification is disabled (allowInsecureTls=true). Use only on trusted local networks.',
-                );
-            }
-
-            this.wsClient.onDeviceDiscovered = (device: KseniaDevice): void => {
-                this.handleDeviceDiscovered(device);
-            };
-            this.wsClient.onDeviceStatusUpdate = (device: KseniaDevice): void => {
-                this.handleDeviceStatusUpdate(device);
-            };
-            this.wsClient.onInitialSyncComplete = (): void => {
-                this.handleInitialSyncComplete();
-            };
-            this.wsClient.onConnected = (): void => this.matterRegistry.setPanelReachable(true);
-            this.wsClient.onDisconnected = (): void => this.matterRegistry.setPanelReachable(false);
             // MQTT and debug capture must not depend on the first connect: if the
             // panel is offline at boot, connect() rejects while the client keeps
-            // reconnecting in the background.
-            if (this.config.mqtt?.enabled) {
-                this.mqttBridge = new MqttBridge(this.config.mqtt, this.log, this);
+            // reconnecting in the background. The bridge exists before `attach`,
+            // which reports the panel as not connected yet.
+            if (this.runtime.mqtt?.enabled) {
+                this.mqttBridge = new MqttBridge(this.runtime.mqtt, this.log, this, {
+                    isDeviceExcluded: (device: KseniaDevice): boolean => this.discoveryService.isDeviceExcluded(device),
+                });
                 this.log.info('MQTT Bridge initialized');
             }
+            this.syncLifecycle.attach(this.wsClient, this.deviceEvents);
 
-            if (this.config.generateDebugFile) {
-                // After a child-bridge restart, Apple Home / Matter mesh can need several
-                // minutes to become responsive again. The default 60s window often closes
-                // before the user can trigger the failing scenario from HomeKit, so we make
-                // it configurable via `debugCaptureDurationMs`. Allowed range is 10s..30min.
-                const requested = this.config.debugCaptureDurationMs;
-                const durationMs = Math.max(
-                    10_000,
-                    Math.min(1_800_000, typeof requested === 'number' && Number.isFinite(requested) ? requested : 60_000),
-                );
-                const durationSeconds = Math.round(durationMs / 1000);
-                this.log.warn(`[DEBUG] Debug capture requested - starting ${durationSeconds}-second capture...`);
-                this.debugCapture = new DebugCaptureManager(this.log, this.api.user.storagePath());
-                this.debugCapture.startCapture(this.wsClient, durationMs);
-                void this.configFileService.disableDebugFlag(PLATFORM_NAME);
+            if (this.runtime.generateDebugFile) {
+                this.debugCapture = startRequestedDebugCapture(this.runtime.debugCaptureDurationMs, this.log, this.api.user.storagePath(), this.wsClient);
+                void this.configFileService.disableDebugFlag(PLATFORM_NAME, this.blockSelector());
             }
 
             await this.wsClient.connect();
 
             this.log.info('Ksenia Lares4 initialized successfully');
         } catch (error: unknown) {
-            this.log.error(
-                'Lares4 initialization error:',
-                error instanceof Error ? error.message : String(error),
-            );
-            // A TLS failure fixed by allowInsecureTls is a setup issue, already
-            // explained in the log by the client: it is not a bug to report.
-            const tlsContext = { useHttps: this.config.https !== false, allowInsecureTls: this.config.allowInsecureTls === true };
-            if (!tlsConfigurationHint(error, tlsContext)) {
-                captureError(error, { context: 'initializeLares4' });
-            }
+            this.log.error('Lares4 initialization error:', toErrorMessage(error));
         }
     }
 
@@ -237,71 +212,30 @@ export class Lares4Platform implements DynamicPlatformPlugin {
      * `matterExposure` opt-out. HAP and MQTT paths are NOT affected by this.
      */
     private isMatterEligible(device: KseniaDevice): boolean {
-        // Arming scenarios hidden by the security policy count as not exposed, so a
-        // cache-restored endpoint left from an older version is pruned like one of
-        // a disabled category.
-        if (device.type === 'scenario' && this.wsClient?.isScenarioSuppressed(device.id)) return false;
+        // Devices the exposure policy hides (arming scenarios included) count as
+        // excluded in `resolveMatterPolicy`, so a cache-restored endpoint left
+        // from an older version is pruned like one of a disabled category.
         return this.discoveryService.resolveMatterPolicy(device).exposed;
     }
 
-    private handleInitialSyncComplete(): void {
-        this.log.info('Initial synchronization completed, finalizing Matter name-map and pruning stale accessories...');
-        this.accessoryRegistry.pruneStaleAccessories();
-        // Two-phase naming, phase 2: with the full device set known, batch-compute
-        // the authoritative name-map, persist it and refresh outliers — then prune.
-        const eligibleDevices = [...this.matterDevices.values()]
-            .filter((device: KseniaDevice): boolean => this.isMatterEligible(device));
-        this.matterRegistry
-            .finalizeNameMap(eligibleDevices)
-            .catch((err: unknown) => {
-                this.log.warn('[Matter] Name-map finalize error:', err instanceof Error ? err.message : String(err));
-            })
-            .then(() => this.matterRegistry.pruneStaleAccessories())
-            .catch((err: unknown) => {
-                this.log.warn('[Matter] Prune error:', err instanceof Error ? err.message : String(err));
-            });
+    /** What tells this instance's block apart in config.json when it holds several. */
+    private blockSelector(): PlatformBlockSelector {
+        return { name: this.config.name, ip: this.runtime.ip };
+    }
+
+    private initAborted(): boolean {
+        if (this.shuttingDown) this.log.debug('Initialization stopped: Homebridge is shutting down');
+        return this.shuttingDown;
     }
 
     private cleanupConnections(): void {
+        this.shuttingDown = true;
         this.lifecycleService.cleanupConnections((): void => {
             // Flush before disconnecting: both write synchronously, Homebridge exits right after.
             this.debugCapture?.shutdown();
             this.deviceListService.flush();
             this.wsClient?.disconnect();
             this.mqttBridge?.disconnect();
-        });
-        closeTelemetry();
-    }
-
-    private handleDeviceDiscovered(device: KseniaDevice): void {
-        this.discoveredDevices.set(device.id, device);
-        this.deviceListService.saveDevicesList(this.discoveredDevices.values());
-
-        if (this.discoveryService.shouldExcludeDevice(device)) {
-            this.log.info(`Device excluded: ${device.type} - ${device.name}`);
-            return;
-        }
-
-        const sharedDevice = this.discoveryService.applyCustomName(device);
-        const matterDevice = this.discoveryService.applyMatterName(device);
-        this.matterDevices.set(device.id, matterDevice);
-        this.log.info(`Device discovered: ${sharedDevice.type} - ${sharedDevice.name}`);
-        this.addAccessory(sharedDevice);
-        this.matterRegistry.addOrUpdateAccessory(matterDevice).catch((err: unknown) => {
-            this.log.warn(`[Matter] Registration error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
-        });
-    }
-
-    private handleDeviceStatusUpdate(device: KseniaDevice): void {
-        const sharedDevice = this.discoveryService.applyCustomName(device);
-        const matterDevice = this.discoveryService.applyMatterName(device);
-        this.discoveredDevices.set(device.id, device);
-        this.matterDevices.set(device.id, matterDevice);
-        this.log.debug(`Device status update: ${sharedDevice.name}`);
-        this.updateAccessory(sharedDevice);
-        this.mqttBridge?.publishDeviceState(sharedDevice);
-        this.matterRegistry.updateAccessoryState(matterDevice).catch((err: unknown) => {
-            this.log.debug(`[Matter] State update error for ${matterDevice.name}:`, err instanceof Error ? err.message : String(err));
         });
     }
 

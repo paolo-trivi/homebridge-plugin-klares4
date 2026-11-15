@@ -1,22 +1,35 @@
-import WebSocket from 'ws';
 import type { Logger } from 'homebridge';
 import { LogLevel, maskSensitiveData } from '../log-levels';
 import { stripDevicePrefix } from '../device-id';
 import type { ThermostatMode } from '../thermostat-mode';
-import { CommandDispatcher, type CommandAcknowledgement } from '../websocket/command-dispatcher';
-import {
-    OutputCommandConfirmationTracker,
-    type OutputConfirmationHandle,
-    type StateConfirmation,
-} from '../websocket/output-command-confirmation';
+import type { CommandDispatcher } from '../websocket/command-dispatcher';
+import type { OutputCommandConfirmationTracker } from '../websocket/output-command-confirmation';
 import { clampValue } from '../websocket/device-state-projector';
-import { WsTransport } from '../websocket/ws-transport';
+import type { WsTransport } from '../websocket/ws-transport';
 import { ThermostatCommandService } from './thermostat-command-service';
-import type { KseniaMessage, KseniaMessagePayload, KseniaWebSocketOptions } from '../types';
+import type { KseniaDevice, KseniaMessage, KseniaWebSocketOptions } from '../types';
 import type { KseniaCommandPayload, RawMessageDirection, SendCommandOptions, WebSocketClientState } from './types';
 import { calculateCRC16 } from './crc16';
-import { isIgnoredScenarioCategory } from './device-parsers';
-import { logMutationOutcome, mutationOptions } from './command-outcome';
+import { CommandSender } from './command-sender';
+import { resolveScenarioExposure, scenarioOptInIds } from './device-parsers';
+import { type MutationOutcome, mutationOptions, reportMutationOutcome } from './command-outcome';
+import { coverTargetMatches, dimmerLevelMatches, lightStateMatches } from './output-state-matchers';
+import { ValidationKlaresError } from '../errors';
+
+const SCENARIO_REFUSAL = {
+    'arming': 'it arms or disarms the alarm',
+    'partial-arm': 'it partially arms the alarm (exposePartialArmScenarios is off)',
+    'unknown-category': 'its category is not a known harmless one (list it in exposeScenarios to allow it)',
+} as const;
+
+/** WS-08: NaN and Infinity used to become "close" / "off" through the clamp. */
+function requireFinite(value: unknown, kind: string, deviceId: string): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new ValidationKlaresError(`${kind} ${String(deviceId)}: value must be a finite number`);
+    }
+    return value;
+}
+
 interface CommandServiceDeps {
     state: WebSocketClientState;
     sender: string;
@@ -28,18 +41,28 @@ interface CommandServiceDeps {
     outputConfirmation?: OutputCommandConfirmationTracker;
     wsTransport: WsTransport;
     emitRawMessage: (direction: RawMessageDirection, rawMessage: string) => void;
-} export class CommandService {
+    /** Realtime status channel: an acknowledged thermostat write reaches HomeKit, Matter and MQTT through it. */
+    emitDeviceStatusUpdate?: (device: KseniaDevice) => void;
+}
+
+export class CommandService {
     private readonly thermostatCommands: ThermostatCommandService;
+    private readonly commandSender: CommandSender;
+
     constructor(private readonly deps: CommandServiceDeps) {
+        this.commandSender = new CommandSender(deps);
         // Late-bound so a replaced sendKseniaCommand (tests) is still the one used.
         this.thermostatCommands = new ThermostatCommandService({
             state: deps.state,
             log: deps.log,
             logLevel: deps.logLevel,
             commandDispatcher: deps.commandDispatcher,
+            commandTimeoutMs: deps.options.commandTimeoutMs ?? 8000,
             send: (cmd, payloadType, payload, options) => this.sendKseniaCommand(cmd, payloadType, payload, options),
+            emitDeviceStatusUpdate: deps.emitDeviceStatusUpdate,
         });
     }
+
     public async sendLoginCommand(): Promise<void> {
         const loginMessage: KseniaMessage = {
             SENDER: this.deps.sender,
@@ -58,9 +81,10 @@ interface CommandServiceDeps {
         if (this.deps.state.pendingLogin) this.deps.state.pendingLogin.messageId = loginMessage.ID;
         this.deps.log.info('Executing login...');
         const messageStr = JSON.stringify(loginMessage);
-        this.deps.log.info(`Sending: ${maskSensitiveData(messageStr)}`);
-        await this.sendRawMessage(messageStr);
+        if (this.deps.logLevel >= LogLevel.DEBUG) this.deps.log.debug(`Sending: ${maskSensitiveData(messageStr)}`);
+        await this.commandSender.sendRaw(messageStr);
     }
+
     public async requestSystemData(): Promise<void> {
         if (!this.deps.state.idLogin) {
             this.deps.log.error('ID_LOGIN not available');
@@ -85,91 +109,64 @@ interface CommandServiceDeps {
             ],
         });
     }
+
     public async switchLight(lightId: string, on: boolean): Promise<void> {
-        if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const systemOutputId = stripDevicePrefix(lightId);
-        await this.deps.commandDispatcher.enqueueDeviceCommand(lightId, async (): Promise<void> => {
-            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
-                ID_LOGIN: 'true',
-                PIN: 'true',
-                OUTPUT: {
-                    ID: systemOutputId,
-                    STA: on ? 'ON' : 'OFF',
-                },
-            }, mutationOptions(systemOutputId, (status) =>
-                status.STA.trim().toUpperCase() === (on ? 'ON' : 'OFF')));
-            logMutationOutcome(this.deps.log, 'Light', systemOutputId, on ? 'ON' : 'OFF', outcome);
+        if (typeof on !== 'boolean') throw new ValidationKlaresError(`Light ${String(lightId)}: on/off must be a boolean`);
+        const systemOutputId = this.discoveredOutputId(lightId, 'light');
+        const target = on ? 'ON' : 'OFF';
+        await this.enqueueObservable(`light_${systemOutputId}`, async (): Promise<void> => {
+            const outcome = await this.sendOutputCommand(
+                systemOutputId, target, mutationOptions(systemOutputId, lightStateMatches(on)),
+            );
+            reportMutationOutcome(this.deps.log, 'Light', systemOutputId, target, outcome);
         });
     }
+
     public async dimLight(lightId: string, brightness: number): Promise<void> {
-        if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const safeBrightness = clampValue(Math.round(brightness), 0, 100);
-        const systemOutputId = stripDevicePrefix(lightId);
-        await this.deps.commandDispatcher.enqueueDeviceCommand(lightId, async (): Promise<void> => {
-            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
-                ID_LOGIN: 'true',
-                PIN: 'true',
-                OUTPUT: {
-                    ID: systemOutputId,
-                    STA: safeBrightness.toString(),
-                },
-            }, mutationOptions(systemOutputId, (status) => {
-                const position = status.POS === undefined ? undefined : Number(status.POS);
-                return position === safeBrightness
-                    || (safeBrightness === 0 && status.STA.trim().toUpperCase() === 'OFF');
-            }));
-            logMutationOutcome(this.deps.log, 'Dimmer', systemOutputId, `${safeBrightness}%`, outcome);
+        const safeBrightness = clampValue(Math.round(requireFinite(brightness, 'Dimmer', lightId)), 0, 100);
+        const systemOutputId = this.discoveredOutputId(lightId, 'light');
+        await this.enqueueObservable(`light_${systemOutputId}`, async (): Promise<void> => {
+            const outcome = await this.sendOutputCommand(
+                systemOutputId, safeBrightness.toString(), mutationOptions(systemOutputId, dimmerLevelMatches(safeBrightness)),
+            );
+            reportMutationOutcome(this.deps.log, 'Dimmer', systemOutputId, `${safeBrightness}%`, outcome);
         });
     }
+
     public async moveCover(coverId: string, position: number): Promise<void> {
-        if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const systemOutputId = stripDevicePrefix(coverId);
-        const safePosition = clampValue(Math.round(position), 0, 100);
+        const safePosition = clampValue(Math.round(requireFinite(position, 'Cover', coverId)), 0, 100);
+        const systemOutputId = this.discoveredOutputId(coverId, 'cover');
         const command = safePosition === 0 ? 'DOWN' : safePosition === 100 ? 'UP' : safePosition.toString();
-        await this.deps.commandDispatcher.enqueueDeviceCommand(coverId, async (): Promise<void> => {
-            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
-                ID_LOGIN: 'true',
-                PIN: 'true',
-                OUTPUT: {
-                    ID: systemOutputId,
-                    STA: command,
-                },
-            }, mutationOptions(systemOutputId, (status) => {
-                const target = Number(status.TPOS ?? status.POS);
-                const state = status.STA.trim().toUpperCase();
-                return target === safePosition
-                    || (safePosition === 100 && (state === 'UP' || state === 'OPEN'))
-                    || (safePosition === 0 && (state === 'DOWN' || state === 'CLOSE'));
-            }));
-            logMutationOutcome(this.deps.log, 'Cover', systemOutputId, command, outcome);
+        await this.enqueueObservable(`cover_${systemOutputId}`, async (): Promise<void> => {
+            const outcome = await this.sendOutputCommand(
+                systemOutputId, command, mutationOptions(systemOutputId, coverTargetMatches(safePosition)),
+            );
+            reportMutationOutcome(this.deps.log, 'Cover', systemOutputId, command, outcome);
         });
     }
+
     public async toggleGate(gateId: string): Promise<void> {
-        if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const systemOutputId = stripDevicePrefix(gateId);
-        await this.deps.commandDispatcher.enqueueDeviceCommand(gateId, async (): Promise<void> => {
-            const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
-                ID_LOGIN: 'true',
-                PIN: 'true',
-                OUTPUT: {
-                    ID: systemOutputId,
-                    STA: 'ON',
-                },
-            }, mutationOptions());
-            logMutationOutcome(this.deps.log, 'Gate', systemOutputId, 'ON (momentary)', outcome);
-        });
+        const systemOutputId = this.discoveredOutputId(gateId, 'gate');
+        await this.deps.commandDispatcher.enqueueDeviceCommand(`gate_${systemOutputId}`, async (): Promise<void> => {
+            const outcome = await this.sendOutputCommand(systemOutputId, 'ON', mutationOptions());
+            reportMutationOutcome(this.deps.log, 'Gate', systemOutputId, 'ON (momentary)', outcome);
+        }, { policy: 'reject-while-busy' });
     }
+
     public async setThermostatMode(thermostatId: string, mode: ThermostatMode): Promise<void> {
         await this.thermostatCommands.setThermostatMode(thermostatId, mode);
     }
+
     public async setThermostatTemperature(thermostatId: string, temperature: number): Promise<void> {
         await this.thermostatCommands.setThermostatTemperature(thermostatId, temperature);
     }
+
     public async triggerScenario(scenarioId: string): Promise<void> {
         if (!this.deps.state.idLogin) throw new Error('Not connected');
-        const systemScenarioId = stripDevicePrefix(scenarioId);
+        const systemScenarioId = stripDevicePrefix(String(scenarioId));
         this.assertScenarioAllowed(systemScenarioId);
-        await this.deps.commandDispatcher.enqueueDeviceCommand(scenarioId, async (): Promise<void> => {
+        this.discoveredOutputId(scenarioId, 'scenario');
+        await this.deps.commandDispatcher.enqueueDeviceCommand(`scenario_${systemScenarioId}`, async (): Promise<void> => {
             const outcome = await this.sendKseniaCommand('CMD_USR', 'CMD_EXE_SCENARIO', {
                 ID_LOGIN: 'true',
                 PIN: 'true',
@@ -177,99 +174,66 @@ interface CommandServiceDeps {
                     ID: systemScenarioId,
                 },
             }, mutationOptions());
-            logMutationOutcome(this.deps.log, 'Scenario', systemScenarioId, 'trigger', outcome);
-        });
+            reportMutationOutcome(this.deps.log, 'Scenario', systemScenarioId, 'trigger', outcome);
+        }, { policy: 'reject-while-busy' });
     }
-    /** Defense in depth: never run an arming scenario with the stored PIN, even if an accessory exists. */
+
+    /** Defense in depth: never run a scenario the exposure policy hides, even if an accessory exists. */
     private assertScenarioAllowed(systemScenarioId: string): void {
         const category = this.deps.state.scenarioCategoryById?.get(systemScenarioId);
         if (category === undefined) {
-            throw new Error(`Scenario ${systemScenarioId} refused: not listed by the panel`);
+            throw new ValidationKlaresError(`Scenario ${systemScenarioId} refused: not listed by the panel`);
         }
-        if (isIgnoredScenarioCategory(category, this.deps.options.exposePartialArmScenarios ?? false)) {
-            throw new Error(`Scenario ${systemScenarioId} refused: category ${category} arms or disarms the alarm`);
+        const exposure = resolveScenarioExposure(
+            category,
+            this.deps.options.exposePartialArmScenarios ?? false,
+            scenarioOptInIds(this.deps.options.exposeScenarios).has(systemScenarioId),
+        );
+        if (!exposure.exposed) {
+            throw new ValidationKlaresError(`Scenario ${systemScenarioId} refused: ${SCENARIO_REFUSAL[exposure.reason]}`);
         }
     }
+
+    /**
+     * Defense in depth: a command reaches only an output the client discovered
+     * with that kind. An output the exposure policy hides is not in the client
+     * state, so a stale accessory or a forged MQTT topic cannot drive it.
+     */
+    private discoveredOutputId(deviceId: string, type: 'light' | 'cover' | 'gate' | 'scenario'): string {
+        if (!this.deps.state.idLogin) throw new Error('Not connected');
+        const systemId = stripDevicePrefix(String(deviceId));
+        if (this.deps.state.devices.get(`${type}_${systemId}`)?.type !== type) {
+            throw new ValidationKlaresError(`Command refused: ${String(deviceId)} is not a ${type} discovered on the panel`);
+        }
+        return systemId;
+    }
+
+    /** Observable outputs: the latest request wins, and a request may not wait longer than a command timeout. */
+    private enqueueObservable(key: string, command: () => Promise<void>): Promise<void> {
+        return this.deps.commandDispatcher.enqueueDeviceCommand(key, command, {
+            policy: 'latest-wins',
+            maxWaitMs: this.deps.options.commandTimeoutMs ?? 8000,
+        });
+    }
+
+    private sendOutputCommand(
+        systemOutputId: string,
+        sta: string,
+        options: SendCommandOptions,
+    ): Promise<MutationOutcome> {
+        return this.sendKseniaCommand('CMD_USR', 'CMD_SET_OUTPUT', {
+            ID_LOGIN: 'true',
+            PIN: 'true',
+            OUTPUT: { ID: systemOutputId, STA: sta },
+        }, options);
+    }
+
     private async sendKseniaCommand(
         cmd: string,
         payloadType: string,
         payload: KseniaCommandPayload,
         options: SendCommandOptions = {},
-    ): Promise<CommandAcknowledgement | StateConfirmation | undefined> {
-        if (!this.deps.state.ws || this.deps.state.ws.readyState !== WebSocket.OPEN) {
-            throw new Error('WebSocket not connected');
-        }
-        const processedPayload = this.buildPayload(payload);
-        const id = this.createCommandId();
-        const message: KseniaMessage = {
-            SENDER: this.deps.sender,
-            RECEIVER: '', CMD: cmd, ID: id, PAYLOAD_TYPE: payloadType,
-            PAYLOAD: processedPayload as KseniaMessagePayload, TIMESTAMP: Math.floor(Date.now() / 1000).toString(), CRC_16: '0x0000',
-        };
-        message.CRC_16 = calculateCRC16(JSON.stringify(message));
-        const jsonMessage = JSON.stringify(message);
-        const isPing = cmd === 'PING' || payloadType === 'HEARTBEAT';
-        if (!isPing && this.deps.logLevel >= LogLevel.DEBUG) {
-            this.deps.log.debug(`Sending: ${maskSensitiveData(jsonMessage)}`);
-        }
-        let pendingResponsePromise: Promise<CommandAcknowledgement> | undefined;
-        let stateConfirmation: OutputConfirmationHandle | undefined;
-        // Both registrations sit inside the try so the finally always clears
-        // them, and each promise gets a no-op handler at creation: it can be
-        // rejected (timeout, disconnect) before or without being awaited, and
-        // Homebridge turns an unhandled rejection into a bridge restart.
-        try {
-            if (options.awaitResponse) {
-                pendingResponsePromise = this.deps.commandDispatcher.registerPendingCommand(
-                    id,
-                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                    options.responseCmds,
-                    options.requirePositiveResult,
-                    options.allowGenericErrorFallback,
-                    options.responsePayloadTypes,
-                );
-                pendingResponsePromise.catch((): void => undefined);
-            } else {
-                this.deps.commandDispatcher.noteFireAndForget(id);
-            }
-            if (options.stateConfirmation) {
-                if (!this.deps.outputConfirmation) {
-                    throw new Error('Output confirmation tracker not initialized');
-                }
-                stateConfirmation = this.deps.outputConfirmation.register(
-                    options.stateConfirmation.outputId,
-                    options.timeoutMs ?? this.deps.options.commandTimeoutMs ?? 8000,
-                    options.stateConfirmation.matches,
-                );
-                stateConfirmation.promise.catch((): void => undefined);
-            }
-            await this.sendRawMessage(jsonMessage);
-            if (pendingResponsePromise && stateConfirmation) {
-                return await Promise.race([pendingResponsePromise, stateConfirmation.promise]);
-            }
-            if (pendingResponsePromise) return await pendingResponsePromise;
-            if (stateConfirmation) return await stateConfirmation.promise;
-            return undefined;
-        } finally {
-            this.deps.commandDispatcher.clearPendingCommand(id);
-            stateConfirmation?.cancel();
-        }
+    ): Promise<MutationOutcome> {
+        return this.commandSender.send(cmd, payloadType, payload, options);
     }
-    private createCommandId(): string {
-        // 16-bit IDs: the panel echoes the ID modulo 65536 (86152 comes back as
-        // 20616), so a larger ID could never be correlated exactly.
-        for (let attempt = 0; attempt < 1000; attempt += 1) {
-            const candidate = (1 + Math.floor(Math.random() * 65535)).toString();
-            if (!this.deps.commandDispatcher.isKnownCommandId(candidate)) return candidate;
-        }
-        throw new Error('Unable to allocate a unique command ID');
-    }
-    private buildPayload(payload: KseniaCommandPayload): KseniaCommandPayload {
-        return {
-            ...payload,
-            ...(payload?.ID_LOGIN === 'true' && { ID_LOGIN: this.deps.state.idLogin }),
-            ...(payload?.PIN === 'true' && { PIN: this.deps.pin }),
-        };
-    }
-    private async sendRawMessage(rawMessage: string): Promise<void> { this.deps.emitRawMessage('out', rawMessage); await this.deps.wsTransport.send(this.deps.state.ws, rawMessage); }
 }

@@ -1,10 +1,13 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
+import { recordObservation } from '../device-observation';
 import { hasAccessoryMetadataChanged } from './matter-device-mapper';
 import type { MatterRegistration } from './matter-registration-recovery';
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
 import { mergeStateUpdates } from './matter-state-updates';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
+import { currentThermostatAttributes } from './matter-thermostat-push';
+import { toErrorMessage } from '../errors';
 
 /**
  * The queue records every thermostat-cluster push so the mapper's
@@ -22,9 +25,12 @@ export function createStateUpdateQueue(
         api,
         log,
         registrations,
-        (err) => (err instanceof Error ? err.message : String(err)),
-        (uuid, clusterName, attrs) => {
-            if (clusterName === 'thermostat') tracker.recordPushed(uuid, attrs);
+        toErrorMessage,
+        (reg, update) => {
+            if (update.clusterName !== 'thermostat') return update.attributes;
+            const attrs = currentThermostatAttributes(reg.matterAccessory.context?.device as KseniaDevice | undefined, update.attributes, tracker);
+            tracker.recordPushed(reg.uuid, attrs, reg.matterAccessory.clusters?.thermostat as Record<string, unknown> | undefined);
+            return attrs;
         },
     );
 }
@@ -38,6 +44,7 @@ export function createStateUpdateQueue(
  */
 export function enqueueDeviceState(reg: MatterRegistration, device: KseniaDevice, thermostatAsFallback: boolean): void {
     reg.matterAccessory.context.device = device;
+    recordObservation(reg.matterAccessory.context, device);
     const clusters = reg.matterAccessory.clusters ?? {};
     mergeStateUpdates(reg.pendingStateUpdates, device, thermostatAsFallback, (name) => name in clusters);
 }
@@ -73,16 +80,17 @@ export function logRegisterRequested(
     log: Logger,
     device: KseniaDevice,
     matterName: string,
-    flags: { fromCache: boolean; fallback: boolean; isRename: boolean },
+    flags: { fromCache: boolean; fallback: boolean; reregister?: 'rename' | 'upgrade' },
 ): void {
     const nameAnnotation = matterName !== device.name
         ? ` -> "${matterName}" [${matterName.length}ch]`
         : ` [${matterName.length}ch]`;
-    log.info(
-        `[Matter] register requested: ${device.name}${nameAnnotation} `
+    const line = `[Matter] register requested: ${device.name}${nameAnnotation} `
         + `(${device.type}, uuid=${device.id})`
-        + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.isRename ? ' [rename]' : ''}`,
-    );
+        + `${flags.fromCache ? ' [cache restore]' : ''}${flags.fallback ? ' [fallback]' : ''}${flags.reregister ? ` [${flags.reregister}]` : ''}`;
+    // The first registration of every device at every start is a debug line; a fallback or a replacement is an event.
+    if (flags.fallback || flags.reregister) log.info(line);
+    else log.debug(line);
 }
 
 export interface CachedEndpointLabel {
@@ -91,10 +99,13 @@ export interface CachedEndpointLabel {
 }
 
 /**
- * The name a just-registered endpoint really shows. Homebridge 2.4 attaches a
- * same-shaped registration to the endpoint restored from its cache and keeps
- * that endpoint as it is, so its nodeLabel stays the cached displayName; only
- * a fresh endpoint takes the new one. The name finalizer diffs against this.
+ * Best guess of the name a just-registered endpoint shows, before anything
+ * reads it. Homebridge attaches a same-shaped registration to the endpoint
+ * restored from its cache and keeps that endpoint as it is, so its nodeLabel
+ * stays the cached one; only a fresh endpoint takes the new displayName. The
+ * shape test here is the device type name only, while Homebridge compares five
+ * components (AccessoryManager.js:124-128): the name finalizer therefore reads
+ * the live label and uses this value only when the endpoint cannot be read.
  */
 export function liveNodeLabel(accessory: MatterAccessory, cached: CachedEndpointLabel | undefined): string {
     const attachedInPlace = !!cached?.displayName && cached.deviceTypeName === accessory.deviceType?.name;

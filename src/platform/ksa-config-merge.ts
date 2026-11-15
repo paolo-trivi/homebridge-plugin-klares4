@@ -6,34 +6,56 @@ import type { RoomConfig, RoomMappingConfig } from '../types';
  * never removes or overrides something the user configured.
  */
 
-export const EXCLUSION_KEYS = {
-    outputs: 'excludeOutputs',
-    zones: 'excludeZones',
-    sensors: 'excludeSensors',
-    scenarios: 'excludeScenarios',
-} as const;
-
-/**
- * Union of the user's exclusion list and the suggested IDs, or undefined when
- * the suggestions add nothing (the list must then be left exactly as it is).
- */
-export function mergeExclusionList(existing: unknown, suggested: readonly string[]): string[] | undefined {
-    const current = Array.isArray(existing) ? existing.filter((id): id is string => typeof id === 'string') : [];
-    const additions = suggested.filter((id) => !current.includes(id));
-    if (additions.length === 0) return undefined;
-    return [...new Set([...current, ...additions])];
+/** What the backup adds to a list of pairs, and where the user's own pair says something else. */
+export interface PairMergePlan<T> {
+    additions: T[];
+    conflicts: Array<{ outputId: string; kept: string; backup: string }>;
 }
 
-/** Applies `mergeExclusionList` to every exclusion key of a config object, in place. */
-export function applyExclusionSuggestions(
-    target: Record<string, unknown>,
-    suggestions: Record<keyof typeof EXCLUSION_KEYS, string[]>,
-): void {
-    for (const category of Object.keys(EXCLUSION_KEYS) as Array<keyof typeof EXCLUSION_KEYS>) {
-        const key = EXCLUSION_KEYS[category];
-        const merged = mergeExclusionList(target[key], suggestions[category]);
-        if (merged) target[key] = merged;
+function pairText(value: unknown): string | undefined {
+    if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/** `18` and `thermostat_18` are the same thermostat output. */
+function outputKey(value: unknown): string | undefined {
+    return pairText(value)?.replace(/^thermostat_/, '');
+}
+
+/** The rows of a list as the user wrote it; anything that is not a list is no rows. */
+export function existingRows(value: unknown): unknown[] {
+    return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Thermostat pairs from the backup are added only for outputs the user has no
+ * pair for: the user's pairs always win and are never touched, replaced or
+ * emptied (an empty backup adds nothing). `valueField` is the pair's second
+ * field, compared to report where the user's pair differs from the backup.
+ */
+export function planPairMerge<T extends { thermostatOutputId: string }>(
+    existing: unknown,
+    derived: readonly T[],
+    valueField: Exclude<keyof T & string, 'thermostatOutputId'>,
+): PairMergePlan<T> {
+    const userValueByOutput = new Map<string, string>();
+    for (const row of existingRows(existing)) {
+        if (typeof row !== 'object' || row === null) continue;
+        const record = row as Record<string, unknown>;
+        const output = outputKey(record.thermostatOutputId);
+        if (output !== undefined && !userValueByOutput.has(output)) userValueByOutput.set(output, pairText(record[valueField]) ?? '');
     }
+    const plan: PairMergePlan<T> = { additions: [], conflicts: [] };
+    for (const pair of derived) {
+        const output = outputKey(pair.thermostatOutputId) ?? pair.thermostatOutputId;
+        const kept = userValueByOutput.get(output);
+        if (kept === undefined) {
+            plan.additions.push(pair);
+        } else if (kept !== String(pair[valueField])) {
+            plan.conflicts.push({ outputId: output, kept, backup: String(pair[valueField]) });
+        }
+    }
+    return plan;
 }
 
 function hasNamedRoom(rooms: unknown): boolean {

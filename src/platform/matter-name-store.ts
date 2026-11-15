@@ -1,12 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Logger } from 'homebridge';
+import { writeJsonAtomicSync } from '../atomic-file';
 import type { MatterNameMapEntry } from './matter-name-map';
 import { isValidMatterAccessoryName, priorityOf } from './matter-name-sanitizer';
+import { toErrorMessage } from '../errors';
 
 const STORE_FILENAME = 'klares4-matter-names.json';
 const STORE_VERSION = 2;
-const RESERVATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** How old the `lastSeen` on disk of a device still on the panel may get before the file is rewritten. */
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const KNOWN_TYPES = new Set(['zone', 'sensor', 'cover', 'light', 'thermostat', 'scenario', 'gate']);
 
@@ -23,13 +25,23 @@ interface StoreShape {
  * its *final* collision-resolved displayName from the very first
  * `registerPlatformAccessories` call — no post-registration rename window,
  * regardless of the order the WS discovery emits devices in.
+ *
+ * Every row is loaded whatever its age: a device still on the panel keeps its
+ * name even after a long downtime. Only reservations (devices no longer
+ * discovered) expire, 30 days after they were last seen
+ * (`computeMatterNameMap`). `lastSeen` of the devices still on the panel is
+ * written again once it is a day old, so a reservation always counts from the
+ * last time the device was really seen.
  */
 export class MatterNameStore {
     private readonly filePath: string;
     private lastSignature: string | undefined;
-    private lastWriteAt = 0;
     private loadedVersion: number | undefined;
     private needsRewrite = false;
+    /** Set when the file comes from a newer plugin version: it is never rewritten. */
+    private readOnly = false;
+    /** `lastSeen` of each row as it is on disk. */
+    private readonly diskLastSeen = new Map<string, number>();
 
     constructor(storagePath: string, private readonly log: Logger) {
         this.filePath = path.join(storagePath, STORE_FILENAME);
@@ -40,6 +52,14 @@ export class MatterNameStore {
             if (!fs.existsSync(this.filePath)) return [];
             const raw = fs.readFileSync(this.filePath, 'utf8');
             const parsed = JSON.parse(raw) as Partial<StoreShape>;
+            if (typeof parsed.version === 'number' && parsed.version > STORE_VERSION) {
+                this.readOnly = true;
+                this.log.warn(
+                    `[Matter] name-map ${this.filePath} was written by a newer plugin version (${parsed.version}); `
+                    + 'it is ignored and left untouched. Names are recomputed for this session only.',
+                );
+                return [];
+            }
             if (parsed.version !== 1 && parsed.version !== STORE_VERSION) {
                 this.log.warn(`[Matter] Ignoring name-map with unsupported version ${String(parsed.version)}`);
                 return [];
@@ -49,10 +69,10 @@ export class MatterNameStore {
             const entries = this.validateEntries(rawEntries);
             this.needsRewrite = entries.length !== rawEntries.length || parsed.version !== STORE_VERSION;
             this.lastSignature = this.signature(entries);
-            this.lastWriteAt = Date.now();
+            this.rememberDiskLastSeen(entries);
             return entries;
         } catch (err) {
-            this.log.warn(`[Matter] Could not load name-map store (${this.filePath}): ${err instanceof Error ? err.message : String(err)}`);
+            this.log.warn(`[Matter] Could not load name-map store (${this.filePath}): ${toErrorMessage(err)}`);
             return [];
         }
     }
@@ -61,29 +81,40 @@ export class MatterNameStore {
      * Persist the map. Returns true when the file content actually changed
      * (used to log "map updated" only on genuine panel-side changes).
      */
-    public save(entries: MatterNameMapEntry[]): boolean {
+    public save(entries: MatterNameMapEntry[], now = Date.now()): boolean {
+        if (this.readOnly) return false;
+        const refreshDue = entries.some((entry) => !entry.reserved && this.isStaleOnDisk(entry.uuid, now));
         const validEntries = this.validateEntries(entries);
         const signature = this.signature(validEntries);
         const changed = signature !== this.lastSignature;
-        const refreshDue = Date.now() - this.lastWriteAt >= REFRESH_INTERVAL_MS;
         if (!changed && !refreshDue && !this.needsRewrite && this.loadedVersion === STORE_VERSION) return false;
         try {
             this.backupLegacyStore();
-            const temporaryPath = `${this.filePath}.tmp`;
-            fs.writeFileSync(temporaryPath, this.serialize(validEntries), 'utf8');
-            fs.renameSync(temporaryPath, this.filePath);
+            writeJsonAtomicSync(this.filePath, this.serialize(validEntries));
             this.lastSignature = signature;
-            this.lastWriteAt = Date.now();
             this.loadedVersion = STORE_VERSION;
             this.needsRewrite = false;
+            this.rememberDiskLastSeen(validEntries);
             return changed;
         } catch (err) {
-            this.log.warn(`[Matter] Could not write name-map store (${this.filePath}): ${err instanceof Error ? err.message : String(err)}`);
+            this.log.warn(`[Matter] Could not write name-map store (${this.filePath}): ${toErrorMessage(err)}`);
             return false;
         }
     }
 
-    private serialize(entries: MatterNameMapEntry[]): string {
+    private isStaleOnDisk(uuid: string, now: number): boolean {
+        const onDisk = this.diskLastSeen.get(uuid);
+        return onDisk === undefined || now - onDisk >= REFRESH_INTERVAL_MS;
+    }
+
+    private rememberDiskLastSeen(entries: MatterNameMapEntry[]): void {
+        this.diskLastSeen.clear();
+        for (const entry of entries) {
+            if (typeof entry.lastSeen === 'number') this.diskLastSeen.set(entry.uuid, entry.lastSeen);
+        }
+    }
+
+    private serialize(entries: MatterNameMapEntry[]): StoreShape {
         const names = this.sorted(entries).map((entry) => ({
             uuid: entry.uuid,
             name: entry.name,
@@ -91,8 +122,7 @@ export class MatterNameStore {
             ...(entry.type ? { type: entry.type } : {}),
             ...(typeof entry.lastSeen === 'number' ? { lastSeen: entry.lastSeen } : {}),
         }));
-        const payload: StoreShape = { version: STORE_VERSION, names };
-        return JSON.stringify(payload, null, 2);
+        return { version: STORE_VERSION, names };
     }
 
     private validateEntries(entries: unknown[]): MatterNameMapEntry[] {
@@ -128,8 +158,7 @@ export class MatterNameStore {
         if (entry.type !== undefined && !KNOWN_TYPES.has(entry.type)) return undefined;
         if (this.loadedVersion === STORE_VERSION && entry.lastSeen === undefined) return undefined;
         const lastSeen = entry.lastSeen === undefined ? now : entry.lastSeen;
-        if (lastSeen !== undefined && (!Number.isFinite(lastSeen) || (lastSeen as number) < 0)) return undefined;
-        if (typeof lastSeen === 'number' && now - lastSeen >= RESERVATION_TTL_MS) return undefined;
+        if (typeof lastSeen !== 'number' || !Number.isFinite(lastSeen) || lastSeen < 0) return undefined;
         return { uuid: entry.uuid, name: entry.name, base: entry.base, type: entry.type, lastSeen };
     }
 

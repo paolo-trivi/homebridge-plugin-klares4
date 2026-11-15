@@ -28,8 +28,8 @@ test('normalizer handles NFKC, accents, abbreviations and singular/plural', () =
 
 test('analyzer separates lexical evidence from semantic risk', () => {
   const devices = [
-    device('cover_1', 'cover', 'Finestra Studio'),
-    device('zone_1', 'zone', 'Finestra Studio - Sens.'),
+    device('cover_1', 'cover', 'Finestra Solaio'),
+    device('zone_1', 'zone', 'Finestra Solaio - Sens.'),
   ];
   const result = analyzeMatterVoiceCollisions(devices, entries(devices));
   const finding = result.findings[0];
@@ -40,8 +40,8 @@ test('analyzer separates lexical evidence from semantic risk', () => {
 test('analyzer detects prefix and containment', () => {
   const devices = [
     device('light_1', 'light', 'Faretti'),
-    device('light_2', 'light', 'Faretti Televisione'),
-    device('light_3', 'light', 'Televisione Faretti Sala'),
+    device('light_2', 'light', 'Faretti Libreria'),
+    device('light_3', 'light', 'Libreria Faretti Veranda'),
   ];
   const result = analyzeMatterVoiceCollisions(devices, entries(devices));
   assert.ok(result.findings.some((finding) => finding.lexicalEvidence.includes('prefix')));
@@ -50,18 +50,18 @@ test('analyzer detects prefix and containment', () => {
 
 test('analyzer detects global intent and room equality', () => {
   const devices = [
-    device('scenario_1', 'scenario', 'Spegni Tutto'),
-    device('light_1', 'light', 'Studio'),
+    device('scenario_1', 'scenario', 'Chiudi Tutto'),
+    device('light_1', 'light', 'Solaio'),
   ];
-  const result = analyzeMatterVoiceCollisions(devices, entries(devices), ['Studio']);
+  const result = analyzeMatterVoiceCollisions(devices, entries(devices), ['Solaio']);
   assert.ok(result.findings.some((finding) => finding.riskReasons.includes('intent-collision')));
   assert.ok(result.findings.some((finding) => finding.riskReasons.includes('room-equality')));
 });
 
 test('analyzer output and hash are deterministic', () => {
   const devices = [
-    device('scenario_1', 'scenario', 'Apri Cancello'),
-    device('gate_1', 'gate', 'Cancello'),
+    device('scenario_1', 'scenario', 'Apri Passo Carraio'),
+    device('gate_1', 'gate', 'Passo Carraio'),
   ];
   const map = entries(devices);
   const forward = analyzeMatterVoiceCollisions(devices, map);
@@ -71,18 +71,18 @@ test('analyzer output and hash are deterministic', () => {
 
 test('analyzer reports distinguishing-token truncation separately', () => {
   const devices = [
-    device('cover_1', 'cover', 'Finestra Bagno Matrimoniale'),
-    device('zone_1', 'zone', 'Finestra Bagno Matrimoniale'),
+    device('cover_1', 'cover', 'Finestra Atrio Foresteria'),
+    device('zone_1', 'zone', 'Finestra Atrio Foresteria'),
   ];
   const map = new Map([
-    ['cover_1', { uuid: 'cover_1', name: 'Finestra Bagno Matrimoniale', base: 'Finestra Bagno Matrimoniale', type: 'cover' }],
-    ['zone_1', { uuid: 'zone_1', name: 'Finestra Bagno Matrimoni - Sens.', base: 'Finestra Bagno Matrimoniale', type: 'zone' }],
+    ['cover_1', { uuid: 'cover_1', name: 'Finestra Atrio Foresteria', base: 'Finestra Atrio Foresteria', type: 'cover' }],
+    ['zone_1', { uuid: 'zone_1', name: 'Finestra Atrio Foresteri - Sens.', base: 'Finestra Atrio Foresteria', type: 'zone' }],
   ]);
   const finding = analyzeMatterVoiceCollisions(devices, map).findings[0];
   assert.ok(finding.lexicalEvidence.includes('truncation-loss'));
 });
 
-test('real 109-device fixture produces a stable, non-empty diagnostic', () => {
+test('109-device fixture produces a stable, non-empty diagnostic', () => {
   const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'klares4-devices.json'), 'utf8'));
   const map = new Map(fixture.devices.map((item) => [item.id, {
     uuid: item.id,

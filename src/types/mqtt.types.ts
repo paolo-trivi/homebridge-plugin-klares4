@@ -8,6 +8,8 @@ export interface MqttConfig {
     topicPrefix?: string;
     qos?: 0 | 1 | 2;
     retain?: boolean;
+    /** `false`: state only, the `.../set` command topics are not subscribed. Default `true`. */
+    commands?: boolean;
 }
 
 export interface MqttLightCommand {
@@ -70,6 +72,8 @@ export interface ZoneStatePayload extends DeviceStatePayloadBase {
     armed: boolean;
     fault: boolean;
     bypassed: boolean;
+    /** Tamper (panel field `T`); `false` until the panel reports it, like the other zone flags. Since 2.3.0. */
+    tampered: boolean;
 }
 
 export interface ScenarioStatePayload extends DeviceStatePayloadBase {
@@ -83,3 +87,14 @@ export type DeviceStatePayload =
     | SensorStatePayload
     | ZoneStatePayload
     | ScenarioStatePayload;
+
+/** Connection to the panel as last reported to the bridge; `unknown` until the first report. */
+export type MqttPanelConnection = 'connected' | 'disconnected' | 'unknown';
+
+/**
+ * Retained payload of `<prefix>/status`. `offline` is also the broker-side
+ * last will, so a crashed bridge or a lost network reads as `offline`.
+ */
+export type MqttStatusPayload =
+    | { state: 'online'; panel: MqttPanelConnection; timestamp: string }
+    | { state: 'offline' };

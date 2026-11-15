@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -11,7 +10,9 @@ process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '20';
 process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
 
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-const { makeHb24MatterApi, deviceTypes } = require('./fixtures/hb24-matter-api.js');
+const { makeHbMatterApi, deviceTypes } = require('./fixtures/hb-matter-api.js');
+const { tmpStorage } = require('./fixtures/tmp-storage.js');
+const { waitFor } = require('./fixtures/wait-for.js');
 
 function silentLog() {
     return { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} };
@@ -25,7 +26,7 @@ function thermostat(extras = {}) {
     return {
         id: 'thermostat_18',
         type: 'thermostat',
-        name: 'Riscaldamento Sala',
+        name: 'Riscaldamento Veranda',
         description: '',
         currentTemperature: 21,
         targetTemperature: 20,
@@ -35,8 +36,8 @@ function thermostat(extras = {}) {
     };
 }
 
-function storageWithFallback() {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
+function storageWithFallback(t) {
+    const dir = tmpStorage(t, 'klares4-race-');
     fs.writeFileSync(path.join(dir, 'klares4-matter-fallback.json'), JSON.stringify({
         thermostatAsTemperatureSensor: ['thermostat_18'],
     }));
@@ -53,7 +54,7 @@ function recoveryRegistry(api, storagePath) {
     });
     registry.configureCachedAccessory({
         UUID: 'thermostat_18',
-        displayName: 'Riscaldamento Sala',
+        displayName: 'Riscaldamento Veranda',
         deviceType: deviceTypes.TemperatureSensor,
         clusters: { temperatureMeasurement: { measuredValue: 2100 } },
         context: { device: thermostat() },
@@ -61,9 +62,9 @@ function recoveryRegistry(api, storagePath) {
     return registry;
 }
 
-test('F05: a state update during thermostat recovery joins the in-flight registration instead of registering twice', async () => {
-    const storagePath = storageWithFallback();
-    const hb = makeHb24MatterApi({
+test('F05: a state update during thermostat recovery joins the in-flight registration instead of registering twice', async (t) => {
+    const storagePath = storageWithFallback(t);
+    const hb = makeHbMatterApi({
         restored: [{
             UUID: 'thermostat_18',
             deviceType: deviceTypes.TemperatureSensor,
@@ -89,9 +90,9 @@ test('F05: a state update during thermostat recovery joins the in-flight registr
     assert.equal(saved.thermostats[0].mode, 'native');
 });
 
-test('F05: the joined update is still delivered once the registration settles', async () => {
-    const storagePath = storageWithFallback();
-    const hb = makeHb24MatterApi({
+test('F05: the joined update is still delivered once the registration settles', async (t) => {
+    const storagePath = storageWithFallback(t);
+    const hb = makeHbMatterApi({
         restored: [{
             UUID: 'thermostat_18',
             deviceType: deviceTypes.TemperatureSensor,
@@ -113,9 +114,10 @@ test('F05: the joined update is still delivered once the registration settles', 
     assert.equal(temps.at(-1), 2350);
 });
 
-test('F14: fallback after a non-queryable registration unregisters the endpoint before re-registering', async () => {
-    const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
-    const hb = makeHb24MatterApi({ unqueryableOnce: ['thermostat_18'] });
+test('F14: fallback after a non-queryable registration unregisters the endpoint before re-registering', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-race-');
+    // Neither Thermostat payload answers (TH-01: the 2.2.0 one is tried second).
+    const hb = makeHbMatterApi({ unqueryableTimes: { thermostat_18: 2 } });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath,
     });
@@ -124,20 +126,20 @@ test('F14: fallback after a non-queryable registration unregisters the endpoint 
     await delay(1500);
 
     assert.deepEqual(hb.log, [], 'Homebridge must not reject a duplicate registration');
-    assert.deepEqual(hb.unregisterCalls, ['thermostat_18']);
+    assert.deepEqual(hb.unregisterCalls, ['thermostat_18', 'thermostat_18']);
     assert.equal(hb.endpoints.get('thermostat_18').deviceType.name, 'TemperatureSensor');
     assert.equal(registry.getStatus('thermostat_18'), 'registered');
 });
 
-test('F14: registration retry unregisters the stale endpoint on the first attempt', async () => {
-    const storagePath = fs.mkdtempSync(path.join(os.tmpdir(), 'klares4-race-'));
-    const hb = makeHb24MatterApi({ unqueryableOnce: ['light_9'] });
+test('F14: registration retry unregisters the stale endpoint on the first attempt', async (t) => {
+    const storagePath = tmpStorage(t, 'klares4-race-');
+    const hb = makeHbMatterApi({ unqueryableOnce: ['light_9'] });
     const registry = new MatterAccessoryRegistry({
         api: hb.api, log: silentLog(), getWsClient: () => undefined, storagePath,
     });
 
     await registry.addOrUpdateAccessory({
-        id: 'light_9', type: 'light', name: 'Cucina', description: '', status: { on: true, dimmable: false },
+        id: 'light_9', type: 'light', name: 'Taverna', description: '', status: { on: true, dimmable: false },
     });
     await delay(1500);
 
@@ -146,24 +148,45 @@ test('F14: registration retry unregisters the stale endpoint on the first attemp
     assert.equal(registry.getStatus('light_9'), 'registered');
 });
 
-test('F37: a rename waits until Homebridge has really released the UUID before registering again', async () => {
-    process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '150';
-    const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
-    // Homebridge 2.4 closes the endpoint first (probe already undefined) and
-    // deletes the UUID from its registry only afterwards.
-    const hb = makeHb24MatterApi({ unregisterCloseMs: 80 });
-    const coordinator = new MatterTopologyCoordinator(hb.api, silentLog(), 2000);
-    const light = (name) => ({
-        UUID: 'light_37', displayName: name, deviceType: deviceTypes.OnOffLight, clusters: { onOff: { onOff: false } },
+// F37. Homebridge closes the endpoint first (reads already answer nothing)
+// and deletes the UUID from its registry only afterwards. On 2.4 the
+// unregister call resolves before that, so only the coordinator's settle (and
+// the second probe after it) keeps the register that follows from racing the
+// close; on 2.5 the call resolves after it. Without the settle the 2.4 case
+// fails with "already registered" (last test).
+function f37Light(uuid, name) {
+    return {
+        UUID: uuid, displayName: name, serialNumber: uuid, manufacturer: 'Ksenia', model: 'Lares4 light',
+        deviceType: deviceTypes.OnOffLight, clusters: { onOff: { onOff: false } },
+    };
+}
+
+for (const semantics of ['2.4', '2.5']) {
+    test(`F37: a re-register waits until Homebridge has really released the UUID (${semantics})`, async () => {
+        const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
+        const hb = makeHbMatterApi({ semantics, unregisterCloseMs: 80 });
+        const coordinator = new MatterTopologyCoordinator(hb.api, silentLog(), 2000, 150);
+
+        await coordinator.register(f37Light('light_37', 'PC'));
+        await waitFor(() => hb.endpoints.has('light_37'));
+        assert.equal(await coordinator.unregister('light_37', 'onOff'), true);
+        await coordinator.register(f37Light('light_37', 'PC Test'));
+        await waitFor(() => hb.endpoints.get('light_37')?.displayName === 'PC Test' || hb.log.length > 0);
+
+        assert.deepEqual(hb.log, [], 'register raced the endpoint close');
+        assert.equal(hb.endpoints.get('light_37')?.closing, undefined);
     });
+}
 
-    await coordinator.register(light('PC'));
-    await delay(10);
-    assert.equal(await coordinator.unregister('light_37', 'onOff'), true);
-    await coordinator.register(light('PC Test'));
-    await delay(50);
+test('F37: the 2.4 race is real: without the settle the re-register is refused', async () => {
+    const { MatterTopologyCoordinator } = require('../dist/platform/matter-topology-coordinator.js');
+    const hb = makeHbMatterApi({ semantics: '2.4', unregisterCloseMs: 80 });
+    const coordinator = new MatterTopologyCoordinator(hb.api, silentLog(), 2000, 0);
 
-    assert.deepEqual(hb.log, [], 'register raced the endpoint close');
-    assert.equal(hb.endpoints.get('light_37')?.closing, undefined);
-    process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '20';
+    await coordinator.register(f37Light('light_38', 'A'));
+    await waitFor(() => hb.endpoints.has('light_38'));
+    await coordinator.unregister('light_38', 'onOff');
+    await coordinator.register(f37Light('light_38', 'B'));
+    await waitFor(() => hb.log.length > 0);
+    assert.match(hb.log[0], /already registered/);
 });

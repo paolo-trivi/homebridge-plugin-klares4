@@ -44,7 +44,9 @@ function walk(dir) {
     }
 
     const content = fs.readFileSync(absolutePath, 'utf8');
-    const lines = content.split(/\r?\n/).length;
+    const segments = content.split(/\r?\n/);
+    // A final line terminator ends the last line: it does not start another one.
+    const lines = segments[segments.length - 1] === '' ? segments.length - 1 : segments.length;
     if (lines > maxLines) {
       violations.push({
         file: path.relative(process.cwd(), absolutePath),
