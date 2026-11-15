@@ -164,6 +164,77 @@ test('the real field names of a LOGIN_RES and of the status frames: only the sen
 });
 
 // ---------------------------------------------------------------------------
+// Families of keys (defence in depth), and the position of a cover is not a place.
+// ---------------------------------------------------------------------------
+
+const SENSITIVE_VARIANTS = [
+    'userPin', 'USERPIN', 'PINCODE', 'PIN1', 'PIN-CODE', 'pin_code', 'newPin', 'pinNumber', 'MASTER_PIN',
+    'passcode', 'passCode', 'passwd', 'USER_PASSWORD', 'userPassword', 'passwordHash', 'pass',
+    'secret', 'clientSecret', 'authToken', 'ACCESS_TOKEN', 'token2',
+    'accessCode', 'securityCode', 'unlockCode', 'CODE', 'code1',
+    'SERIAL_NUMBER', 'serialNo', 'serialNumber', 'SERIAL', 'SN', 'sn2',
+    'MAC', 'mac', 'MAC_ADDRESS', 'macAddress', 'deviceMac', 'IMEI', 'imei', 'ICCID', 'EMAIL', 'userEmail',
+];
+const HARMLESS_KEYS = [
+    'PING', 'PINNED', 'PINK', 'PIR', 'MACHINE', 'MACRO', 'MAINTENANCE', 'PASSIVE', 'COMPASS', 'PASSED',
+    'ERROR_CODE', 'RESULT_CODE', 'STATUS_CODE', 'errorCode', 'CODEC', 'TOKENS_LEFT_IS_NOT_A_THING_X',
+    'SENSOR', 'SERIALIZER', 'IMEIS_NOT', 'POS', 'TPOS', 'targetPosition', 'positionX', 'DES', 'ID_LOGIN',
+    'STA', 'ACT_MODEL', 'TEMP_THR', 'PRG_CHECK', 'description', 'name',
+];
+
+for (const key of SENSITIVE_VARIANTS) {
+    test(`redaction by key family: ${key} is masked`, () => {
+        const frame = { CMD: 'X', PAYLOAD: { [key]: '482913', NESTED: [{ [key]: 482913 }] } };
+        const captured = captureRawMessage('out', JSON.stringify(frame));
+        assert.equal(captured.parsed.PAYLOAD[key], '***MASKED***');
+        assert.equal(captured.parsed.PAYLOAD.NESTED[0][key], '***MASKED***');
+        assert.deepEqual(leaks(serialized(captured)), []);
+    });
+}
+
+test('keys that only look like a credential are kept', () => {
+    const payload = Object.fromEntries(HARMLESS_KEYS.map((key) => [key, 'visible']));
+    const captured = captureRawMessage('in', JSON.stringify({ CMD: 'X', PAYLOAD: payload }));
+    assert.deepEqual(captured.parsed.PAYLOAD, payload);
+});
+
+test('the position of a cover or a shutter is state, not a place: it stays in the snapshots', async (t) => {
+    const devices = [{
+        id: 'cover_1', type: 'cover', name: 'Shutter', description: 'Shutter',
+        status: { position: 40, targetPosition: 60, state: 'opening' },
+    }];
+    const { data } = await captureToFile(t, { devices });
+    assert.deepEqual(data.deviceSnapshots[0].devices[0].status, { position: 40, targetPosition: 60, state: 'opening' });
+});
+
+test('a geographic position is masked wherever it comes from, a numeric `position` only in frames', () => {
+    for (const direction of ['in', 'out']) {
+        for (const POSITION of [{ LAT: SECRETS.lat, LONG: SECRETS.long }, SECRETS.lat, Number(SECRETS.lat), [Number(SECRETS.lat), Number(SECRETS.long)]]) {
+            const captured = captureRawMessage(direction, JSON.stringify({ CMD: 'X', PAYLOAD: { POSITION } }));
+            assert.equal(captured.parsed.PAYLOAD.POSITION, '***MASKED***');
+        }
+    }
+    const { redactSnapshot } = require('../dist/debug-capture/redaction.js');
+    assert.equal(redactSnapshot([{ status: { position: 40 } }])[0].status.position, 40);
+    assert.equal(redactSnapshot([{ status: { position: { lat: 45.1, long: 9.7 } } }])[0].status.position, '***MASKED***');
+    assert.equal(redactSnapshot([{ position: SECRETS.lat }])[0].position, '***MASKED***');
+    assert.equal(redactSnapshot([{ status: { position: 40 }, lat: 45.1 }])[0].lat, '***MASKED***');
+});
+
+test('a JSON string payload larger than the nested-JSON limit is masked as text, not passed through', () => {
+    const padding = 'x'.repeat(1_100_000);
+    const nested = `{"PIN":"${PIN}","PAD":"${padding}"}`;
+    const captured = captureRawMessage('out', JSON.stringify({ CMD: 'LOGIN', PAYLOAD: nested }));
+    assert.deepEqual(leaks(serialized(captured)), []);
+});
+
+test('a JSON string payload that does not parse (cut short) is masked as text', () => {
+    const cut = `{"PIN":"${PIN}","PAD":`;
+    const captured = captureRawMessage('out', JSON.stringify({ CMD: 'LOGIN', PAYLOAD: cut }));
+    assert.deepEqual(leaks(serialized(captured)), []);
+});
+
+// ---------------------------------------------------------------------------
 // Frames that are not JSON objects: masked as text.
 // ---------------------------------------------------------------------------
 
@@ -178,6 +249,13 @@ const TEXT_CASES = {
     'escaped quotes around the value': `{"PIN":"${PIN}\\"x`,
     'a JSON string holding a frame': JSON.stringify(`{"PIN":"${PIN}"}`),
     'unquoted key and value': `login PIN=${PIN} ok`,
+    'a space between word and value': `login PIN ${PIN} ok`,
+    'a lower-case word and a space': `set pin ${SECRETS.pinNumber}`,
+    'a camelCase key in broken JSON': `{"userPin":"${PIN}","x":`,
+    'a PINCODE key in broken JSON': `{"PINCODE":${SECRETS.pinNumber},"x":`,
+    'single-quoted pairs': `{'PIN': '${PIN}', 'x':`,
+    'a serial number in text': `{"SERIAL_NUMBER":"${SECRETS.serial}","x":`,
+    'a password after a space': `password ${SECRETS.password}`,
 };
 
 for (const [label, text] of Object.entries(TEXT_CASES)) {
@@ -298,7 +376,7 @@ test('the message cap keeps the first messages, counts the rest and warns once',
     const frames = Array.from({ length: 12 }, (_, i) => ['in', JSON.stringify({ CMD: 'REALTIME', ID: String(i) })]);
     const { data, log } = await captureToFile(t, { frames, manager: { limits: { maxMessages: 5, maxBytes: 1_000_000 } } });
     assert.equal(data.rawMessages.length, 5);
-    assert.equal(data.rawMessages[0].parsed.ID, '0');
+    assert.equal(JSON.parse(data.rawMessages[0].rawData).ID, '0');
     assert.equal(data.captureInfo.totalRawMessages, 5);
     assert.equal(data.captureInfo.droppedMessages, 7);
     assert.equal(log.lines.filter((line) => /Capture buffer full/.test(line)).length, 1, 'one warning, not one per message');
@@ -331,4 +409,54 @@ test('the requested capture runs for the duration the runtime config validated',
     t.after(() => capture.shutdown());
     assert.match(log.lines.join('\n'), /starting 600-second capture/);
     assert.equal(capture.captureDurationMs, 600_000);
+});
+
+// ---------------------------------------------------------------------------
+// The file stays small enough to send privately.
+// ---------------------------------------------------------------------------
+
+test('a frame is written once: the text, not a second parsed copy', async (t) => {
+    const { data } = await captureToFile(t, { frames: ALL_SECRET_FRAMES() });
+    for (const message of data.rawMessages) {
+        assert.deepEqual(Object.keys(message).sort(), ['direction', 'rawData', 'timestamp']);
+    }
+    assert.ok(data.rawMessages.some((message) => JSON.parse(message.rawData).CMD === 'LOGIN'));
+    assert.ok(data.analysis.commandsSeen.includes('LOGIN'), 'the analysis still reads the frames');
+});
+
+test('with the default limits a flood of large frames gives a file of a few MiB, written 0600', { skip: process.platform === 'win32' }, async (t) => {
+    const frame = JSON.stringify({ CMD: 'REALTIME', PAYLOAD_TYPE: 'CHANGES', PAYLOAD: { homebridge: { STATUS_ZONES: Array.from({ length: 40 }, (_, i) => ({ ID: String(i), STA: 'R', BYP: 'NO', T: 'N', A: 'N', FM: 'F', OHM: '4000' })) } } });
+    const frames = Array.from({ length: 1500 }, () => ['in', frame]);
+    const { file, data } = await captureToFile(t, { frames, sync: true });
+    const size = fs.statSync(file).size;
+    assert.ok(size < 6 * 1024 * 1024, `file of ${size} bytes`);
+    assert.ok(data.captureInfo.droppedMessages > 0);
+    assert.equal(data.rawMessages.length + data.captureInfo.droppedMessages, 1500);
+    assert.equal(fileMode(file).toString(8), '600');
+});
+
+test('an interval snapshot identical to the last one is not stored again; start and end always are', async (t) => {
+    const dir = tmpStorage(t, 'klares4-privacy-');
+    const devices = [{ id: 'light_1', type: 'light', name: 'Lamp', status: { on: false } }];
+    const client = wsClient(devices);
+    const log = recording();
+    const manager = new DebugCaptureManager(log, dir);
+    const timers = [];
+    const realSetInterval = global.setInterval;
+    global.setInterval = (fn, ms) => { timers.push(fn); return realSetInterval(() => undefined, 1 << 30); };
+    try {
+        manager.startCapture(client, 600_000);
+    } finally {
+        global.setInterval = realSetInterval;
+    }
+    assert.equal(timers.length, 1);
+    timers[0](); timers[0]();                       // unchanged
+    devices[0].status.on = true; timers[0]();       // changed
+    timers[0]();                                    // unchanged again
+    manager.shutdown();
+    const file = path.join(dir, generatedFiles(dir)[0]);
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual(data.deviceSnapshots.map((s) => s.label), ['START', 'INTERVAL', 'END']);
+    assert.equal(data.deviceSnapshots[1].devices[0].status.on, true);
+    assert.equal(data.captureInfo.deviceSnapshotsTaken, 3);
 });
