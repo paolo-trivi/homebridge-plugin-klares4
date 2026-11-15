@@ -1,7 +1,8 @@
 {
     "name": "homebridge-plugin-klares4",
     "version": "2.2.0",
-    "description": "Plugin completo per sistemi Ksenia Lares4 - Zone, Luci, Tapparelle, Termostati, Sensori",
+    "displayName": "Klares4 - Ksenia Lares4",
+    "description": "Homebridge plugin for Ksenia Lares4 alarm systems: zones, lights, covers, thermostats and sensors over HomeKit, Matter and MQTT, local only, no cloud, no telemetry",
     "main": "dist/index.js",
     "scripts": {
         "build": "tsc",
@@ -19,18 +20,22 @@
     },
     "keywords": [
         "homebridge-plugin",
+        "homebridge",
         "ksenia",
         "lares4",
+        "lares-4",
+        "alarm",
         "security",
-        "automation",
-        "zones",
-        "lights",
-        "covers",
-        "thermostats",
-        "sensors",
         "homekit",
+        "matter",
+        "mqtt",
+        "alexa",
+        "google-home",
+        "thermostat",
+        "zones",
+        "covers",
         "smart-home",
-        "domotica"
+        "home-automation"
     ],
     "engines": {
         "node": ">=22.12.0",
