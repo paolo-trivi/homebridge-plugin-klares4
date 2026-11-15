@@ -5,7 +5,7 @@ import type { ThermostatMode } from '../thermostat-mode';
 import type { KseniaDevice } from '../types';
 import type { CommandDispatcher } from '../websocket/command-dispatcher';
 import { clampValue } from '../websocket/device-state-projector';
-import { isCfgCoherentWithRealtime } from './thermostat-config-sync';
+import { judgeDegradedGuess, type DegradedGuessVerdict } from './thermostat-degraded-guess';
 import {
     findDegradedCommandIdConflict,
     resolveThermostatCommandId,
@@ -90,11 +90,7 @@ export class ThermostatCommandService {
                 programCommandId: state.thermostatProgramIdByOutputId.get(outputThermostatId),
                 mappedDomusSensorId: sensorId,
                 primeConfig: (candidateId) => this.executor.primeConfig(candidateId),
-                verifyGuess: (candidateId) => this.isVerifiedForSensor(sensorId, candidateId)
-                    || isCfgCoherentWithRealtime(
-                        state.thermostatCfgById.get(candidateId),
-                        state.thermostatRealtimeSnapshotById.get(sensorId ?? outputThermostatId),
-                    ),
+                verifyGuess: (candidateId) => this.verifyGuess(sensorId, outputThermostatId, candidateId),
                 rememberCommandId: (id): void => { state.thermostatCommandIdByOutputId.set(outputThermostatId, id); },
                 onResolvedAlias: (id): void => {
                     if (this.deps.logLevel >= LogLevel.DEBUG) this.deps.log.debug(`Thermostat command ID resolved thermostat_${outputThermostatId} -> ${id}`);
@@ -127,6 +123,20 @@ export class ThermostatCommandService {
             + `{ "thermostatOutputId": "${outputThermostatId}", "commandThermostatId": "<cfg id>" }.`,
         );
         throw new ThermostatRoutingError(`Thermostat cfg id for thermostat_${outputThermostatId} is ambiguous: set domusThermostat.manualCommandPairs`);
+    }
+
+    /**
+     * A guessed cfg id: vouched for by another output on the same sensor whose
+     * guess was verified discriminatingly, or judged against every cfg on the
+     * panel, read again for the purpose (judgeDegradedGuess).
+     */
+    private async verifyGuess(sensorId: string | undefined, outputId: string, candidateId: string): Promise<DegradedGuessVerdict> {
+        if (this.isVerifiedForSensor(sensorId, candidateId)) return { accepted: true, remember: true };
+        if (!await this.executor.readAllConfigs()) {
+            return { accepted: false, reason: 'the panel\'s thermostat cfgs could not be read to check it' };
+        }
+        const state = this.deps.state;
+        return judgeDegradedGuess(candidateId, sensorId ?? outputId, state.thermostatCfgById, state.thermostatRealtimeSnapshotById);
     }
 
     /** Outputs measuring one sensor share its cfg: one already verified for that sensor vouches for it. */

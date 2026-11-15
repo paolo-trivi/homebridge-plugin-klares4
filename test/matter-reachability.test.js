@@ -78,7 +78,7 @@ function closedPort() {
     });
 }
 
-test('the platform forwards WebSocket connect/disconnect to the Matter registry', async (t) => {
+test('the platform forwards a lost connection and a completed sync to the Matter registry', async (t) => {
     const storagePath = storage(t);
     const listeners = new Map();
     const api = {
@@ -99,7 +99,8 @@ test('the platform forwards WebSocket connect/disconnect to the Matter registry'
         listeners.get('didFinishLaunching')();
         for (let i = 0; i < 100 && !platform.wsClient; i++) await delay(10);
         platform.wsClient.onDisconnected();
-        platform.wsClient.onConnected();
+        assert.equal(platform.wsClient.onConnected, undefined, 'a login alone does not make the panel reachable (MATTER-RC1-06)');
+        platform.wsClient.onInitialSyncComplete();
         assert.deepEqual(seen.slice(-2), [false, true]);
     } finally {
         listeners.get('shutdown')();

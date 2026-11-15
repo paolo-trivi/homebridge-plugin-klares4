@@ -44,6 +44,8 @@ export function createInitialWebSocketClientState(
         lastPongReceived: 0,
         reconnectAttempts: 0,
         loginRejections: 0,
+        unansweredLogins: 0,
+        refusedDiscoveryReads: new Map(),
         reconnectSuspended: false,
         isManualClose: false,
         hasCompletedInitialSync: false,

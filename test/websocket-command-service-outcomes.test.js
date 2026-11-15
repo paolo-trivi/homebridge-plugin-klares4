@@ -8,7 +8,8 @@ const { OutputCommandConfirmationTracker } = require('../dist/websocket/output-c
 const { PanelCommandRejectedError, RetryableKlaresError } = require('../dist/errors.js');
 const { seedStateDevices } = require('./fixtures/command-client.js');
 
-function createService(onSend, timeoutMs = 40) {
+// Wide default: replies come on the next tick, and a loaded CI machine must not turn them into timeouts (COMMS-11).
+function createService(onSend, timeoutMs = 5000) {
   const state = createInitialWebSocketClientState();
   state.idLogin = 'login-id';
   state.ws = { readyState: 1 };

@@ -97,10 +97,19 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         deps.republish?.();
     };
 
+    /**
+     * Records an ACK in the tracker's ledger only when the client did not
+     * apply it to the device state itself (`status.acknowledged` unchanged).
+     * When it did, the state already says what the ACK means (in AUTO or OFF
+     * a setpoint is not the live target), and the ledger must not override it.
+     */
+    const ackedByClient = (before: unknown): boolean => latest().status?.acknowledged !== before;
+
     const sendTemp = async (attr: SetpointAttr, label: string, value: number): Promise<void> => {
         try {
+            const before = latest().status?.acknowledged;
             await client().setThermostatTemperature(device.id, value);
-            tracker?.recordConfirmed(uuid, 'target', value);
+            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'target', value);
         } catch (err) {
             failed(attr, `setThermostatTemperature(${label}) failed: ${errMsg(err)}`);
         }
@@ -195,8 +204,9 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         }
         log.debug(`[Matter] external Matter command accepted: ${device.name} systemMode ${requestedMode} -> ${klares4Mode}`);
         try {
+            const before = latest().status?.acknowledged;
             await client().setThermostatMode(device.id, klares4Mode);
-            tracker?.recordConfirmed(uuid, 'mode', klares4Mode);
+            if (!ackedByClient(before)) tracker?.recordConfirmed(uuid, 'mode', klares4Mode);
         } catch (err) {
             failed('systemMode', `setThermostatMode failed: ${errMsg(err)}`);
         }

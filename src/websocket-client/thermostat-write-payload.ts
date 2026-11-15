@@ -30,14 +30,19 @@ export class ThermostatSeasonTracker {
     }
 
     public resolve(cfgId: string, observations: Array<SeasonObservation | undefined>): ThermostatSeason {
+        return this.resolveKnown(cfgId, observations) ?? 'WIN';
+    }
+
+    /** As resolve, without the WIN default: `undefined` when nothing was ever observed. */
+    public resolveKnown(cfgId: string, observations: Array<SeasonObservation | undefined>): ThermostatSeason | undefined {
         let best: SeasonObservation | undefined;
         for (const observation of observations) {
             if (!observation?.season) continue;
-            if (!best || observation.at > best.at) best = observation;
+            if (!best || observation.at >= best.at) best = observation;
         }
         const acked = this.acknowledged.get(cfgId);
         if (acked && (!best || acked.at > best.at)) return acked.season;
-        return best?.season ?? 'WIN';
+        return best?.season;
     }
 }
 

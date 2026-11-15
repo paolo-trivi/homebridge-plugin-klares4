@@ -111,3 +111,24 @@ test('SP-16: a setpoint outside temperatureDefaults.min/max (e.g. from MQTT) is 
     assert.deepEqual(sent, [16, 26]);
     assert.equal(p.warns.length, 3);
 });
+
+test('rc.1 D3: a HomeKit setpoint in AUTO is stored, and HomeKit goes back to the target the panel uses', async () => {
+    const sent = [];
+    const accessory = platformAccessory(device({ mode: 'auto', targetTemperature: 19 }));
+    new ThermostatAccessory(platform({ setThermostatTemperature: async (id, value) => sent.push(value) }), accessory);
+    const target = accessory.getService(Service.Thermostat).getCharacteristic(Characteristic.TargetTemperature);
+    await target.handleSetRequest(25);
+    assert.equal(target.value, 25, 'hap-nodejs stores the written value first');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(sent, [25]);
+    assert.equal(target.value, 19);
+});
+
+test('rc.1 D3: in MAN the written setpoint stays (it is the live one)', async () => {
+    const accessory = platformAccessory(device({ mode: 'heat', targetTemperature: 19 }));
+    new ThermostatAccessory(platform({ setThermostatTemperature: async () => undefined }), accessory);
+    const target = accessory.getService(Service.Thermostat).getCharacteristic(Characteristic.TargetTemperature);
+    await target.handleSetRequest(23);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(target.value, 23);
+});

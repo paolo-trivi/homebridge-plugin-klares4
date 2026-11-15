@@ -81,11 +81,26 @@ test('TH-03: a room sensor that stays silent is not replaced by the panel temper
 test('TH-03: a thermostat with no source at all uses the panel temperature, one event per change', () => {
     const h = client();
     h.multi([]);
+    h.msg('REALTIME_RES', 'REGISTER_ACK', { RESULT: 'OK' });
     h.system('23.3');
     h.system('23.3');
     h.system('23.5');
     assert.equal(h.device().status.currentTemperature, 23.5);
     assert.deepEqual(h.emits.map((e) => e.current), [23.3, 23.5]);
+});
+
+test('L1: before the initial realtime the panel temperature is never published as a thermostat temperature', () => {
+    const h = client();
+    h.multi(); h.prg();
+    h.system('29.5');
+    h.system('29.5');
+    assert.deepEqual(h.emits.filter((e) => e.current === 29.5), []);
+    h.msg('REALTIME_RES', 'REGISTER_ACK', { RESULT: 'OK', STATUS_TEMPERATURES: [{
+        ID: '1', TEMP: '20.4', THERM: { ACT_SEA: 'WIN', ACT_MODEL: 'MAN', ACT_TOF: '', TEMP_THR: { T: 'M', VAL: '21.0' }, OUT_STATUS: 'OFF' },
+    }] });
+    h.system('29.5');
+    assert.equal(h.device().status.currentTemperature, 20.4);
+    assert.deepEqual(h.emits.filter((e) => e.current === 29.5), []);
 });
 
 test('TH-16: an unknown realtime mode with a live setpoint is shown as heating, with one warning', () => {

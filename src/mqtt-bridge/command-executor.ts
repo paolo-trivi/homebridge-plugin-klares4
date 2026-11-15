@@ -200,6 +200,12 @@ export class CommandExecutor {
      */
     private thermostatJob(accessory: AccessoryHandler, command: MqttThermostatCommand, target: string): Job | null {
         if (!('setTargetTemperature' in accessory)) return this.unsupported(target);
+        // Validated as a whole first: a setpoint out of range must not leave the mode applied alone.
+        if (command.targetTemperature !== undefined && 'isTargetTemperatureAllowed' in accessory
+            && !accessory.isTargetTemperatureAllowed(command.targetTemperature)) {
+            this.deps.log.warn(`MQTT: Thermostat command for ${target} refused: targetTemperature outside temperatureDefaults.min/max`);
+            return null;
+        }
         return async (): Promise<void> => {
             if (command.mode !== undefined) {
                 this.deps.log.info(`MQTT: Thermostat mode requested -> ${command.mode}`);

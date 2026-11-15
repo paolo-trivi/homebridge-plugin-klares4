@@ -37,19 +37,39 @@ test('reject-while-busy: a second momentary command is refused at once, never se
     assert.deepEqual(ran, ['first', 'third']);
 });
 
-test('latest-wins: among waiting commands only the last one survives, the others are refused', async () => {
+test('latest-wins: replaced requests are never run and share the outcome of the one that replaced them', async () => {
     const dispatcher = new CommandDispatcher();
     const ran = [];
     const first = gatedCommand(ran, 'on');
     const opts = { policy: 'latest-wins', maxWaitMs: 5000 };
     const a = dispatcher.enqueueDeviceCommand('light_5', first.run, opts);
-    const b = settle(dispatcher.enqueueDeviceCommand('light_5', async () => { ran.push('off'); }, opts));
-    const c = dispatcher.enqueueDeviceCommand('light_5', async () => { ran.push('on-again'); }, opts);
-    const superseded = await b;
-    assert.ok(rejectedFor('superseded')(superseded.error), String(superseded.error));
+    let bSettled = false;
+    const b = dispatcher.enqueueDeviceCommand('light_5', async () => { ran.push('off'); }, opts);
+    b.then(() => { bSettled = true; }, () => { bSettled = true; });
+    const last = gatedCommand(ran, 'on-again');
+    const c = dispatcher.enqueueDeviceCommand('light_5', last.run, opts);
     first.release();
-    await Promise.all([a, c]);
+    await a;
+    await waitFor(() => ran.length === 2);
+    assert.equal(bSettled, false, 'a replaced request does not settle before the command that replaced it');
+    last.release();
+    await Promise.all([b, c]);
     assert.deepEqual(ran, ['on', 'on-again']);
+});
+
+test('latest-wins: replaced requests fail when the command that replaced them fails', async () => {
+    const dispatcher = new CommandDispatcher();
+    const first = gatedCommand([], 'first');
+    const opts = { policy: 'latest-wins', maxWaitMs: 5000 };
+    const a = dispatcher.enqueueDeviceCommand('cover_7', first.run, opts);
+    const replaced = [1, 2, 3].map(() => settle(dispatcher.enqueueDeviceCommand('cover_7', async () => undefined, opts)));
+    const last = settle(dispatcher.enqueueDeviceCommand('cover_7', async () => { throw new Error('refused by panel'); }, opts));
+    first.release();
+    await a;
+    for (const result of await Promise.all([...replaced, last])) {
+        assert.equal(result.ok, false);
+        assert.match(result.error.message, /refused by panel/);
+    }
 });
 
 test('a command left in the queue beyond its deadline is refused and never runs', async () => {

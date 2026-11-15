@@ -14,6 +14,7 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaCover, KseniaLight } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
+import { hasObservedState } from '../device-observation';
 
 type Handlers = NonNullable<MatterAccessory['handlers']>;
 
@@ -141,10 +142,12 @@ function liftPercent100ths(panelPosition: number): number {
  */
 function keepReportedPosition(device: KseniaCover, requested: number, ctx: CommandContext<KseniaCover>): void {
     setTimeout(() => {
-        const position = ctx.latest().status?.position;
+        const latest = ctx.latest();
+        // A position the panel never reported (cache without the marker) is not sent as one.
+        const position = hasObservedState(latest) ? latest.status?.position : undefined;
         const target = liftPercent100ths(requested);
         const attributes: Record<string, unknown> = { targetPositionLiftPercent100ths: target };
-        if (Number.isFinite(position)) {
+        if (typeof position === 'number' && Number.isFinite(position)) {
             const current = liftPercent100ths(position);
             const movement = current === target ? MOVEMENT_STOPPED : current < target ? MOVEMENT_CLOSING : MOVEMENT_OPENING;
             attributes.currentPositionLiftPercent100ths = current;

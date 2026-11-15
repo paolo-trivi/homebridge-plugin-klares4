@@ -491,8 +491,7 @@ test('STATUS_TEMPERATURES regression: crossed (cfg,sensor) pairs do NOT cross-po
 
 test('CommandService does not fall back to legacy WRITE/THERMOSTAT', async () => {
   const calls = [];
-  const service = new CommandService({
-    state: {
+  const state = Object.assign(createInitialWebSocketClientState(), {
       idLogin: '3',
       ws: { readyState: 1 },
       thermostatProgramById: new Map(),
@@ -503,7 +502,9 @@ test('CommandService does not fall back to legacy WRITE/THERMOSTAT', async () =>
       domusThermostatConfig: { enabled: true, manualPairs: [], manualCommandPairs: [], sensorFreshnessMs: 300000 },
       thermostatToDomus: new Map([['18', '1']]),
       missingThermostatProgramWarningOutputIds: new Set(),
-    },
+  });
+  const service = new CommandService({
+    state,
     sender: 'sender',
     pin: '1234',
     log: createLogger(),

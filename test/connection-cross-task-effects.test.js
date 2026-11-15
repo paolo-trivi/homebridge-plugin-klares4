@@ -38,7 +38,7 @@ test('WS-10 + SP-11: after three refused logins the panel stays disconnected on 
     assert.ok(states.length > 0);
     assert.ok(!states.includes('connected'), JSON.stringify(states));
     assert.equal(states.at(-1), 'disconnected');
-    assert.ok(log.lines.some((l) => /refused or did not answer the login 3 times/.test(l)));
+    assert.ok(log.lines.some((l) => /refused the login 3 times in a row/.test(l)));
 });
 
 test('WS-12 + command queue: a command to a device the panel no longer lists is refused, nothing is sent', async (t) => {

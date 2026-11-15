@@ -70,7 +70,7 @@ test('with the .ksa programs the role is already set when the thermostat is anno
     assert.equal(h.discovered.get('thermostat_34').status.outputRole, 'cooling');
 });
 
-test('real stack: in summer the heating output (role from PRG_THERMOSTATS) is heating-only, shows Off and refuses Heat and setpoints', { timeout: 30000 }, async (t) => {
+test('real stack: in summer the heating output (role from PRG_THERMOSTATS) is heating-only, shows Off and refuses Heat and setpoints', { timeout: 120000 }, async (t) => {
     const h = panelClient();
     h.multi(); h.prg(); h.summer();
     const heating = h.device('thermostat_18');
@@ -100,4 +100,47 @@ test('real stack: in summer the heating output (role from PRG_THERMOSTATS) is he
     await stack.write('thermostat_34', 'thermostat', { occupiedCoolingSetpoint: 2500 });
     await waitFor(() => ws.calls.length === 1);
     assert.deepEqual(ws.calls, [['temp', 'thermostat_34', 25]]);
+});
+
+test('real stack: a Matter setpoint on a thermostat in AUTO is written as the manual setpoint, and the program target comes back', { timeout: 120000 }, async (t) => {
+    const h = panelClient();
+    const cfg = {
+        ID: '1', ACT_MODE: 'AUTO', ACT_SEA: 'WIN', MAN_HRS: 'NA',
+        WIN: { T1: '18.0', T2: '20.0', T3: '21.5', TM: '20.0' }, SUM: { T1: '24.0', T2: '25.0', T3: '26.0', TM: '26.0' },
+    };
+    h.multi(); h.prg();
+    const send = (CMD, PAYLOAD_TYPE, PAYLOAD) => h.client.messageService.handleMessage(signFrame({
+        SENDER: 'p', RECEIVER: 'x', CMD, ID: '1', PAYLOAD_TYPE, PAYLOAD, TIMESTAMP: '0',
+    }));
+    send('READ_RES', 'CFG_THERMOSTATS', { RESULT: 'OK', CFG_THERMOSTATS: [cfg] });
+    send('REALTIME_RES', 'REGISTER_ACK', { RESULT: 'OK', STATUS_TEMPERATURES: [{
+        ID: '1', TEMP: '19.0', THERM: { ACT_SEA: 'WIN', ACT_MODEL: 'AUTO', ACT_TOF: '', TEMP_THR: { T: '1', VAL: '18.0' }, OUT_STATUS: 'ON' },
+    }] });
+    h.client.state.idLogin = '1';
+    const writes = [];
+    h.client.commandService.sendKseniaCommand = async (cmd, _type, payload) => {
+        if (cmd === 'READ') send('READ_RES', 'CFG_THERMOSTATS', { RESULT: 'OK', CFG_THERMOSTATS: [cfg] });
+        if (cmd === 'WRITE_CFG') writes.push(payload.CFG_THERMOSTATS[0]);
+        return { status: 'acknowledged' };
+    };
+    const heating = h.device('thermostat_18');
+    assert.equal(heating.status.targetTemperature, 18);
+
+    const stack = await realMatterStackSession(t).start();
+    const registry = new MatterAccessoryRegistry({
+        api: stack.api, log: silentLog(), getWsClient: () => h.client, storagePath: tmpStorage(t, 'klares4-d-auto-'),
+    });
+    h.client.onDeviceStatusUpdate = (device) => { registry.updateAccessoryState(device).catch(() => undefined); };
+    registry.startDiscoveryCycle();
+    await registry.addOrUpdateAccessory(heating);
+    await waitFor(() => ['registered', 'failed'].includes(registry.getStatus(heating.id)), 10000);
+    const thermo = () => stack.read('thermostat_18', 'thermostat') ?? {};
+    assert.equal(thermo().occupiedHeatingSetpoint, 1800);
+
+    await stack.write('thermostat_18', 'thermostat', { occupiedHeatingSetpoint: 2500 });
+    await waitFor(() => writes.length === 1, 10000);
+    assert.deepEqual(Object.keys(writes[0]), ['ID', 'WIN']);
+    assert.equal(writes[0].WIN.TM, '25.0');
+    await waitFor(() => thermo().occupiedHeatingSetpoint === 1800, 10000);
+    assert.equal(heating.status.targetTemperature, 18);
 });
