@@ -17,12 +17,14 @@ interface BuildThermostatWriteInput {
     season: ThermostatSeason;
     /** The cfg as just read from the panel. Required for a setpoint. */
     cfg?: Record<string, unknown>;
+    /** The season the panel is in now, when known: a mode already in it does not send ACT_SEA. */
+    currentSeason?: ThermostatSeason;
 }
 
 /**
  * Partial WRITE_CFG entry, in the shapes the official Ksenia web app sends and
- * the panel acknowledges with WRITE_OK: a mode is `{ID, ACT_MODE}` (`ACT_SEA`
- * too when the mode picks a season), a setpoint is `{ID, <season>: block}` with
+ * the panel acknowledges with WRITE_OK: a mode is `{ID, ACT_MODE}` (plus
+ * `ACT_SEA` only to change season, a form never observed from the app), a setpoint is `{ID, <season>: block}` with
  * the season block exactly as just read and only `TM` changed. No other
  * top-level key is ever sent, so nothing changed on the keypad (mode, season,
  * the other season, MAN_HRS, TOF) can be written back. The whole block is sent
@@ -34,10 +36,15 @@ export function buildThermostatWritePayload({
     intent,
     season,
     cfg,
+    currentSeason,
 }: BuildThermostatWriteInput): Record<string, unknown> {
     const payload: Record<string, unknown> = { ID: cfgId };
     if (intent.mode !== undefined) {
-        Object.assign(payload, buildThermostatModeCfgPayload(intent.mode));
+        const { ACT_SEA: modeSeason, ...modeKeys } = buildThermostatModeCfgPayload(intent.mode);
+        Object.assign(payload, modeKeys);
+        // The official app switches heating on with `{ID, ACT_MODE: "MAN"}` alone;
+        // ACT_SEA only goes out when the mode needs the other season.
+        if (modeSeason !== undefined && modeSeason !== currentSeason) payload.ACT_SEA = modeSeason;
     }
     if (intent.temperature !== undefined) {
         const block = cfg?.[season];
