@@ -20,7 +20,7 @@ This document describes the structure of the plugin as of `2.3.0`: the layers, t
 - Discovery: `discovery-read-handler.ts` (zones, outputs, scenarios, DOMUS sensors), `scenario-discovery.ts`, `discovered-device.ts` (discovery rounds and what survives a re-read), `device-parsers.ts` (scenario exposure rules, parsers), `exposure-report.ts` (hidden devices and the single startup warning).
 - Status: `status-updater.ts`, `zone-status-reader.ts`, `system-temperature-updater.ts`, `thermostat-status-updater.ts`, `output-state-matchers.ts`.
 - Commands: `command-service.ts` (lights, covers, gates, scenarios; refuses anything that is not a discovered device of that kind), `command-sender.ts` (framing, ID, CRC, wait for the answer), `command-outcome.ts`.
-- Thermostats: `thermostat-read-handler.ts` (outputs, `CFG_THERMOSTATS`, `PRG_THERMOSTATS`), `thermostat-config-sync.ts`, `thermostat-cfg-freshness.ts` (`PRG_CHECK` counter, `NM_CHANGES`), `thermostat-command-service.ts` (validation and routing) → `thermostat-command-id-resolver.ts` (manual pair → program → verified guess) → `thermostat-write-batcher.ts` (serialization per configuration ID, merging) → `thermostat-write-executor.ts` (re-read, partial payload, acknowledgement) with `thermostat-write-payload.ts` and `thermostat-command-payload.ts`; `domus-thermostat-mapper.ts` and `domus-thermostat-mapping-runtime.ts` (sensor mapping).
+- Thermostats: `thermostat-read-handler.ts` (outputs, `CFG_THERMOSTATS`, `PRG_THERMOSTATS`), `thermostat-config-sync.ts`, `thermostat-cfg-freshness.ts` (`PRG_CHECK` counter, `NM_CHANGES`), `thermostat-command-service.ts` (validation and routing) → `thermostat-command-id-resolver.ts` (manual pair → program → verified guess, the guess judged by `thermostat-degraded-guess.ts`: accepted only when it is the one coherent candidate, remembered only after a discriminating match) → `thermostat-write-batcher.ts` (serialization per configuration ID, merging) → `thermostat-write-executor.ts` (re-read, partial payload, acknowledgement) with `thermostat-write-payload.ts` and `thermostat-command-payload.ts`; `domus-thermostat-mapper.ts` and `domus-thermostat-mapping-runtime.ts` (sensor mapping); `thermostat-sequence.ts` (the monotonic order of thermostat events: two events in the same millisecond still have a first and a second).
 - Shared: `state.ts` (client state), `bounded-map.ts`, `types.ts`.
 
 `websocket/` holds the protocol internals:
@@ -31,7 +31,7 @@ This document describes the structure of the plugin as of `2.3.0`: the layers, t
 
 **MQTT** — public facade `MqttBridge` (`mqtt-bridge/index.ts`).
 
-- `broker-session.ts` (connection, retry backoff, last will on `<prefix>/status`), `state-publisher.ts` and `state-topic-registry.ts` (state topics, collisions → ID topics), `command-intake.ts` (retained, duplicate and size filter), `command-executor.ts` (validation, one running and one waiting command per device), `accessory-index-service.ts` (ID, slug and room lookup, exclusions), `room-resolver.ts`, `command-failure.ts`, `throttled-log.ts`.
+- `broker-session.ts` (connection, retry backoff, last will on `<prefix>/status`), `last-will-policy.ts` (whether a CONNECT carries the last will: set aside only when the broker refuses the CONNECT with it as not authorized and accepts the next one without it, then retried periodically), `state-publisher.ts` and `state-topic-registry.ts` (state topics, collisions → ID topics), `command-intake.ts` (retained, duplicate and size filter), `command-executor.ts` (validation, one running and one waiting command per device), `accessory-index-service.ts` (ID, slug and room lookup, exclusions), `room-resolver.ts`, `command-failure.ts`, `throttled-log.ts`.
 - `mqtt/`: `topic-parser.ts` (topic parsing and slugs), `state-payload-mapper.ts` (stable payloads), `broker-url.ts` (URL validation and masking), `log-text.ts`.
 - `mqtt.commands: false` removes the command subscription entirely.
 
@@ -45,7 +45,7 @@ This document describes the structure of the plugin as of `2.3.0`: the layers, t
 - `display-name.ts`: name cleaning shared by HAP and Matter.
 - `errors.ts`: the error types that mean something to a caller (retryable, validation, refused by the panel, queue rejection); `isolation.ts`: one failure never takes the rest of a batch with it.
 - `ksa/`: `parser.ts` (the `.ksa` backup is untrusted input: numeric IDs only, names cut, 32 MB cap), `derive.ts` (thermostat, sensor, room and name derivation), `cache-service.ts` (sanitized cache).
-- `log-levels.ts`: log level definitions and `maskSensitiveData`, the PIN masking applied to every frame that is logged; `plugin-version.ts`: the plugin version, and the suffix-free form that HAP and Matter accept as firmware revision; `settings.ts`: plugin name and alias constants.
+- `log-levels.ts`: log level definitions and `maskSensitiveData`, the PIN masking applied to every frame that is logged; `secret-keys.ts`: the key families that hold a secret, shared by the log mask and the debug file redaction so the two cannot drift apart; `plugin-version.ts`: the plugin version, and the suffix-free form that HAP and Matter accept as firmware revision; `settings.ts`: plugin name and alias constants.
 
 ### 3) Infrastructure Layer
 
