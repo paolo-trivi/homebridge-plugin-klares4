@@ -46,19 +46,55 @@ test('WS-05 A: a refused realtime registration is not a completed sync; the sess
     assert.equal(warnings(log).filter((l) => /refused the realtime registration \(CMD_NOT_AVAILABLE\)/.test(l)).length, 2);
 });
 
-test('WS-05 B: a refused discovery read is not a completed sync and keeps backing off', async (t) => {
-    const { panel, log, client, events } = await session(t, { failReads: ['MULTI_TYPES'] });
+test('WS-05 B: an occasional refused discovery read is not a completed sync and keeps backing off', async (t) => {
+    const { panel, log, client, events } = await session(t, {
+        // Refused at the first two logins only (panel busy).
+        onMessage: (m, socket, mock) => {
+            if (m.CMD !== 'READ' || m.PAYLOAD_TYPE !== 'MULTI_TYPES' || mock.logins > 2) return false;
+            socket.send(frame('READ_RES', m.ID, 'MULTI_TYPES', { RESULT: 'FAIL', RESULT_DETAIL: 'CMD_NOT_AVAILABLE' }));
+            return true;
+        },
+    });
+    let attemptsAtSecondRefusal;
+    client.onDisconnected = () => {
+        events.push('disconnected');
+        if (panel.logins === 2) attemptsAtSecondRefusal = client['state'].reconnectAttempts;
+    };
     await client.connect();
-    await waitFor(() => panel.logins >= 3);
-    assert.deepEqual(events.filter((e) => e === 'sync'), []);
-    assert.equal(client['state'].hasCompletedInitialSync, false);
-    assert.ok(warnings(log).some((l) => /refused the MULTI_TYPES read \(CMD_NOT_AVAILABLE\)/.test(l)));
+    await waitFor(() => events.includes('sync'));
+    assert.equal(panel.logins, 3);
+    assert.equal(events.filter((e) => e === 'sync').length, 1);
+    assert.equal(warnings(log).filter((l) => /refused the MULTI_TYPES read \(CMD_NOT_AVAILABLE\): the synchronization is not complete/.test(l)).length, 2);
     // A login that ends in a refused sync does not reset the backoff.
-    assert.ok(client['state'].reconnectAttempts >= 2, `attempts ${client['state'].reconnectAttempts}`);
-
-    panel.failReads.delete('MULTI_TYPES');
-    await waitFor(() => events.includes('sync'), 5000);
+    assert.equal(attemptsAtSecondRefusal, 1);
     assert.equal(client['state'].reconnectAttempts, 0, 'a completed sync resets the backoff');
+    assert.ok(client.getAllDevices().some((d) => d.id === 'light_5'), 'the full sync discovered the outputs');
+});
+
+test('COMMS-02: a discovery read always refused ends in a degraded sync that serves the other families', async (t) => {
+    const { panel, log, client, events } = await session(t, { failReads: ['ZONES'] });
+    await client.connect();
+    await waitFor(() => events.includes('sync'));
+    assert.equal(panel.logins, 3, 'two refused syncs, then the degraded one');
+    const ids = client.getAllDevices().map((d) => d.id);
+    assert.ok(ids.includes('light_5') && ids.includes('scenario_1'), 'outputs and scenarios are discovered');
+    assert.ok(!ids.includes('zone_1'));
+    assert.equal(warnings(log).filter((l) => /refused the ZONES read .* in 3 synchronizations in a row: continuing without it/.test(l)).length, 1);
+
+    // Further degraded syncs: no reconnection loop, no repeated warning.
+    for (let i = 0; i < 3; i += 1) {
+        const synced = events.filter((e) => e === 'sync').length;
+        panel.dropConnections();
+        await waitFor(() => events.filter((e) => e === 'sync').length === synced + 1);
+    }
+    assert.equal(panel.logins, 6);
+    assert.equal(warnings(log).filter((l) => /refused the ZONES read/.test(l)).length, 3);
+
+    // The read answers again: zones are back and the streak is over.
+    panel.failReads.delete('ZONES');
+    panel.dropConnections();
+    await waitFor(() => client.getAllDevices().some((d) => d.id === 'zone_1'));
+    assert.equal(client['state'].refusedDiscoveryReads.size, 0);
 });
 
 test('WS-05 C: PRG_THERMOSTATS CMD_NOT_AVAILABLE is normal; a refused status read is reported and tolerated', async (t) => {

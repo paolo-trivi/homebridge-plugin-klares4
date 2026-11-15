@@ -79,3 +79,19 @@ test('WS-12: a discovery section missing from the read removes nothing', async (
     await resync();
     assert.deepEqual(ids(), before);
 });
+
+test('COMMS-09: a discovery element that fails is still listed: nothing of that section is removed', async (t) => {
+    const { panel, ids, resync, log } = await session(t);
+    const before = ids();
+    // light_6 and gate_9 are gone, but one element of the section cannot be processed.
+    panel.data = { ...panel.data, OUTPUTS: [null, { ID: '5', DES: 'Light A', CAT: 'LIGHT', MOD: 'B' }, { ID: '7', DES: 'Shutter', CAT: 'ROLL', MOD: 'BDP' }] };
+    await resync();
+    assert.deepEqual(ids(), before);
+    assert.ok(log.lines.some((l) => /^\[error\] .*OUTPUTS/.test(l)), 'the element failure is logged by the isolation');
+    assert.ok(!log.lines.some((l) => /no longer listed/.test(l)));
+
+    // The next complete section removes what is really gone.
+    panel.data = { ...panel.data, OUTPUTS: [{ ID: '5', DES: 'Light A', CAT: 'LIGHT', MOD: 'B' }, { ID: '7', DES: 'Shutter', CAT: 'ROLL', MOD: 'BDP' }] };
+    await resync();
+    assert.ok(!ids().includes('light_6') && !ids().includes('gate_9'));
+});
