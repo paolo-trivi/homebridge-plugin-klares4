@@ -111,6 +111,20 @@ function readPin(raw: unknown, issues: ConfigIssues): { pin?: string; rejected: 
     return { rejected: true };
 }
 
+/**
+ * An on/off key that exists to switch an attack surface off, on by default
+ * for compatibility: absent or `true` keeps it on, `false` turns it off, and
+ * any other value (`"false"`, `0`, ...) turns it off too, because whoever
+ * wrote it meant to. Unlike `readBoolean`, an invalid value gives the safe
+ * value, not the default.
+ */
+function readOptOutSwitch(raw: unknown, key: string, offEffect: string, issues: ConfigIssues): boolean {
+    if (raw === undefined || raw === true) return true;
+    if (raw === false) return false;
+    issues.warn(key, `expected true or false, received ${typeName(raw)}; ${offEffect} (the safe value). Set it to true or false`);
+    return false;
+}
+
 function readMqtt(raw: unknown, issues: ConfigIssues): RuntimeMqttConfig | undefined {
     if (raw === undefined || raw === null) return undefined;
     if (!isPlainObject(raw)) {
@@ -134,7 +148,7 @@ function readMqtt(raw: unknown, issues: ConfigIssues): RuntimeMqttConfig | undef
         topicPrefix: topicPrefix?.trim() ? topicPrefix : 'homebridge/klares4',
         qos: qos === 0 || qos === 2 ? qos : 1,
         retain: readBoolean(raw.retain, true, 'mqtt.retain', issues),
-        commands: readBoolean(raw.commands, true, 'mqtt.commands', issues),
+        commands: readOptOutSwitch(raw.commands, 'mqtt.commands', 'MQTT commands stay off', issues),
     };
 }
 

@@ -11,14 +11,14 @@ const { MqttBridge } = require('../dist/mqtt-bridge/index.js');
 const { fakeMqtt, recordingLog } = require('./fixtures/fake-mqtt.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 
-function setup(mqttConfig = {}, { backoff = { initialMs: 5, maxMs: 20 }, handlers = new Map() } = {}) {
+function setup(mqttConfig = {}, { backoff = { initialMs: 5, maxMs: 20 }, handlers = new Map(), timing } = {}) {
   const log = recordingLog();
   const mqtt = fakeMqtt();
   const bridge = new MqttBridge(
     { enabled: true, broker: 'mqtt://broker.example', ...mqttConfig },
     log.logger,
     { accessoryHandlers: handlers, config: {} },
-    { connect: mqtt.connect, reconnectBackoff: backoff },
+    { connect: mqtt.connect, reconnectBackoff: backoff, ...(timing ? { sessionTiming: timing } : {}) },
   );
   return { bridge, log, mqtt, client: mqtt.client };
 }
@@ -82,81 +82,149 @@ test('SP-04: commands stay on by default', () => {
   assert.deepEqual(client.subscriptions[0].topics, ['homebridge/klares4/+/+/set', 'homebridge/klares4/+/+/+/set']);
 });
 
+const attempts = (mqtt) => mqtt.calls.length;
+const willsSent = (mqtt) => mqtt.calls.map((call) => (call.options.will ? 'will' : 'none'));
+const refused = (code = 5) => (client) => client.simulateConnackRefused(code);
+const econnrefused = () => Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), { code: 'ECONNREFUSED' });
+
 test('SP-07: mqtt.js never reconnects by itself; the bridge does, also after a refused CONNACK', async () => {
-  const { client } = setup();
-  assert.equal(client.options.reconnectPeriod, 0);
-  client.simulateConnackRefused(5);
-  await waitFor(() => client.reconnects === 1);
-  client.simulateConnackRefused(5);
-  await waitFor(() => client.reconnects === 2);
-  client.simulateConnect();
-  assert.equal(client.connected, true);
+  const { mqtt } = setup();
+  assert.equal(mqtt.client.options.reconnectPeriod, 0);
+  mqtt.client.simulateClose(econnrefused());
+  await waitFor(() => attempts(mqtt) === 2);
+  mqtt.client.simulateClose(econnrefused());
+  await waitFor(() => attempts(mqtt) === 3);
+  mqtt.client.simulateConnect();
+  assert.equal(mqtt.client.connected, true);
+  assert.ok(mqtt.calls.slice(0, -1).every((call) => call.client.endForced === true), 'each closed attempt is ended');
 });
 
 test('SP-07: the retry delay doubles up to the maximum and resets after a connection', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { client } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 } });
+  const { mqtt } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 } });
   const fireAfter = (ms) => {
-    const before = client.reconnects;
+    const before = attempts(mqtt);
     t.mock.timers.tick(ms - 1);
-    assert.equal(client.reconnects, before, `fired before ${ms} ms`);
+    assert.equal(attempts(mqtt), before, `fired before ${ms} ms`);
     t.mock.timers.tick(1);
-    assert.equal(client.reconnects, before + 1, `did not fire at ${ms} ms`);
+    assert.equal(attempts(mqtt), before + 1, `did not fire at ${ms} ms`);
   };
   for (const delay of [1000, 2000, 4000, 4000]) {
-    client.simulateClose(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+    mqtt.client.simulateClose(econnrefused());
     fireAfter(delay);
   }
-  client.simulateConnect();
-  client.simulateClose();
+  mqtt.client.simulateConnect();
+  mqtt.client.simulateClose();
   fireAfter(1000);
 });
 
 test('TD-DOC-02: a broker down for many attempts logs on transitions only', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { client, log } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 } });
-  const refused = () => Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), { code: 'ECONNREFUSED' });
+  const { mqtt, log } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 } });
   for (let i = 0; i < 100; i++) {
-    client.simulateClose(refused());
+    mqtt.client.simulateClose(econnrefused());
     t.mock.timers.tick(4000);
   }
   assert.equal(log.lines.error.length, 1, log.lines.error.join(' | '));
   assert.equal(log.lines.warn.length, 1, log.lines.warn.join(' | '));
   assert.equal(log.lines.info.length, 0, log.lines.info.join(' | '));
 
-  client.simulateConnect();
+  mqtt.client.simulateConnect();
   assert.ok(log.lines.info.some((line) => line.includes('Reconnected')));
-  client.simulateClose(refused());
+  mqtt.client.simulateClose(econnrefused());
   assert.equal(log.lines.warn.filter((line) => line.includes('lost')).length, 1);
   assert.equal(log.lines.error.length, 2, 'the same error after a new failure period is logged again');
 });
 
-test('SP-11: a CONNECT refused with its last will is retried without, and the ACL hint is logged once', async () => {
-  const { client, log } = setup();
-  client.simulateConnackRefused(5);
-  await waitFor(() => client.reconnects === 1);
-  assert.equal(client.connectWills[1], undefined, 'second attempt without the will');
-  client.simulateConnect();
-  assert.equal(log.lines.warn.filter((line) => line.includes('ACL')).length, 1);
+test('N2: refused with the will, accepted right after without it: runs without the will and says what it saw', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { mqtt, log } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 } });
+  refused()(mqtt.client);
+  t.mock.timers.tick(0);
+  assert.deepEqual(willsSent(mqtt), ['will', 'none'], 'the attempt without the will follows at once');
+  mqtt.client.simulateConnect();
+  const warnings = log.lines.warn.filter((line) => line.includes('last will'));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /refused the connection that carried the last will .* accepted the one sent right after without it/);
+  assert.doesNotMatch(warnings[0], /restart/i);
 });
 
-test('SP-11: wrong credentials (refused with and without the will) keep the will for later attempts', async () => {
-  const { client } = setup();
-  client.simulateConnackRefused(5);
-  await waitFor(() => client.reconnects === 1);
-  client.simulateConnackRefused(5);
-  await waitFor(() => client.reconnects === 2);
-  assert.ok(client.connectWills[2], 'the will is back once the credentials are shown to be the cause');
+test('N2: a refusal that was not about the will (refused with and without it) keeps the will, no ACL diagnosis', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { mqtt, log } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 } });
+  refused()(mqtt.client);
+  t.mock.timers.tick(0);
+  refused()(mqtt.client);
+  t.mock.timers.tick(1000);
+  mqtt.client.simulateConnect();
+  assert.deepEqual(willsSent(mqtt), ['will', 'none', 'will']);
+  assert.ok(!log.all().includes('last will'), log.all());
+});
+
+test('N2: a transient refusal followed by a plain reconnection keeps the will', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { mqtt } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 } });
+  mqtt.client.simulateClose(econnrefused());
+  t.mock.timers.tick(1000);
+  mqtt.client.simulateConnect();
+  assert.deepEqual(willsSent(mqtt), ['will', 'will']);
+});
+
+test('N2: without the will, it is tried again periodically and comes back without a restart', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { mqtt, log } = setup({}, { backoff: { initialMs: 1000, maxMs: 4000 }, timing: { willRetryMs: 60000 } });
+  refused()(mqtt.client);
+  t.mock.timers.tick(0);
+  mqtt.client.simulateConnect();
+  // First retry: the ACL is still wrong, refused again; back without the will at once, quietly.
+  t.mock.timers.tick(60000);
+  assert.deepEqual(willsSent(mqtt), ['will', 'none', 'will']);
+  refused()(mqtt.client);
+  t.mock.timers.tick(0);
+  mqtt.client.simulateConnect();
+  assert.equal(log.lines.warn.filter((line) => line.includes('last will')).length, 1, 'warned once');
+  assert.equal(log.lines.error.length, 1, `the expected refusal of a retry is not an error: ${log.lines.error.join(' | ')}`);
+  // Second retry: the ACL was fixed.
+  t.mock.timers.tick(60000);
+  mqtt.client.simulateConnect();
+  assert.deepEqual(willsSent(mqtt), ['will', 'none', 'will', 'none', 'will']);
+  assert.ok(log.lines.info.some((line) => line.includes('accepted the last will') ));
+  t.mock.timers.tick(10 * 60000);
+  assert.equal(attempts(mqtt), 5, 'no more retries once the will is accepted');
+});
+
+test('N1: shutdown sends offline and DISCONNECT, and is forced if the broker does not confirm in time', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { bridge, mqtt, log } = setup({}, { timing: { stopTimeoutMs: 2000 } });
+  mqtt.client.simulateConnect();
+  mqtt.client.holdEnd = true; // the broker never confirms: end() would wait forever
+  bridge.disconnect();
+  assert.equal(mqtt.client.endForced, false, 'a graceful DISCONNECT is attempted first');
+  assert.ok(mqtt.client.published.some((p) => p.topic === 'homebridge/klares4/status' && JSON.parse(p.payload).state === 'offline'));
+  t.mock.timers.tick(2000);
+  assert.equal(mqtt.client.stream.destroyed, true);
+  assert.ok(log.lines.warn.some((line) => line.includes('did not confirm')));
+});
+
+test('N1: an attempt that closed fails its unconfirmed publishes instead of keeping them queued', async () => {
+  const { bridge, mqtt } = setup();
+  const first = mqtt.client;
+  first.simulateConnect();
+  first.simulateClose();
+  assert.equal(first.endForced, true, 'ended with force: mqtt.js flushes its in-flight publishes');
+  await waitFor(() => attempts(mqtt) === 2);
+  mqtt.client.simulateConnect();
+  bridge.disconnect();
+  assert.equal(mqtt.client.endForced, false);
 });
 
 test('shutdown stops the reconnection loop', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { bridge, client } = setup({}, { backoff: { initialMs: 1000, maxMs: 1000 } });
-  client.simulateClose();
+  const { bridge, mqtt } = setup({}, { backoff: { initialMs: 1000, maxMs: 1000 } });
+  mqtt.client.simulateClose();
   bridge.disconnect();
   t.mock.timers.tick(5000);
-  assert.equal(client.reconnects, 0);
-  assert.equal(client.endForced, true, 'not connected: nothing to flush');
+  assert.equal(attempts(mqtt), 1);
 });
 
 const refusedUrls = [

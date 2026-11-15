@@ -76,6 +76,8 @@ export function createDeviceStatePayload(device: KseniaDevice): DeviceStatePaylo
                 armed: zone.status?.armed ?? false,
                 fault: zone.status?.fault ?? false,
                 bypassed: zone.status?.bypassed ?? false,
+                // Added in 2.3.0, last so the existing fields keep their order.
+                tampered: zone.status?.tampered ?? false,
             };
             return zonePayload;
         }
