@@ -9,7 +9,7 @@ import type {
     ScenarioOptIn,
 } from '../types';
 import { normalizeDeviceName } from '../websocket/device-state-projector';
-import { resolveOutputExposure } from '../websocket/output-classifier';
+import { OutputTypeMemory, resolveOutputExposure } from '../websocket/output-classifier';
 import { outputOptInTypes, parseOutputData, parseZoneData, scenarioOptInIds } from './device-parsers';
 import { adoptDiscoveredDevice } from './discovered-device';
 import { ExposureReport, replaceHiddenDevices, type ReadFindings } from './exposure-report';
@@ -42,6 +42,7 @@ export interface DiscoveryReadHandlerDeps {
  */
 export class DiscoveryReadHandler {
     private readonly report: ExposureReport;
+    private readonly outputTypes = new OutputTypeMemory();
 
     constructor(private readonly deps: DiscoveryReadHandlerDeps) {
         this.report = new ExposureReport(deps.log);
@@ -65,7 +66,7 @@ export class DiscoveryReadHandler {
             const panelId = String(output.ID);
             listed.add(panelId);
             this.deps.thermostats.recordOutput(output);
-            const exposure = resolveOutputExposure(output, optIns);
+            const exposure = resolveOutputExposure(output, optIns, this.outputTypes);
             if (!exposure.exposed) {
                 const name = normalizeDeviceName(output.DES) || `Output ${panelId}`;
                 findings.hidden.push({
