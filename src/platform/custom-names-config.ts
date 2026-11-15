@@ -206,7 +206,8 @@ export function mergeCustomNames(
 ): CustomNameEntry[] {
     const userNames = normalizeCustomNames(configured);
     const rows: CustomNameEntry[] = Array.isArray(configured)
-        ? configured.map((entry) => ({ ...entry }))
+        // A row that is not an object (null, a string) is dropped, not rewritten as `{}` or `{"0":"a"}`.
+        ? configured.filter(isPlainObject).map((entry) => ({ ...entry }))
         : toCustomNameEntries(userNames);
     const additions: Partial<CustomNamesMap> = {};
     for (const category of Object.keys(ENTRY_PREFIX) as Array<keyof CustomNamesMap>) {

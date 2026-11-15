@@ -33,7 +33,7 @@ async function register(stack, device, getWsClient) {
     const accessory = deviceToMatterAccessory(device, {
         api: stack.api, log: silentLog(), getWsClient, momentaryAutoOffMs: 5, getLatestDevice: () => device,
     });
-    await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [accessory]);
+    await stack.register([accessory]);
     assert.ok(stack.record(device.id), `${device.id} registered`);
 }
 

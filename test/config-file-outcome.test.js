@@ -147,3 +147,22 @@ test('PLAT-16: leftover temporary files are removed when the service is asked to
 
     assert.deepEqual(fs.readdirSync(dir), ['config.json']);
 });
+
+test('PLAT-R6: with a symlinked config.json the leftover temporary file next to its destination is removed too', async (t) => {
+    const dir = tmpStorage(t, 'klares4-cfg-');
+    const realDir = tmpStorage(t, 'klares4-cfg-real-');
+    const destination = write(realDir, { platforms: [] });
+    fs.symlinkSync(destination, path.join(dir, 'config.json'));
+    const orphan = path.join(realDir, `${path.basename(destination)}.31337.0a1b2c3d4e5f.tmp`);
+    const stranger = path.join(realDir, 'notes.txt.1.2.tmp');
+    for (const file of [orphan, stranger]) {
+        fs.writeFileSync(file, '{"pin":"secret"}');
+        const old = new Date(Date.now() - 3600 * 1000);
+        fs.utimesSync(file, old, old);
+    }
+
+    await new PlatformConfigFileService(recordingLog(), dir).removeOrphanedTemporaryFiles();
+
+    assert.equal(fs.existsSync(orphan), false);
+    assert.equal(fs.existsSync(stranger), true, 'files the plugin did not create are left alone');
+});

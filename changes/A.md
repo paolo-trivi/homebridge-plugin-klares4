@@ -50,8 +50,8 @@ No numeric key: nothing to add to `runtime-config-limits.ts`.
 - One warning at startup lists every hidden output and scenario with its category (and mode) and the exact `exposeOutputs` / `exposeScenarios` entries to add, plus opt-in entries that have no effect. It is repeated only if the situation changes. (WS-01, WS-02)
 - The panel's per-scenario PIN flag is now read. Its meaning is not established yet, so it does not change what is exposed: exposed scenarios with a flag other than `N` are listed in the startup warning for the user to check. (WS-02)
 
-### Changed
-- An output of category `GATE` with mode `m` (lower case) is now a gate, like `M`. (PLAT-05)
+### Fixed
+- An output reconfigured on the panel (for example from `LIGHT` to `GATE`) is no longer kept with its old type until a restart: an explicit category always wins over the type remembered from an earlier read, so a former light that is now a gate is not switched by "turn on all the lights". The remembered type is still used when a re-read does not name a category, so a partial re-read never changes a device's identity. (COMMS-07)
 
 ## Migration notes (2.2.0 → 2.3.0)
 - **Outputs that were exposed as lights may disappear.** Any output whose panel category is not LIGHT, ROLL, GATE or a thermostat category (typically `GEN` relays) was a light in 2.2.0 and is hidden from 2.3.0. At the first startup the log shows a warning starting with `Exposure policy:` that names each hidden output and ends with a line such as
@@ -60,7 +60,9 @@ No numeric key: nothing to add to `runtime-config-limits.ts`.
 - Scenarios without a category or with an unknown category disappear the same way; the warning gives the `"exposeScenarios": [...]` line.
 - Accessories of hidden devices restored from the HomeKit/Matter cache are removed like excluded devices: on HomeKit at the first sync, on Matter by the normal 3-sync prune; they are never registered again and cannot run commands.
 - Retained MQTT state topics of now-hidden devices published by 2.2.0 are not cleared automatically; delete them on the broker if needed.
-- Nothing else changes: IDs, UUIDs, topics and existing keys are the same.
+- **Device IDs.** Every output 2.2.0 exposed and 2.3.0 still exposes keeps exactly its 2.2.0 ID (`light_`, `cover_`, `gate_`, `thermostat_` + panel ID), hence the same HomeKit UUID, Matter endpoint and MQTT topic: the classification of recognized categories is the 2.2.0 one, comparison for comparison (category upper-cased but not trimmed, `MOD` compared as `M`; `GATE` with `m` stays a cover). A test compares the two over a grid of categories and modes. The only outputs that change are those 2.2.0 exposed as lights by default (unrecognized category, including a recognized name with surrounding spaces such as `" ROLL"`): they are hidden, and `exposeOutputs` brings them back with their old `light_<id>`.
+- An output reconfigured on the panel to another recognized category gets the ID of its new type (`light_15` → `cover_15`), as a newly installed output would: the new accessory appears, the old one stops receiving commands and states at once and is removed by the usual prune (3 syncs; a sync is one login, so with a stable connection this can take until the next restarts or reconnections). Rooms and automations of the old accessory do not carry over. 2.2.0 instead kept the old type (and the old ID) when the new category was `GATE` without a mode.
+- Existing config keys, scenario IDs and zone/sensor IDs are unchanged.
 
 ## Documentation notes
 - README EN/IT "Supported devices": replace the "currently not supported" list for GEN/IRR with: not exposed by default, can be exposed one by one with `exposeOutputs` (as a light); explain the safety reason (group commands and scenes act on every light).
@@ -69,11 +71,11 @@ No numeric key: nothing to add to `runtime-config-limits.ts`.
 - ARCHITECTURE: exposure policy = `websocket/output-classifier.ts` (`determineOutputType` returns `undefined` for unrecognized categories, `resolveOutputExposure`) and `websocket-client/device-parsers.ts` (`resolveScenarioExposure`, `isIgnoredScenarioCategory(category, exposePartialArm, optedIn)`), applied in `discovery-read-handler.ts` / `scenario-discovery.ts` before anything enters `state.devices`; hidden devices recorded in `state.hiddenByExposurePolicy` (`exposure-report.ts`, `isHiddenByExposurePolicy`); `DiscoveryService.attachExposurePolicy` makes them count as excluded on the platform side.
 - `ksaImport.applyExclusionSuggestions` (task G) has nothing left to do for GEN/IRR outputs: they are hidden by default. The KSA room mapping lists such an output as `light_<id>`, the ID it gets when re-exposed with `exposeOutputs` (until then the entry matches no device).
 
-## Wiring left to other tasks (not my files)
-The fail-closed default works everywhere already. Done in this branch: the platform attaches the client to `DiscoveryService` (`clientExposurePolicy` in `platform/client-options.ts`, called in `platform/index.ts`), so a cached accessory of a hidden **scenario** is removed from HomeKit at the first sync like an excluded one and on Matter follows the exclusion policy (never re-registered, 3-sync prune); the KSA room mapping maps an unrecognized output to `light_<id>`. Still needed, each pinned by a `todo` test in `test/exposure-platform-wiring.test.js`:
-1. **C — `websocket-client/index.ts`, `message-service.ts`, `state.ts`**:
-   - forward `this.options.exposeOutputs` / `exposeScenarios` to `MessageService` and from there to `DiscoveryReadHandler` (deps `exposeOutputs`, `exposeScenarios`, same path as `exposePartialArmScenarios`);
-   - `isScenarioSuppressed` passes the opt-in: `isIgnoredScenarioCategory(category, partial, scenarioOptInIds(this.options.exposeScenarios).has(id))`;
-   - facade method `isHiddenByExposurePolicy(deviceId)` = `isHiddenByExposurePolicy(this.state, deviceId)` (from `exposure-report.ts`); then `clientExposurePolicy(client)` returns the client itself (cached accessories of hidden **outputs** treated as excluded);
-   - `state.ts`: initialize `hiddenByExposurePolicy: new Map()` (the field can then become required).
-2. **B — `command-service.ts`**: `assertScenarioAllowed` passes the opt-in as third argument and words the error by `resolveScenarioExposure(...).reason` (an unknown category is refused today with "arms or disarms the alarm"); outputs that are not a discovered device of that type are refused (makes cached accessories of hidden outputs inert).
+## Decisions to confirm with the user
+1. **Reconfigured output = new device** (COMMS-07). An explicit, recognized category different from the remembered one gives the output its new type and ID; the old accessory is pruned after 3 syncs. Alternative: keep the old ID with the new behaviour (impossible without changing the ID ↔ type rule) or hide the output until a restart. Chosen because it is what discovery does for any new output and what task C's removal of no-longer-listed devices expects.
+2. **2.2.0 classification kept literally** (COMMS-08), including its oddities: `GATE` with `m` is a cover, `" ROLL"` (with spaces) is not recognized and is now hidden. Real captures always send `CAT`/`MOD` in upper case without spaces.
+3. **Type memory is per client** (one per panel connection), no longer shared by every instance in the process. It covers only re-reads without a category, and `GATE` without `MOD` for an output already known as a gate or a cover from a `GATE` read.
+
+## Implementation notes
+- `OutputTypeMemory` lives in `DiscoveryReadHandler` (one per client). The type it decides for a discovery element reaches `parseOutputDevice` (task C's projector, which calls `classifyOutput(outputData)`) through a `WeakMap` keyed by that element. A cleaner follow-up for C: give `parseOutputDevice` an explicit `type` parameter and drop the `WeakMap`.
+- The wiring to tasks B and C is done (`isHiddenByExposurePolicy` on the facade, opt-ins forwarded, command guard).

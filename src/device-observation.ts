@@ -13,12 +13,56 @@ import { syncThermostatTopLevelFromStatus } from './thermostat-state';
  */
 const placeholderStatuses = new WeakSet<object>();
 
+/**
+ * "The panel reported this value" must survive a restart together with the
+ * value. Homebridge persists the accessory `context` (the device snapshot and
+ * whatever else is stored next to it) in its HAP and Matter caches, so the marker
+ * lives there, not in the status (which every consumer compares and serializes).
+ * It is versioned: a cache written before it existed (2.2.0 and earlier) has none.
+ */
+const REPORTED_KEY = 'panelReported';
+const REPORTED_VERSION = 1;
+
+/** Types whose discovery placeholder (0 °C, 50 %, position 0) looks like a measurement. */
+const TYPES_WITH_PLACEHOLDERS: ReadonlySet<string> = new Set(['sensor', 'cover']);
+
+type AccessoryContext = Record<string, unknown>;
+
 export function markStatusPlaceholder(device: KseniaDevice): void {
     placeholderStatuses.add(device.status);
 }
 
 export function markStatusObserved(device: KseniaDevice): void {
     placeholderStatuses.delete(device.status);
+}
+
+/**
+ * Keeps the persisted marker in step with the device stored in `context`: set
+ * when the state was reported by the panel, absent otherwise. Written only for
+ * the types that have placeholders.
+ */
+export function recordObservation(context: AccessoryContext, device: KseniaDevice): void {
+    if (!TYPES_WITH_PLACEHOLDERS.has(device.type)) return;
+    if (hasObservedState(device)) context[REPORTED_KEY] = REPORTED_VERSION;
+    else delete context[REPORTED_KEY];
+}
+
+/** `context` for a new accessory holding `device`, with the observation marker when it applies. */
+export function contextWithObservation(device: KseniaDevice): AccessoryContext {
+    const context: AccessoryContext = { device };
+    recordObservation(context, device);
+    return context;
+}
+
+/**
+ * A device restored from a Homebridge cache (HAP or Matter). For the types whose
+ * placeholder is indistinguishable from a reading, a state without the marker was
+ * never reported by the panel (or was saved by a version that did not record it):
+ * it is not a reading. Types without such placeholders keep their cached state.
+ */
+export function adoptCachedState(context: AccessoryContext, device: KseniaDevice): void {
+    if (typeof device.status !== 'object' || device.status === null || !TYPES_WITH_PLACEHOLDERS.has(device.type)) return;
+    if (context[REPORTED_KEY] !== REPORTED_VERSION) markStatusPlaceholder(device);
 }
 
 export function hasObservedState(device: KseniaDevice): boolean {

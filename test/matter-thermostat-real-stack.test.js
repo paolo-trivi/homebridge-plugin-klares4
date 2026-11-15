@@ -116,7 +116,7 @@ test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupanc
         [thermostat(4, { role: 'heating-cooling' }), { heating: true, cooling: true, autoMode: true }, 4],
     ];
     for (const [device, features, sequence] of cases) {
-        await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [deviceToMatterAccessory(device, deps)]);
+        await stack.register([deviceToMatterAccessory(device, deps)]);
         const state = thermo(stack, device.id);
         assert.equal(stack.deviceTypeName(device.id), 'Thermostat', device.status.outputRole);
         for (const [feature, on] of Object.entries(features)) assert.equal(state.featureMap[feature], on, `${device.status.outputRole}.${feature}`);
@@ -129,7 +129,7 @@ test('TH-01/TH-09/TH-05: the feature map follows the output role, never Occupanc
 test('TH-05/invariant 3: the program data decides the role, a cooling-sounding name does not', { timeout: 120000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const device = { ...thermostat(5, { role: 'heating' }), name: 'Raffrescamento prova' };
-    await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [deviceToMatterAccessory(device, { api: stack.api, log: recordingLog().log, getWsClient: () => panel() })]);
+    await stack.register([deviceToMatterAccessory(device, { api: stack.api, log: recordingLog().log, getWsClient: () => panel() })]);
     assert.equal(thermo(stack, 'thermostat_5').featureMap.cooling, false);
 });
 
@@ -219,7 +219,7 @@ test('TH-01: a fallback saved by an earlier version goes back to a native Thermo
 
     // Boot 1 (as 2.2.0 left it): the thermostat is a TemperatureSensor and the v1 store says so.
     const boot1 = await session.start();
-    await boot1.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [
+    await boot1.register([
         mapThermostatAsTemperatureSensor(device, { api: boot1.api, log: recordingLog().log, getWsClient: () => undefined }),
     ]);
     assert.equal(boot1.deviceTypeName('thermostat_12'), 'TemperatureSensor');

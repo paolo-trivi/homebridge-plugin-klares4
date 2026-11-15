@@ -17,7 +17,7 @@ test('room mapping uses light_<id> for outputs of an unrecognized category', () 
             { ID: '3', DES: 'Sprinkler', CAT: 'IRR', MOD: 'M' },
             { ID: '4', DES: 'No category' },
             { ID: '5', DES: 'Numeric category', CAT: 7 },
-            { ID: '6', DES: 'Driveway', CAT: 'GATE', MOD: 'm' },
+            { ID: '6', DES: 'Driveway', CAT: 'GATE', MOD: 'm' }, // 2.2.0: MOD compared as `M`, so a cover
         ],
         zones: [], scenarios: [], busHas: [], thermostats: [],
         rooms: [{ ID: '1', DES: 'Hall' }],
@@ -25,6 +25,6 @@ test('room mapping uses light_<id> for outputs of an unrecognized category', () 
     };
     const { derivedConfig } = deriveKsaImportResult(program, undefined, Buffer.from('x'));
     const ids = derivedConfig.roomMapping.rooms.flatMap((room) => room.devices.map((device) => device.deviceId));
-    assert.deepEqual(ids, ['light_1', 'light_2', 'light_3', 'light_4', 'light_5', 'gate_6']);
+    assert.deepEqual(ids, ['light_1', 'light_2', 'light_3', 'light_4', 'light_5', 'cover_6']);
     assert.ok(ids.every((id) => !id.startsWith('undefined_')));
 });

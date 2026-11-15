@@ -1,5 +1,6 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaDevice } from '../types';
+import { recordObservation } from '../device-observation';
 import { hasAccessoryMetadataChanged } from './matter-device-mapper';
 import type { MatterRegistration } from './matter-registration-recovery';
 import { MatterStateUpdateQueue } from './matter-state-update-queue';
@@ -41,6 +42,7 @@ export function createStateUpdateQueue(
  */
 export function enqueueDeviceState(reg: MatterRegistration, device: KseniaDevice, thermostatAsFallback: boolean): void {
     reg.matterAccessory.context.device = device;
+    recordObservation(reg.matterAccessory.context, device);
     const clusters = reg.matterAccessory.clusters ?? {};
     mergeStateUpdates(reg.pendingStateUpdates, device, thermostatAsFallback, (name) => name in clusters);
 }
