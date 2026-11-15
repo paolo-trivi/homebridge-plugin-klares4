@@ -88,7 +88,7 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 - MQTT: the plugin schedules the reconnections itself (backoff from 5 s up to 60 s); `{"on":true,"brightness":40}` runs its two steps one after the other.
 - A panel setpoint outside `temperatureDefaults.min`/`max` is shown on HomeKit at the nearest limit.
 - Logging: the plugin logs through one logger held to `logLevel` (0: warnings and errors; 1: connection, synchronization, device summary, commands; 2: everything, at info level and marked `[debug]`). `debug: true` is level 2 whatever `logLevel` says. A thermostat whose temperature is missing is reported once, when it goes missing, not at every read by a controller; a Matter state update or a momentary auto-off that fails is a warning instead of a debug line.
-- Compiled for ES2022 (Node 22 and later, as before). The npm package no longer ships source maps (269 files and 254 kB instead of 521 files and 346 kB), and install size drops by about 95 MB of dependencies.
+- Compiled for ES2022 (Node 22 and later, as before). The npm package no longer ships source maps, and install size drops by about 95 MB of dependencies.
 - CI runs on Node 22, 24 and 26, runs contract tests against the real Homebridge Matter stack on Homebridge 2.4.x and 2.5.x, enforces coverage thresholds and checks the package contents. Tests now run against the real Homebridge Matter stack, and the test device list is fully synthetic.
 
 ### Fixed

@@ -95,7 +95,7 @@ Eseguita il 2026-09-26 su un'installazione reale, dopo il report statico. Nessun
 | Homebridge | 2.4.0 (HAP-NodeJS 2.2.2, matter.js 0.17.9), identico al codice analizzato: F01 (`requiresExternalBridge(accessory.deviceType)`), register bridged fire-and-forget, `already registered` su UUID duplicato |
 | Node (container) | 24.21.0 |
 | Plugin installato | 2.2.0-rc.3 da npm, poi le build del branch installate sostituendo `dist/` nella stessa cartella (dipendenze identiche) |
-| Child bridge | sì, `0E:91:2B:75:74:97`, **solo Matter** (`hap.enabled: false`, Matter su 5530), 109 endpoint |
+| Child bridge | sì, `0E:00:00:00:00:01`, **solo Matter** (`hap.enabled: false`, Matter su 5530), 109 endpoint |
 | MQTT | disabilitato nel plugin (non attivato per il test, per scelta dell'utente) |
 | Pannello | Lares4, firmware non esposto nei messaggi catturati; `PRG_THERMOSTATS` → `CMD_NOT_AVAILABLE` (percorso degradato "DOMUS sensor id come cfg id" attivo: `thermostat_18` e `thermostat_34` → cfg 1) |
 | Backup | una cartella di backup sull'host (config, persist, accessories, storage Matter, file `klares4-*`, plugin rc.3 per il rollback) |
