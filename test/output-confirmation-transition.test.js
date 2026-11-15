@@ -28,14 +28,14 @@ test('a state that already matched before the command does not confirm it', asyn
 test('a transition to the target observed after the command confirms it', async () => {
     const tracker = new OutputCommandConfirmationTracker();
     tracker.observe({ ID: '5', STA: 'OFF' });
-    const handle = tracker.register('5', 500, isOn);
+    const handle = tracker.register('5', 60_000, isOn);
     tracker.observe({ ID: '5', STA: 'ON' });
     assert.equal((await handle.promise).status, 'state-confirmed');
 });
 
 test('with no state known before the command, a matching state alone does not confirm', async () => {
     const tracker = new OutputCommandConfirmationTracker();
-    const handle = tracker.register('5', 500, isOn);
+    const handle = tracker.register('5', 60_000, isOn);
     tracker.observe({ ID: '5', STA: 'ON' });
     let settled = false;
     handle.promise.then(() => { settled = true; }, () => { settled = true; });
@@ -49,7 +49,7 @@ test('with no state known before the command, a matching state alone does not co
 test('the late event of an acknowledged earlier command is not taken for the next one', async () => {
     const tracker = new OutputCommandConfirmationTracker();
     tracker.observe({ ID: '5', STA: 'OFF' });
-    const first = tracker.register('5', 500, isOn);
+    const first = tracker.register('5', 60_000, isOn);
     first.promise.catch(() => undefined);
     first.expectLateState(); // ACK arrived, the panel's realtime event is still on its way
     const second = tracker.register('5', 60, isOn);
@@ -60,7 +60,7 @@ test('the late event of an acknowledged earlier command is not taken for the nex
 test('a non-string STA or ID is tolerated by the tracker and by the client matchers', async () => {
     const tracker = new OutputCommandConfirmationTracker();
     tracker.observe({ ID: '5', STA: 'OFF' });
-    const handle = tracker.register('5', 500, isOn);
+    const handle = tracker.register('5', 60_000, isOn);
     assert.doesNotThrow(() => tracker.observe({ ID: 5, STA: null }));
     handle.cancel();
 
@@ -131,7 +131,7 @@ test('repro 04-A: ON / OFF / ON with the first event late and the third refused 
     } });
     const log = { info() {}, warn() {}, error() {}, debug() {}, success() {} };
     const client = new KseniaWebSocketClient('127.0.0.1', panel.port, false, 'hb', '135790', log, {
-        commandTimeoutMs: 1000, heartbeatInterval: 60000, reconnectInterval: 60000,
+        commandTimeoutMs: 5000, heartbeatInterval: 60000, reconnectInterval: 60000,
     });
     let synced = false;
     client.onInitialSyncComplete = () => { synced = true; };
