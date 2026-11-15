@@ -112,3 +112,29 @@ test('auto-off rejection is swallowed: trigger already happened, controller must
     await new Promise((resolve) => setTimeout(resolve, 40));
     // No assertion needed beyond "process did not crash with an unhandled rejection".
 });
+
+// Invariant: a Matter-only name is derived; it never reaches the device
+// snapshot HomeKit and MQTT share. One direct check per device type.
+test('mapping a device to Matter does not change the name (or anything else) of the shared device', () => {
+    const { api } = makeApi();
+    const { client } = makeWsClient();
+    const devices = [
+        { id: 'light_1', name: 'Kitchen', description: 'Kitchen', type: 'light', status: { on: true, dimmable: false } },
+        { id: 'cover_2', name: 'Kitchen', description: 'Kitchen', type: 'cover', status: { position: 40, state: 'stopped' } },
+        { id: 'gate_3', name: 'Gate', description: 'Gate', type: 'gate', status: {} },
+        { id: 'scenario_4', name: 'Evening', description: 'Evening', type: 'scenario', status: {} },
+        { id: 'zone_5', name: 'Kitchen', description: 'Kitchen', type: 'zone', status: { open: false, armed: false, fault: false, bypassed: false } },
+        { id: 'sensor_temp_6', name: 'Kitchen', description: 'Kitchen', type: 'sensor', status: { sensorType: 'temperature', value: 21, unit: 'C' } },
+        { id: 'thermostat_7', name: 'Kitchen', description: 'Kitchen', type: 'thermostat', status: { currentTemperature: 20, targetTemperature: 21, mode: 'heat' }, currentTemperature: 20, targetTemperature: 21, mode: 'heat' },
+    ];
+    for (const device of devices) {
+        const before = JSON.stringify(device);
+        const accessory = deviceToMatterAccessory(device, {
+            api, log: silentLog(), getWsClient: () => client,
+            resolveDisplayName: (d) => `${d.name} - Matter only`,
+        });
+        assert.ok(accessory, `${device.type} is mapped`);
+        assert.equal(accessory.displayName, `${device.name} - Matter only`, `${device.type}: the Matter accessory carries the derived name`);
+        assert.equal(JSON.stringify(device), before, `${device.type}: the shared device is left as it was`);
+    }
+});
