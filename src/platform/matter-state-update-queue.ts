@@ -40,7 +40,9 @@ export class MatterStateUpdateQueue {
         reg: MatterRegistration,
         update: PendingMatterStateUpdate,
     ): Promise<void> {
-        if (!this.isReadyForStateUpdates(reg) || this.commands.isBusy(reg.uuid)) {
+        // Behind anything already queued for the endpoint: a direct push would
+        // land before an older queued one, which would then overwrite it.
+        if (!this.isReadyForStateUpdates(reg) || this.commands.isBusy(reg.uuid) || reg.pendingStateUpdates.length > 0) {
             this.queue(reg, update);
             this.scheduleFlush(reg.uuid);
             return;

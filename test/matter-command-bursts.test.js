@@ -87,10 +87,12 @@ for (const gapMs of [0, 1, 5]) {
         assert.deepEqual(ws.calls.map((c) => c[2]), [100, 0, 75, 100, 0], 'each command sent once, in order');
 
         // The panel has not reported any movement: current stays at the reported 50 %, target is the last request.
-        await waitFor(() => {
+        const lift = () => {
             const state = stack.read('cover_1', 'windowCovering');
-            return state.currentPositionLiftPercent100ths === 5000 && state.targetPositionLiftPercent100ths === 10000;
-        });
+            return { current: state.currentPositionLiftPercent100ths, target: state.targetPositionLiftPercent100ths };
+        };
+        await waitFor(() => lift().current === 5000 && lift().target === 10000).catch(() => undefined);
+        assert.deepEqual(lift(), { current: 5000, target: 10000 }, 'the last request wins, never an older one');
     });
 }
 
