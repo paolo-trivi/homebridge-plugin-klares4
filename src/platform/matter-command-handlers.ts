@@ -14,6 +14,7 @@
 import type { API, Logger, MatterAccessory } from 'homebridge';
 import type { KseniaCover, KseniaLight } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
+import type { PendingMatterStateUpdate } from './matter-state-updates';
 
 type Handlers = NonNullable<MatterAccessory['handlers']>;
 
@@ -22,6 +23,12 @@ export interface CommandContext<T> {
     getWsClient: () => KseniaWebSocketClient | undefined;
     latest: () => T;
     log?: Logger;
+    /**
+     * Hands a Matter-only state update to the registry's state-update queue,
+     * the path every state push takes, so it is ordered with them (and with
+     * the controller's commands, once the queue serializes against them).
+     */
+    queueState?: (update: PendingMatterStateUpdate) => void;
 }
 
 // Matter spec: Status.UnsupportedCommand. Homebridge ships no named class for it.
@@ -136,18 +143,27 @@ function liftPercent100ths(panelPosition: number): number {
  * and here it already has, so the status goes with the positions; it returns
  * to stopped when `current` reaches the target (:162-169). Matter state only:
  * the device snapshot is not touched.
+ *
+ * The update goes through the registry's state-update queue, which flushes
+ * on a later timer turn, after matter.js has committed the command; a newer
+ * panel status queued later replaces it. Without a queue (the mapper used on
+ * its own) the same push is made directly on a later turn.
  */
 function keepReportedPosition(device: KseniaCover, requested: number, ctx: CommandContext<KseniaCover>): void {
+    const position = ctx.latest().status?.position;
+    const target = liftPercent100ths(requested);
+    const attributes: Record<string, unknown> = { targetPositionLiftPercent100ths: target };
+    if (Number.isFinite(position)) {
+        const current = liftPercent100ths(position);
+        const movement = current === target ? MOVEMENT_STOPPED : current < target ? MOVEMENT_CLOSING : MOVEMENT_OPENING;
+        attributes.currentPositionLiftPercent100ths = current;
+        attributes.operationalStatus = { global: movement, lift: movement, tilt: MOVEMENT_STOPPED };
+    }
+    if (ctx.queueState) {
+        ctx.queueState({ clusterName: 'windowCovering', attributes });
+        return;
+    }
     setTimeout(() => {
-        const position = ctx.latest().status?.position;
-        const target = liftPercent100ths(requested);
-        const attributes: Record<string, unknown> = { targetPositionLiftPercent100ths: target };
-        if (Number.isFinite(position)) {
-            const current = liftPercent100ths(position);
-            const movement = current === target ? MOVEMENT_STOPPED : current < target ? MOVEMENT_CLOSING : MOVEMENT_OPENING;
-            attributes.currentPositionLiftPercent100ths = current;
-            attributes.operationalStatus = { global: movement, lift: movement, tilt: MOVEMENT_STOPPED };
-        }
         ctx.api.matter?.updateAccessoryState(device.id, 'windowCovering', attributes)
             .catch((err: unknown) => {
                 ctx.log?.debug(`[Matter] cover position refresh failed for ${device.id}: ${err instanceof Error ? err.message : String(err)}`);

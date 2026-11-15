@@ -15,7 +15,7 @@ import {
 } from './matter-registration-recovery';
 import { enqueueDeviceState, liveNodeLabel, logRegisterRequested, refreshRegistrationMetadata, type CachedEndpointLabel } from './matter-registry-state';
 import type { MatterTimings } from './matter-registry-types';
-import { buildStateUpdates } from './matter-state-updates';
+import { buildStateUpdates, type PendingMatterStateUpdate } from './matter-state-updates';
 import type { MatterStateUpdateQueue } from './matter-state-update-queue';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { resolvePersistedThermostatFallback } from './matter-thermostat-recovery-request';
@@ -224,6 +224,16 @@ export class MatterRegistrationFlow {
         this.ctx.fallbackStore.markNative(reg.uuid);
     }
 
+    private queueState(uuid: string, update: PendingMatterStateUpdate): void {
+        const reg = this.ctx.registrations.get(uuid);
+        if (!reg) return;
+        const pending = reg.pendingStateUpdates;
+        const index = pending.findIndex((p) => p.clusterName === update.clusterName && p.partId === update.partId);
+        if (index >= 0) pending[index] = update;
+        else pending.push(update);
+        this.ctx.stateUpdateQueue.scheduleFlush(uuid);
+    }
+
     private republishKnownState(uuid: string): void {
         const device = this.ctx.registrations.get(uuid)?.matterAccessory.context?.device as KseniaDevice | undefined;
         if (!device) return;
@@ -243,6 +253,8 @@ export class MatterRegistrationFlow {
             getLatestDevice: (id: string) => ctx.registrations.get(id)?.matterAccessory.context?.device as KseniaDevice | undefined,
             // Pushes the last observed state again, e.g. after the panel refused a Matter command.
             republishState: (id: string) => this.republishKnownState(id),
+            // A handler's Matter-only update (cover position after a command) takes the queue too.
+            queueState: (id: string, update: PendingMatterStateUpdate) => this.queueState(id, update),
         };
     }
 

@@ -17,6 +17,7 @@ import { buildThermostatMatterState, toMatterTemperatureCelsius, thermostatSuppo
 import { sanitizeMatterAccessoryName, MatterNameRegistry } from './matter-name-sanitizer';
 import { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { buildThermostatHandlers } from './matter-thermostat-handlers';
+import type { PendingMatterStateUpdate } from './matter-state-updates';
 import { buildCoverHandlers, buildLightHandlers, buildMomentaryHandlers, requireWsClient } from './matter-command-handlers';
 import {
     coverLift, finiteNumber, humidityMeasuredValue, MAX_LEVEL, MIN_LEVEL, illuminanceMeasuredValue, levelFromBrightness, temperatureMeasuredValue,
@@ -76,6 +77,8 @@ interface MapperDeps {
     getLatestDevice?: (id: string) => KseniaDevice | undefined;
     /** Re-publish the known state of a device after a command the panel refused. */
     republishState?: (id: string) => void;
+    /** A Matter-only state update for the registry's state-update queue (see `CommandContext.queueState`). */
+    queueState?: (id: string, update: PendingMatterStateUpdate) => void;
 }
 
 function latestSnapshot<T extends KseniaDevice>(device: T, deps: MapperDeps): T {
@@ -178,7 +181,10 @@ function mapCover(device: KseniaCover, deps: MapperDeps): MatterAccessory {
                 configStatus: { liftPositionAware: true, operational: true },
             },
         },
-        handlers: buildCoverHandlers(device, { api, getWsClient, log, latest: () => latestSnapshot(device, deps) }),
+        handlers: buildCoverHandlers(device, {
+            api, getWsClient, log, latest: () => latestSnapshot(device, deps),
+            queueState: deps.queueState ? (update) => deps.queueState?.(device.id, update) : undefined,
+        }),
     };
 }
 
