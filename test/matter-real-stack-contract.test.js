@@ -17,7 +17,13 @@ process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
 
 const { deviceToMatterAccessory, mapThermostatAsTemperatureSensor } = require('../dist/platform/matter-device-mapper.js');
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
-const { realMatterStackSession } = require('./fixtures/real-matter-stack.js');
+const { realMatterStackSession, installedHomebridgeVersion } = require('./fixtures/real-matter-stack.js');
+
+function semverAtLeast(version, min) {
+    const [a, b] = [version, min].map((v) => v.split('-')[0].split('.').map(Number));
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return true;
+}
 const { REAL_DEVICE_TYPES } = require('./fixtures/hb-matter-api.js');
 const { waitFor } = require('./fixtures/wait-for.js');
 const { tmpStorage } = require('./fixtures/tmp-storage.js');
@@ -76,7 +82,7 @@ function mapperDeps(stack, ws = wsClient()) {
 }
 
 async function registerOnRealStack(stack, accessory) {
-    await stack.api.matter.registerPlatformAccessories(PLUGIN, PLATFORM, [accessory]);
+    await stack.register([accessory]);
     return stack.record(accessory.UUID);
 }
 
@@ -175,28 +181,37 @@ test('fixture fidelity: hb-matter-api.js offers exactly the real device types th
     }
 });
 
-test('fixture fidelity: the API calls behave as the fixture models them', { timeout: 30000 }, async (t) => {
+// hb-matter-api.js models Homebridge 2.5. On 2.4 register/unregister emit the
+// event and return before the bridge has done the work (MatterAPIImpl.js of
+// 2.4.0 has no emitAndWait); everything else checked here is the same. The
+// version is read only to state which of the two the call itself must show.
+const AWAITS_LISTENERS = semverAtLeast(installedHomebridgeVersion(), '2.5.0');
+
+test(`fixture fidelity: the API calls behave as modelled (Homebridge ${installedHomebridgeVersion()}, `
+    + `register/unregister ${AWAITS_LISTENERS ? 'await' : 'do not await'} the bridge)`, { timeout: 30000 }, async (t) => {
     const stack = await realMatterStackSession(t).start();
     const matter = stack.api.matter;
     // updateAccessoryState on an unknown UUID or cluster resolves; Homebridge only logs.
     await matter.updateAccessoryState('missing_1', 'onOff', { onOff: true });
     const light = deviceToMatterAccessory(D.light(30), mapperDeps(stack));
-    await registerOnRealStack(stack, light);
+    await matter.registerPlatformAccessories(PLUGIN, PLATFORM, [light]);
+    // 2.5: the call resolves once the endpoint exists; 2.4: the endpoint follows.
+    if (AWAITS_LISTENERS) assert.ok(stack.record('light_30'), 'register resolves once the endpoint exists');
+    await stack.until(() => stack.record('light_30') && stack.server.registrationsInFlight === 0, 'light_30 registration');
     await matter.updateAccessoryState('light_30', 'temperatureMeasurement', { measuredValue: 1 });
-    // register resolves once the endpoint exists.
-    assert.ok(stack.record('light_30'));
     // an accessory without serialNumber is dropped by validation; the call resolves.
     const { serialNumber: _dropped, ...noSerial } = deviceToMatterAccessory(D.light(31), mapperDeps(stack));
-    await matter.registerPlatformAccessories(PLUGIN, PLATFORM, [noSerial]);
+    await stack.register([noSerial]);
     assert.equal(stack.record('light_31'), undefined);
     // a duplicate UUID is refused and only logged; the call resolves.
-    await matter.registerPlatformAccessories(PLUGIN, PLATFORM, [deviceToMatterAccessory(D.light(30), mapperDeps(stack))]);
+    await stack.register([deviceToMatterAccessory(D.light(30), mapperDeps(stack))]);
     assert.ok(stack.hbLines.some((l) => l.includes('already registered')));
     // unregister with a bare { UUID } stub throws before removing anything.
     await assert.rejects(matter.unregisterPlatformAccessories(PLUGIN, PLATFORM, [{ UUID: 'light_30' }]), TypeError);
     assert.ok(stack.record('light_30'));
-    // unregister resolves once the endpoint is gone.
+    // 2.5: unregister resolves once the endpoint is gone; 2.4: the removal follows.
     await matter.unregisterPlatformAccessories(PLUGIN, PLATFORM, [light]);
-    assert.equal(stack.record('light_30'), undefined);
+    if (AWAITS_LISTENERS) assert.equal(stack.record('light_30'), undefined, 'unregister resolves once the endpoint is gone');
+    await stack.until(() => !stack.record('light_30'), 'light_30 removal');
     assert.equal(await matter.getAccessoryState('light_30', 'onOff'), undefined);
 });

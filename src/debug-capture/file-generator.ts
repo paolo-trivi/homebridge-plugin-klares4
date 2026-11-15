@@ -35,6 +35,8 @@ export class DebugFileGenerator {
             const incomingMessages = rawMessages.filter((m) => m.direction === 'in').length;
             const outgoingMessages = rawMessages.filter((m) => m.direction === 'out').length;
 
+            // Each frame is written once, as its (redacted) text: `parsed` is that text parsed.
+            const frames = rawMessages.map(({ timestamp, direction, rawData }) => ({ timestamp, direction, rawData }));
             const debugData = {
                 generated: new Date().toISOString(),
                 version: PLUGIN_VERSION_RAW,
@@ -50,8 +52,8 @@ export class DebugFileGenerator {
                     purpose: 'Traffic between the plugin and the Ksenia Lares4 panel, to diagnose entities that do not work',
                     privacy: CONFIDENTIALITY_NOTICE,
                     whatToLookFor: [
-                        'Check rawMessages[] for complete WebSocket traffic',
-                        'Compare deviceSnapshots[] to see how devices change over time',
+                        'Check rawMessages[] for the WebSocket traffic: each frame is the JSON text in rawData, written once',
+                        'Compare deviceSnapshots[] to see how devices change over time (START and END always, INTERVAL only when something changed)',
                         'Look at messagesByType to understand what commands the central supports',
                         'Check commandsSeen[] for all commands that were actually used',
                         'PINs, account data, panel serial numbers and the home position are masked (***MASKED***)',
@@ -59,7 +61,7 @@ export class DebugFileGenerator {
                     ],
                 },
                 deviceSnapshots,
-                rawMessages,
+                rawMessages: frames,
                 analysis: {
                     messagesByType: analyzeMessages(rawMessages),
                     commandsSeen: extractCommands(rawMessages),
@@ -84,7 +86,7 @@ export class DebugFileGenerator {
                 this.log.warn('[OK] COMPREHENSIVE DEBUG FILE GENERATED!');
                 this.log.warn('[FILE] Location: ' + filepath);
                 this.log.warn('[INFO] Contains:');
-                this.log.warn(`   - ${debugData.rawMessages.length} raw WebSocket messages`);
+                this.log.warn(`   - ${frames.length} raw WebSocket messages`);
                 this.log.warn(`   - ${debugData.deviceSnapshots.length} device snapshots`);
                 this.log.warn(`   - ${debugData.statistics.devices} total devices`);
                 this.log.warn('');

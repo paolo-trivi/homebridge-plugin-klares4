@@ -310,14 +310,14 @@ Per ogni prova: frase, trascrizione, risposta Alexa, endpoint scelto, azione fis
 - tap app vs stessa azione a voce;
 - `accendi Studio` vs `accendi Lampadario Studio`;
 - vecchio e nuovo nome dopo rename;
-- `chiudi Finestra Studio`;
-- `accendi Cancello`, `apri Cancello`, `accendi Apri Cancello`;
-- `apri Cancello Grande`;
+- `chiudi Device 70`;
+- `accendi Cancello`, `Device 78`, `accendi Device 78`;
+- `Device 36`;
 - query temperatura;
 - stesso endpoint da Siri e Alexa;
 - inventario dopo un singolo prune.
 
-`Spegni Tutto` non è un test ordinario. `controller-observed` viene registrato solo nel verbale manuale.
+`Device 81` non è un test ordinario. `controller-observed` viene registrato solo nel verbale manuale.
 
 # 11. Release plan
 

@@ -7,12 +7,16 @@ import { redactSnapshot } from './redaction';
 import type { DeviceSnapshot } from './types';
 import type { KseniaWebSocketClient, RawMessageDirection } from '../websocket-client';
 
+const MAX_INTERVAL_SNAPSHOTS = 60;
+
 export class DebugCaptureManager {
     private buffer: CaptureBuffer;
     private isCapturing = false;
     private captureTimer?: NodeJS.Timeout;
     private snapshotInterval?: NodeJS.Timeout;
     private deviceSnapshots: DeviceSnapshot[] = [];
+    private lastSnapshotJson?: string;
+    private intervalSnapshots = 0;
     private rawMessageUnsubscribe?: () => void;
     private captureDurationMs = 60000;
     private activeClient?: KseniaWebSocketClient;
@@ -54,6 +58,8 @@ export class DebugCaptureManager {
         this.captureDurationMs = durationMs;
         this.buffer = this.newBuffer();
         this.deviceSnapshots = [];
+        this.lastSnapshotJson = undefined;
+        this.intervalSnapshots = 0;
         this.captureDeviceSnapshot(wsClient, 'START');
         this.hookWebSocket(wsClient);
 
@@ -114,16 +120,28 @@ export class DebugCaptureManager {
         });
     }
 
+    /**
+     * START and END are always taken; an INTERVAL one only when the devices changed since the
+     * last stored snapshot, and at most MAX_INTERVAL_SNAPSHOTS of them: a snapshot is the
+     * largest part of the file.
+     */
     private captureDeviceSnapshot(
         wsClient: KseniaWebSocketClient,
         label: 'START' | 'INTERVAL' | 'END',
     ): void {
         const devices = wsClient.getAllDevices ? wsClient.getAllDevices() : [];
+        const redacted = redactSnapshot(JSON.parse(JSON.stringify(devices)));
+        const serialized = JSON.stringify(redacted);
+        if (label === 'INTERVAL') {
+            if (serialized === this.lastSnapshotJson || this.intervalSnapshots >= MAX_INTERVAL_SNAPSHOTS) return;
+            this.intervalSnapshots += 1;
+        }
+        this.lastSnapshotJson = serialized;
         this.deviceSnapshots.push({
             timestamp: new Date().toISOString(),
             label,
             deviceCount: devices.length,
-            devices: redactSnapshot(JSON.parse(JSON.stringify(devices))),
+            devices: redacted,
         });
     }
 

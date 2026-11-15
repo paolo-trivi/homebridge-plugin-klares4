@@ -11,7 +11,7 @@ const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
 const { DiscoveryReadHandler } = require('../dist/websocket-client/discovery-read-handler.js');
 const { createInitialWebSocketClientState } = require('../dist/websocket-client/state.js');
 const { isHiddenByExposurePolicy } = require('../dist/websocket-client/exposure-report.js');
-const { resolveOutputExposure } = require('../dist/websocket/output-classifier.js');
+const { OutputTypeMemory, resolveOutputExposure } = require('../dist/websocket/output-classifier.js');
 const { recordingLog } = require('./fixtures/lares4-mock-panel.js');
 
 // Shapes seen on real panels (CAT/MOD pairs), with synthetic names.
@@ -74,7 +74,7 @@ test('WS-01: only outputs of a recognized category enter the client state', () =
     const { client, discovered } = createClient();
     client['messageService'].handleReadResponse(multiTypes({ OUTPUTS }));
 
-    assert.deepEqual(discovered, ['light_1', 'cover_9', 'gate_10']);
+    assert.deepEqual(discovered, ['light_1', 'cover_9', 'cover_10']);
     const ids = [...client['state'].devices.keys()];
     for (const id of ['2', '3', '4', '5', '6', '7', '8', '11']) {
         assert.ok(!ids.some((deviceId) => deviceId.endsWith(`_${id}`)), `output ${id} must not be in the client state`);
@@ -98,8 +98,10 @@ test('WS-01: an output whose category stops being recognized leaves the client s
 
 test('WS-01: a known gate keeps its type when a re-read lacks the category', () => {
     const output = { ID: '22', DES: 'Gate', CAT: 'GATE', MOD: 'M' };
-    assert.deepEqual(resolveOutputExposure(output, new Map()), { exposed: true, type: 'gate', source: 'category' });
-    assert.deepEqual(resolveOutputExposure({ ID: '22', DES: 'Gate' }, new Map()), { exposed: true, type: 'gate', source: 'category' });
+    const memory = new OutputTypeMemory();
+    assert.deepEqual(resolveOutputExposure(output, new Map(), memory), { exposed: true, type: 'gate', source: 'category' });
+    assert.deepEqual(resolveOutputExposure({ ID: '22', DES: 'Gate' }, new Map(), memory), { exposed: true, type: 'gate', source: 'category' });
+    assert.deepEqual(resolveOutputExposure({ ID: '22', DES: 'Gate', CAT: 'GATE' }, new Map(), memory), { exposed: true, type: 'gate', source: 'category' });
 });
 
 test('WS-01: exposeOutputs re-exposes one output as a light with its 2.2.0 device ID', () => {

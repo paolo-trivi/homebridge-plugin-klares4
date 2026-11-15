@@ -31,8 +31,8 @@ function plan(overrides) {
 test('classifyVersion maps stable, rc and beta versions and rejects other pre-releases', () => {
     assert.deepEqual(classifyVersion('2.3.0'), { base: '2.3.0', channel: 'latest', stable: true });
     assert.deepEqual(classifyVersion('2.3.0-rc.1'), { base: '2.3.0', channel: 'rc', stable: false });
-    assert.deepEqual(classifyVersion('2.0.1-beta2'), { base: '2.0.1', channel: 'beta', stable: false });
-    for (const bad of ['2.3.0-alpha.1', '2.3.0-debug0', '2.3', 'v2.3.0', '2.3.0-rc', '2.3.0+build']) {
+    assert.deepEqual(classifyVersion('2.0.1-beta.2'), { base: '2.0.1', channel: 'beta', stable: false });
+    for (const bad of ['2.3.0-alpha.1', '2.3.0-debug0', '2.3', 'v2.3.0', '2.3.0-rc', '2.3.0+build', '2.3.0-rc1', '2.0.1-beta2']) {
         assert.throws(() => classifyVersion(bad), /Unsupported version/, bad);
     }
 });
@@ -71,6 +71,12 @@ test('a stable release is refused when a dependency range changed after the last
         () => plan({ git: git({ rcPackage: { devDependencies: { typescript: '^6.0.0' } } }) }),
         /differs from 2\.3\.0-rc\.2 in package\.json devDependencies/,
     );
+});
+
+test('an rc written without the dot is refused, with the format to use', () => {
+    assert.throws(() => classifyVersion('2.3.0-rc1'), /with the dot before N .*2\.3\.0-rc\.1, not 2\.3\.0-rc1/);
+    // The stable release looks for -rc.N only, so -rc1 must never have been publishable.
+    assert.equal(latestRc(['2.3.0-rc1'], '2.3.0'), null);
 });
 
 test('prerelease versions go to their own dist-tag and need no rc', () => {

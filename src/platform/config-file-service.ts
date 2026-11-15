@@ -64,6 +64,11 @@ export class PlatformConfigFileService {
     /** Removes temporary files an earlier crash left in the storage directory (they may hold the PIN). */
     public async removeOrphanedTemporaryFiles(): Promise<void> {
         const removed = await removeOrphanedTemporaryFiles(this.storagePath);
+        // A symlinked config.json is written through: its temporary file lives next to the destination.
+        const destination = await fs.promises.realpath(path.join(this.storagePath, 'config.json')).catch(() => undefined);
+        if (destination && path.dirname(destination) !== path.resolve(this.storagePath)) {
+            removed.push(...await removeOrphanedTemporaryFiles(path.dirname(destination), { baseNames: [path.basename(destination)] }));
+        }
         if (removed.length > 0) this.log.info(`Removed ${removed.length} leftover temporary file(s) from the Homebridge storage directory`);
     }
 
