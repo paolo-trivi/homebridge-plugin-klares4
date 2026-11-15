@@ -19,7 +19,11 @@ import { buildStateUpdates } from './matter-state-updates';
 import type { MatterStateUpdateQueue } from './matter-state-update-queue';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { resolvePersistedThermostatFallback } from './matter-thermostat-recovery-request';
-import { needsThermostatReshape, reshapeThermostatEndpoint, startThermostatAttempts } from './matter-thermostat-attempts';
+import {
+    needsThermostatReshape, pinRegisteredRole, reshapeThermostatEndpoint, startThermostatAttempts, unpinRegisteredRole,
+} from './matter-thermostat-attempts';
+import { forgetSensorIdentity } from './matter-thermostat-recovery-request';
+import { ThermostatRoleWait } from './matter-thermostat-role-wait';
 import { thermostatShapeOf } from './matter-thermostat-shape';
 import type { MatterTopologyCoordinator } from './matter-topology-coordinator';
 
@@ -73,12 +77,18 @@ export class MatterRegistrationFlow {
     private readonly settlement: RegisterSettlement;
     /** Thermostats whose payload attempts this registry has started. */
     private readonly thermostatAttemptsStarted = new Set<string>();
+    private readonly roleWait: ThermostatRoleWait;
 
     constructor(private readonly ctx: MatterRegistrationContext) {
         this.settlement = new RegisterSettlement(ctx.api);
+        this.roleWait = new ThermostatRoleWait(ctx.timings.thermostatRoleWaitMs, ctx.log, (device) => {
+            void ctx.updateAccessoryState(device);
+        });
     }
 
     public register(device: KseniaDevice, reregister?: ReregisterOptions): Promise<void> {
+        // A thermostat whose role is still a guess from its name waits for the programs.
+        if (!reregister && this.roleWait.hold(device)) return Promise.resolve();
         return this.gate.run(
             device.id,
             () => this.performRegistration(device, reregister),
@@ -98,9 +108,9 @@ export class MatterRegistrationFlow {
     public enqueueStateFor(device: KseniaDevice): void {
         const reg = this.ctx.registrations.get(device.id);
         if (!reg) return;
+        // The update below is built for the live endpoint's role, so it lands even before (or without) the reshape.
         if (device.type === 'thermostat' && reg.status === 'registered' && needsThermostatReshape(reg.matterAccessory, device)) {
             void this.reshapeThermostat(device);
-            return;
         }
         if (!hasObservedState(device)) return;
         enqueueDeviceState(reg, device, device.type === 'thermostat' && this.ctx.thermostatFallbackUUIDs.has(device.id));
@@ -146,7 +156,9 @@ export class MatterRegistrationFlow {
         const cached = ctx.cachedDevices.get(discovered.id);
         // Discovery placeholders must not overwrite the state Homebridge restored from its cache.
         const device = withCachedDimmable(hasObservedState(discovered) ? discovered : mergeKnownState(discovered, cached), cached);
+        unpinRegisteredRole(device);
         const { accessory: matterAccessory, fallback } = await this.resolveShape(device);
+        pinRegisteredRole(device, matterAccessory);
         if (!matterAccessory) return;
 
         const reg: MatterRegistration = {
@@ -174,14 +186,6 @@ export class MatterRegistrationFlow {
         // `Accessory <UUID> not found or not registered`. The same UUID is reused, so
         // Apple Home rooms and automations survive the re-register.
         try {
-            // Record the thermostat-cluster values we're about to register with
-            // matter.js as already-pushed, so the very first handler firings (which
-            // some matter.js versions emit eagerly after registerPlatformAccessories)
-            // are recognised as echoes of our own register payload, not external commands.
-            if (device.type === 'thermostat' && !fallback) {
-                const tc = matterAccessory.clusters?.thermostat as Record<string, unknown> | undefined;
-                if (tc) ctx.thermostatEchoTracker.recordPushed(device.id, tc);
-            }
             const existedBefore = !this.settlement.registerIsSettled && await this.settlement.exists(device.id);
             await ctx.topologyCoordinator.register(matterAccessory);
             if (!existedBefore) await this.settlement.observeNewEndpoint(device.id);
@@ -252,6 +256,8 @@ export class MatterRegistrationFlow {
         if (reg.deviceType !== 'thermostat' || isFallbackTemperatureSensor(reg)) return;
         this.ctx.thermostatFallbackUUIDs.delete(reg.uuid);
         this.ctx.fallbackStore.markNative(reg.uuid, thermostatShapeOf(reg.uuid));
+        // A Thermostat is another device than the sensor it replaces: new identity.
+        forgetSensorIdentity(reg.uuid);
     }
 
     private republishKnownState(uuid: string): void {

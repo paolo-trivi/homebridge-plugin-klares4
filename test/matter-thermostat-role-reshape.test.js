@@ -1,12 +1,13 @@
 'use strict';
 
-// TH-05 at the first login: the panel lists the outputs (MULTI_TYPES) before
-// the thermostat programs (PRG_THERMOSTATS), so Matter registers a thermostat
-// with the role its panel name suggests and learns the real one later. The
-// endpoint must end with the attribute set of the program's role, without a
-// restart, with one endpoint per output, its identity kept and no fallback;
-// a panel that refuses PRG_THERMOSTATS keeps the name-based role and registers
-// at once. Real WebSocket client state, real Homebridge/matter.js stack.
+// TH-05 / H1 at the first login: the panel lists the outputs (MULTI_TYPES)
+// before the thermostat programs (PRG_THERMOSTATS). A thermostat waits for the
+// programs and registers once with the program's role; a panel that refuses
+// PRG_THERMOSTATS registers at once with the name-based role; a panel that
+// never answers registers after the wait. A role changed later on the panel
+// replaces the endpoint with its identity kept, and updates keep flowing. One
+// endpoint per output, no fallback. Real WebSocket client state, real
+// Homebridge/matter.js stack.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,6 +19,7 @@ process.env.KLARES4_MATTER_REGISTER_TIMEOUT_MS = '2000';
 process.env.KLARES4_MATTER_REGISTER_POLL_MS = '10';
 process.env.KLARES4_MATTER_REGISTER_POLL_MAX_MS = '50';
 process.env.KLARES4_MATTER_UNREGISTER_SETTLE_MS = '10';
+process.env.KLARES4_MATTER_THERMOSTAT_ROLE_WAIT_MS = '1500';
 
 const { KseniaWebSocketClient } = require('../dist/websocket-client/index.js');
 const { MatterAccessoryRegistry } = require('../dist/platform/matter-accessory-registry.js');
@@ -54,12 +56,13 @@ async function firstLogin(t) {
     }));
     const settled = async (ids) => {
         await Promise.all(work);
-        await waitFor(() => ids.every((id) => registry.getStatus(id) === 'registered'), 10000);
+        await waitFor(() => ids.every((id) => registry.getStatus(id) === 'registered'), 30000);
     };
     return {
         stack, registry, lines, storagePath, settled,
         multi: () => msg('READ_RES', 'MULTI_TYPES', { RESULT: 'OK', OUTPUTS, BUS_HAS: [{ ID: '1', DES: 'Prova' }], SCENARIOS: [] }),
         programs: (program = PROGRAM) => msg('READ_RES', 'PRG_THERMOSTATS', { RESULT: 'OK', PRG_THERMOSTATS: [program] }),
+        realtime: (entry) => msg('REALTIME', 'CHANGES', { x: { STATUS_TEMPERATURES: [entry] } }),
         programsRefused: () => msg('READ_RES', 'PRG_THERMOSTATS', { RESULT: 'FAIL', RESULT_DETAIL: 'CMD_NOT_AVAILABLE' }),
         features: (id) => {
             const fm = stack.read(id, 'thermostat')?.featureMap ?? {};
@@ -81,36 +84,56 @@ function assertClean(h) {
     assert.equal(h.lines.some((l) => /TemperatureSensor/.test(l)), false, h.lines.join('\n'));
 }
 
-test('first login: MULTI_TYPES before PRG_THERMOSTATS ends with the program roles, identity kept, no restart', { timeout: 60000 }, async (t) => {
+test('first login: a thermostat waits for PRG_THERMOSTATS and registers once with the program role', { timeout: 120000 }, async (t) => {
     const h = await firstLogin(t);
     h.multi();
-    await h.settled(['thermostat_18', 'thermostat_34']);
-    assert.deepEqual(h.features('thermostat_18'), BOTH, 'before the programs: the panel name suggests cooling');
-    assert.deepEqual(h.features('thermostat_34'), HEATING_ONLY);
-    const ids = { 18: h.uniqueId('thermostat_18'), 34: h.uniqueId('thermostat_34') };
+    await h.settled(['sensor_temp_1']);
+    assert.equal(h.registry.getStatus('thermostat_18'), undefined, 'not registered on the role guessed from the name');
+    assert.equal(h.registry.getStatus('thermostat_34'), undefined);
 
     h.programs();
-    await waitFor(() => h.features('thermostat_18').cooling === false && h.features('thermostat_34').cooling === true, 15000);
     await h.settled(['thermostat_18', 'thermostat_34']);
     assert.deepEqual(h.features('thermostat_18'), HEATING_ONLY);
     assert.deepEqual(h.features('thermostat_34'), COOLING_ONLY);
-    // The identity is given back once the new endpoint answers.
-    await waitFor(() => h.uniqueId('thermostat_18') === ids[18] && h.uniqueId('thermostat_34') === ids[34], 10000);
+    assert.equal(h.lines.some((l) => /replacing the Thermostat endpoint/.test(l)), false, 'nothing to replace');
     assertClean(h);
+});
 
-    // The program changes on the panel at runtime: the roles swap.
+test('the program changes on the panel at runtime: the endpoint is replaced with the new role, identity kept; updates keep flowing', { timeout: 120000 }, async (t) => {
+    const h = await firstLogin(t);
+    h.multi();
+    h.programs();
+    await h.settled(['thermostat_18', 'thermostat_34']);
+    const ids = { 18: h.uniqueId('thermostat_18'), 34: h.uniqueId('thermostat_34') };
+
     h.programs({ ...PROGRAM, HEATING_OUT: '34', COOLING_OUT: '18' });
-    await waitFor(() => h.features('thermostat_18').cooling === true && h.features('thermostat_34').heating === true, 15000);
+    await waitFor(() => h.features('thermostat_18').cooling === true && h.features('thermostat_34').heating === true, 30000);
     await h.settled(['thermostat_18', 'thermostat_34']);
     assert.deepEqual(h.features('thermostat_18'), COOLING_ONLY);
     assert.deepEqual(h.features('thermostat_34'), HEATING_ONLY);
+    // The identity is given back once the new endpoint answers.
+    await waitFor(() => h.uniqueId('thermostat_18') === ids[18] && h.uniqueId('thermostat_34') === ids[34], 30000);
     assertClean(h);
+
+    // A realtime after the replacement reaches the endpoint (H1: nothing rolled back).
+    h.realtime({ ID: '1', TEMP: '23.5', THERM: { ACT_SEA: 'SUM', ACT_MODEL: 'MAN', ACT_TOF: '', TEMP_THR: { T: 'M', VAL: '26.0' }, OUT_STATUS: 'ON' } });
+    await waitFor(() => h.stack.read('thermostat_18', 'thermostat')?.localTemperature === 2350, 30000);
+    assert.equal(h.stack.hbLines.some((l) => /Rolling back/.test(l)), false);
 
     // The same programs again: nothing is replaced.
     const replacements = h.lines.filter((l) => /replacing the Thermostat endpoint/.test(l)).length;
     h.programs({ ...PROGRAM, HEATING_OUT: '34', COOLING_OUT: '18' });
     await h.settled(['thermostat_18', 'thermostat_34']);
     assert.equal(h.lines.filter((l) => /replacing the Thermostat endpoint/.test(l)).length, replacements);
+});
+
+test('no answer to PRG_THERMOSTATS at all: the thermostat registers after the wait, with the role from its name', { timeout: 120000 }, async (t) => {
+    const h = await firstLogin(t);
+    h.multi();
+    await h.settled(['thermostat_18', 'thermostat_34']);
+    assert.ok(h.lines.some((l) => /no thermostat program data from the panel/.test(l)));
+    assert.deepEqual(h.features('thermostat_18'), BOTH);
+    assertClean(h);
 });
 
 test('first login on a panel that refuses PRG_THERMOSTATS: registered at once with the panel-name role, nothing replaced', { timeout: 60000 }, async (t) => {

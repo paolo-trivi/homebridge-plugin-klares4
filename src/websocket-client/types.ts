@@ -113,6 +113,11 @@ export interface WebSocketClientState {
     domusThermostatConfig: Required<DomusThermostatConfig>;
     thermostatOutputs: Map<string, KseniaOutputData>;
     thermostatProgramById: Map<string, KseniaProgramThermostatRaw>;
+    /**
+     * The thermostat programs are settled: `PRG_THERMOSTATS` answered (OK or
+     * refused) at least once, or the `.ksa` backup provided them.
+     */
+    thermostatProgramsSettled: boolean;
     thermostatProgramIdByOutputId: Map<string, string>;
     domusSensorIdByThermostatProgramId: Map<string, string>;
     thermostatCommandIdByOutputId: Map<string, string>;

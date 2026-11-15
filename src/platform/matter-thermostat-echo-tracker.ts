@@ -39,6 +39,9 @@ const DEFAULT_ECHO_TTL_MS = 10_000;
  */
 const DEFAULT_CONFIRMED_TTL_MS = 15_000;
 
+/** How long a just-started state push is given to be applied before a command returns. */
+const PUSH_SETTLE_MS = 50;
+
 type TrackedAttr = 'occupiedHeatingSetpoint' | 'occupiedCoolingSetpoint' | 'systemMode';
 
 interface Entry {
@@ -59,8 +62,11 @@ interface ConfirmedEntry {
 
 export class MatterThermostatEchoTracker {
     private readonly ttlMs: number;
-    private readonly entries = new Map<string, Entry>();
+    /** Per accessory and attribute: the values pushed (or intended) and not yet seen fired, oldest first. */
+    private readonly entries = new Map<string, Entry[]>();
     private readonly confirmed = new Map<string, ConfirmedEntry>();
+    private readonly commandsInFlight = new Map<string, number>();
+    private readonly lastPushAt = new Map<string, number>();
 
     constructor(
         ttlMs = DEFAULT_ECHO_TTL_MS,
@@ -71,53 +77,101 @@ export class MatterThermostatEchoTracker {
     }
 
     /**
-     * Record the most recent value the plugin pushed to matter.js for the given
-     * thermostat. Subsequent handler callbacks with the same value are echoes
-     * and must be ignored.
+     * Record the values the plugin is about to push to matter.js for the
+     * given thermostat. A handler callback with one of them is an echo.
+     * `current` is the cluster state Homebridge holds for the endpoint (it
+     * follows applied pushes and controller writes): a value equal to it
+     * changes nothing and fires no handler, so it is not recorded, and it
+     * cannot later swallow a controller write of that value.
      */
-    recordPushed(uuid: string, attrs: Record<string, unknown>): void {
-        const now = this.now();
+    recordPushed(uuid: string, attrs: Record<string, unknown>, current?: Record<string, unknown>): void {
+        this.lastPushAt.set(uuid, this.now());
         for (const attr of ['occupiedHeatingSetpoint', 'occupiedCoolingSetpoint', 'systemMode'] as TrackedAttr[]) {
             const v = attrs[attr];
-            if (typeof v === 'number' && Number.isFinite(v)) {
-                this.entries.set(this.key(uuid, attr), { value: v, at: now });
-            }
+            if (typeof v === 'number' && Number.isFinite(v) && current?.[attr] !== v) this.record(uuid, attr, v);
         }
     }
 
     /**
-     * Manually record a single attribute. Used by handlers that send commands
-     * to Lares4 so the centrale's echo (and matter.js's re-fire of it) is suppressed.
+     * Record a single attribute a handler is about to send to Lares4, so the
+     * centrale's echo (and matter.js's re-fire of it) is suppressed.
      */
     recordIntent(uuid: string, attr: TrackedAttr, value: number): void {
-        this.entries.set(this.key(uuid, attr), { value, at: this.now() });
+        this.record(uuid, attr, value);
     }
 
     /**
-     * True when the handler is being invoked with a value the plugin itself
-     * just wrote — meaning this is matter.js re-firing our own push, not a
-     * controller-initiated command.
+     * True when the handler is invoked with a value the plugin itself pushed:
+     * matter.js re-firing our own push, not a controller command. Pushes are
+     * applied in order, so the match and every older value are used up; a
+     * value newer than the match stays (L2: an initial push applied after a
+     * controller write is recognised, and the write is not undone).
      */
     isEcho(uuid: string, attr: TrackedAttr, value: number): boolean {
-        const e = this.entries.get(this.key(uuid, attr));
-        if (!e) return false;
-        if (this.now() - e.at > this.ttlMs) {
-            this.entries.delete(this.key(uuid, attr));
-            return false;
-        }
-        return e.value === value;
+        const list = this.live(uuid, attr);
+        const idx = list.findIndex((e) => e.value === value);
+        if (idx < 0) return false;
+        list.splice(0, idx + 1);
+        return true;
+    }
+
+    /** Drop every tracked value of the attribute (after a failed command, F33). */
+    consume(uuid: string, attr: TrackedAttr): void {
+        this.entries.delete(this.key(uuid, attr));
     }
 
     /**
-     * Drop the tracked entry once consumed. Some matter.js versions fire the
-     * handler exactly once per push — keeping the entry after consumption would
-     * suppress a *legitimate* controller command that happens to land on the
-     * same value within the TTL window. For safety we don't aggressively expire:
-     * isEcho compares value AND key, and TTL bounds the worst case. Callers may
-     * still invoke this to be explicit.
+     * A Matter command handler for `uuid` is running. Homebridge runs the
+     * matter.js default of some commands right after the handler and that
+     * needs the endpoint's state lock synchronously (`setpointRaiseLower`:
+     * "Cannot lock … synchronously"); state pushes for the endpoint wait until
+     * the command is over (`isCommandInFlight`, read by the update queue).
      */
-    consume(uuid: string, attr: TrackedAttr): void {
-        this.entries.delete(this.key(uuid, attr));
+    beginCommand(uuid: string): void {
+        this.commandsInFlight.set(uuid, (this.commandsInFlight.get(uuid) ?? 0) + 1);
+    }
+
+    /** Ends a command one macrotask later: Homebridge's post-handler step runs in microtasks. */
+    endCommand(uuid: string): void {
+        setImmediate(() => {
+            const left = (this.commandsInFlight.get(uuid) ?? 1) - 1;
+            if (left > 0) this.commandsInFlight.set(uuid, left);
+            else this.commandsInFlight.delete(uuid);
+        });
+    }
+
+    /**
+     * Resolves once a state push started just before (or during) the command
+     * has had time to be applied. Homebridge applies a push in its own
+     * transaction on a later tick; a command that returns while it is still
+     * open makes Homebridge's synchronous lock fail.
+     */
+    async settlePushes(uuid: string): Promise<void> {
+        const since = this.now() - (this.lastPushAt.get(uuid) ?? Number.NEGATIVE_INFINITY);
+        if (since < PUSH_SETTLE_MS) await new Promise<void>((resolve) => setTimeout(resolve, PUSH_SETTLE_MS - since));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    isCommandInFlight(uuid: string): boolean {
+        return (this.commandsInFlight.get(uuid) ?? 0) > 0;
+    }
+
+    private record(uuid: string, attr: TrackedAttr, value: number): void {
+        const list = this.live(uuid, attr);
+        const last = list[list.length - 1];
+        // The same value again changes nothing on the endpoint: no new fire to expect.
+        if (last?.value === value) last.at = this.now();
+        else list.push({ value, at: this.now() });
+        this.entries.set(this.key(uuid, attr), list);
+    }
+
+    private live(uuid: string, attr: TrackedAttr): Entry[] {
+        const key = this.key(uuid, attr);
+        const now = this.now();
+        const list = (this.entries.get(key) ?? []).filter((e) => now - e.at <= this.ttlMs);
+        if (list.length > 0) this.entries.set(key, list);
+        else this.entries.delete(key);
+        return list;
     }
 
     /**
@@ -132,19 +186,20 @@ export class MatterThermostatEchoTracker {
     }
 
     /** The target to compare a new command against: see `effectiveValue`. */
-    effectiveTarget(uuid: string, observed: number | undefined): number | undefined {
-        const value = this.effectiveValue(uuid, 'target', observed);
+    effectiveTarget(uuid: string, observed: number | undefined, observedAt?: number): number | undefined {
+        const value = this.effectiveValue(uuid, 'target', observed, observedAt);
         return typeof value === 'number' ? value / 100 : observed;
     }
 
     /** The mode to compare a new command against: see `effectiveValue`. */
-    effectiveMode(uuid: string, observed: ThermostatModeValue | undefined): ThermostatModeValue | undefined {
-        const value = this.effectiveValue(uuid, 'mode', observed);
+    effectiveMode(uuid: string, observed: ThermostatModeValue | undefined, observedAt?: number): ThermostatModeValue | undefined {
+        const value = this.effectiveValue(uuid, 'mode', observed, observedAt);
         return typeof value === 'string' ? value as ThermostatModeValue : observed;
     }
 
     /** Clear all entries for an accessory (use on unregister / device removal). */
     clear(uuid: string): void {
+        this.commandsInFlight.delete(uuid);
         for (const map of [this.entries, this.confirmed] as Map<string, unknown>[]) {
             for (const k of Array.from(map.keys())) {
                 if (k.startsWith(`${uuid}::`)) map.delete(k);
@@ -154,15 +209,21 @@ export class MatterThermostatEchoTracker {
 
     /**
      * The acknowledged value while the realtime has not caught up with it, else
-     * `observed` (normalized). The entry ends when the realtime reports the
-     * acknowledged value, or after its TTL.
+     * `observed` (normalized). The entry ends at the first realtime observation
+     * after the ACK (`observedAt`, epoch ms), whatever it reports: from then on
+     * the panel's own report is newer, also when another source (keypad,
+     * HomeKit) changed the value (M1). Without `observedAt`, when the realtime
+     * reports the acknowledged value; in any case after its TTL.
      */
-    private effectiveValue(uuid: string, attr: ConfirmedAttr, observed: number | string | undefined): number | string | undefined {
+    private effectiveValue(
+        uuid: string, attr: ConfirmedAttr, observed: number | string | undefined, observedAt?: number,
+    ): number | string | undefined {
         const key = this.confirmedKey(uuid, attr);
         const entry = this.confirmed.get(key);
         const seen = observed === undefined ? undefined : normalize(observed);
         if (!entry) return seen;
-        if (this.now() - entry.at > this.confirmedTtlMs || seen === entry.value) {
+        if (this.now() - entry.at > this.confirmedTtlMs || seen === entry.value
+            || (observedAt !== undefined && observedAt > entry.at)) {
             this.confirmed.delete(key);
             return seen;
         }

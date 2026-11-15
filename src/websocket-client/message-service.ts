@@ -217,6 +217,9 @@ export class MessageService {
     private handleRefusedRead(message: KseniaMessage, result: string): void {
         const detail = resultDetail(message);
         const what = `The panel refused the ${String(message.PAYLOAD_TYPE)} read (${detail ?? result})`;
+        if (message.PAYLOAD_TYPE === 'PRG_THERMOSTATS') {
+            runIsolated(this.deps.log, 'PRG_THERMOSTATS refused', () => this.thermostats.programsUnavailable());
+        }
         switch (readRefusalImpact(message.PAYLOAD_TYPE, detail)) {
             case 'expected':
                 this.deps.log.debug(`${what}: not available on this panel`);

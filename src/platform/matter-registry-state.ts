@@ -24,8 +24,11 @@ export function createStateUpdateQueue(
         registrations,
         (err) => (err instanceof Error ? err.message : String(err)),
         (uuid, clusterName, attrs) => {
-            if (clusterName === 'thermostat') tracker.recordPushed(uuid, attrs);
+            if (clusterName !== 'thermostat') return;
+            const live = registrations.get(uuid)?.matterAccessory.clusters?.thermostat as Record<string, unknown> | undefined;
+            tracker.recordPushed(uuid, attrs, live);
         },
+        (uuid) => tracker.isCommandInFlight(uuid),
     );
 }
 

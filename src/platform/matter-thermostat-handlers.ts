@@ -34,7 +34,7 @@ import type { Logger, MatterClusterHandlers } from 'homebridge';
 import type { KseniaThermostat, ThermostatOutputRole } from '../types';
 import type { KseniaWebSocketClient } from '../websocket-client';
 import {
-    normalizeMatterSetpointC, matterSystemModeForRole, domainModeToMatterSystemMode, isCoolingSetpointActiveForRole,
+    normalizeMatterSetpointC, matterSystemModeForRole, isCoolingSetpointActiveForRole,
     DEFAULT_MIN_HEAT_C, DEFAULT_MAX_HEAT_C, DEFAULT_MIN_COOL_C, DEFAULT_MAX_COOL_C,
     DEFAULT_HEATING_SETPOINT_C, DEFAULT_COOLING_SETPOINT_C,
 } from './matter-thermostat-mapper';
@@ -71,11 +71,11 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
     const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
     const modeOf = (d: KseniaThermostat): Mode | undefined => {
         const observed = d.status?.mode ?? d.mode;
-        return tracker ? tracker.effectiveMode(uuid, observed) : observed;
+        return tracker ? tracker.effectiveMode(uuid, observed, d.status?.observedAt) : observed;
     };
     const targetOf = (d: KseniaThermostat): number | undefined => {
         const observed = d.status?.targetTemperature ?? d.targetTemperature;
-        return tracker ? tracker.effectiveTarget(uuid, observed) : observed;
+        return tracker ? tracker.effectiveTarget(uuid, observed, d.status?.observedAt) : observed;
     };
     const coolActive = (role: ThermostatOutputRole, d: KseniaThermostat): boolean => isCoolingSetpointActiveForRole(role, modeOf(d));
     const client = (): KseniaWebSocketClient => {
@@ -96,7 +96,6 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
     };
 
     const sendTemp = async (attr: SetpointAttr, label: string, value: number): Promise<void> => {
-        tracker?.recordIntent(uuid, attr, Math.round(value * 100));
         try {
             await client().setThermostatTemperature(device.id, value);
             tracker?.recordConfirmed(uuid, 'target', value);
@@ -132,7 +131,6 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         const target = targetOf(current);
         if (typeof target === 'number' && Math.abs(target - value) < 0.05) {
             log.debug(`[Matter] idempotent Matter thermostat change ignored: ${device.name} ${attr} ${value}°C already current`);
-            tracker?.recordIntent(uuid, attr, Math.round(value * 100));
             return;
         }
         log.debug(`[Matter] external Matter command accepted: ${device.name} ${attr} -> ${value}°C`);
@@ -189,7 +187,6 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
             failed('systemMode', `systemMode ${klares4Mode} not forwarded: ${OTHER_SEASON}; switching it here would change the season of the whole program`);
             return;
         }
-        tracker?.recordIntent(uuid, 'systemMode', domainModeToMatterSystemMode(klares4Mode));
         if (modeOf(current) === klares4Mode) {
             log.debug(`[Matter] idempotent Matter thermostat change ignored: ${device.name} mode=${klares4Mode} already current`);
             return;
@@ -203,12 +200,26 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
         }
     };
 
+    /**
+     * Runs a handler as a command on the endpoint: state pushes wait until
+     * Homebridge has finished the command (see `beginCommand`).
+     */
+    const asCommand = <A>(fn: (args: A) => Promise<void>) => async (args: A): Promise<void> => {
+        tracker?.beginCommand(uuid);
+        try {
+            await fn(args);
+            await tracker?.settlePushes(uuid);
+        } finally {
+            tracker?.endCommand(uuid);
+        }
+    };
+
     return {
-        setpointRaiseLower,
-        occupiedHeatingSetpointChange: async (args: { occupiedHeatingSetpoint: number }) => {
+        setpointRaiseLower: asCommand(setpointRaiseLower),
+        occupiedHeatingSetpointChange: asCommand(async (args: { occupiedHeatingSetpoint: number }) => {
             await setpointChange('occupiedHeatingSetpoint', args.occupiedHeatingSetpoint);
-        },
-        occupiedCoolingSetpointChange: async (args: { occupiedCoolingSetpoint: number }) => {
+        }),
+        occupiedCoolingSetpointChange: asCommand(async (args: { occupiedCoolingSetpoint: number }) => {
             // Only the legacy payload declares a cooling setpoint on a heating
             // output; there it is read-only state and never a command.
             if (thermostatRole(latest()) === 'heating') {
@@ -216,7 +227,7 @@ export function buildThermostatHandlers(deps: ThermostatHandlerDeps): MatterClus
                 return;
             }
             await setpointChange('occupiedCoolingSetpoint', args.occupiedCoolingSetpoint);
-        },
-        systemModeChange,
+        }),
+        systemModeChange: asCommand(systemModeChange),
     };
 }

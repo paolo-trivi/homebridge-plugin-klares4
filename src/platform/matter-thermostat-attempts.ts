@@ -22,7 +22,10 @@ import type { KseniaDevice, KseniaThermostat } from '../types';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { MatterThermostatEchoTracker } from './matter-thermostat-echo-tracker';
 import { buildThermostatMatterState } from './matter-thermostat-mapper';
-import { advanceThermostatShape, resetThermostatShapes, startThermostatShapes, type ThermostatShape } from './matter-thermostat-shape';
+import { derivedThermostatRole } from './matter-thermostat-role';
+import {
+    advanceThermostatShape, pinThermostatRole, resetThermostatShapes, startThermostatShapes, type ThermostatShape,
+} from './matter-thermostat-shape';
 import { replaceEndpoint } from './matter-endpoint-replacement';
 import type { MatterTopologyCoordinator } from './matter-topology-coordinator';
 
@@ -54,6 +57,21 @@ export function startThermostatAttempts(uuid: string, remembered: ThermostatShap
 /** Back to the first attempt for `uuid` (after a fallback, or when the device goes away). */
 export function resetThermostatAttempts(uuid: string): void {
     resetThermostatShapes(uuid);
+    pinThermostatRole(uuid, undefined);
+}
+
+/**
+ * Around the mapping of a native Thermostat registration: before it, the
+ * device's current role must decide the attribute set (`unpin`); after it,
+ * every update and command of the endpoint follows that role (`pin`).
+ */
+export function unpinRegisteredRole(device: KseniaDevice): void {
+    if (device.type === 'thermostat') pinThermostatRole(device.id, undefined);
+}
+
+export function pinRegisteredRole(device: KseniaDevice, accessory: MatterAccessory | undefined): void {
+    if (device.type !== 'thermostat') return;
+    pinThermostatRole(device.id, accessory?.clusters?.thermostat ? derivedThermostatRole(device) : undefined);
 }
 
 /**
@@ -75,7 +93,7 @@ export function needsThermostatReshape(registered: MatterAccessory, device: Ksen
     if (device.type !== 'thermostat') return false;
     const live = registered.clusters?.thermostat as Record<string, unknown> | undefined;
     if (!live) return false;
-    const { base, schemaInvariants } = buildThermostatMatterState(device);
+    const { base, schemaInvariants } = buildThermostatMatterState(device, derivedThermostatRole(device));
     return clusterSignature(live) !== clusterSignature({ ...base, ...schemaInvariants });
 }
 
@@ -128,8 +146,6 @@ export async function registerNextThermostatAttempt(reg: MatterRegistration, dep
     try {
         // Still a Thermostat: the new endpoint keeps the identity of the refused one, if it had one.
         await replaceEndpoint(reg, deps.topologyCoordinator, 'same-device');
-        // The register payload must not come back as a controller command.
-        deps.thermostatEchoTracker?.recordPushed(reg.uuid, next.clusters?.thermostat as Record<string, unknown>);
         reg.matterAccessory = next;
         reg.status = 'pending';
         await deps.topologyCoordinator.register(next);

@@ -2,6 +2,9 @@ import type { API, Logger } from 'homebridge';
 import type { MatterRegistration } from './matter-registration-recovery';
 import type { PendingMatterStateUpdate } from './matter-state-updates';
 
+/** Retry interval of a flush held back by a Matter command on the endpoint. */
+const HELD_RETRY_MS = 10;
+
 export class MatterStateUpdateQueue {
     private readonly flushTimers = new Map<string, NodeJS.Timeout>();
 
@@ -16,6 +19,8 @@ export class MatterStateUpdateQueue {
          * to recognise its own state echo when matter.js re-fires the handlers).
          */
         private readonly onBeforePush?: (uuid: string, clusterName: string, attrs: Record<string, unknown>) => void,
+        /** True while pushes to the endpoint must wait (a Matter command is running on it). */
+        private readonly isHeld?: (uuid: string) => boolean,
     ) {}
 
     /**
@@ -59,6 +64,14 @@ export class MatterStateUpdateQueue {
             this.scheduleFlush(uuid);
             return;
         }
+        if (this.isHeld?.(uuid)) {
+            const timer = setTimeout(() => {
+                this.flushTimers.delete(uuid);
+                void this.flush(uuid);
+            }, HELD_RETRY_MS);
+            this.flushTimers.set(uuid, timer);
+            return;
+        }
 
         const pending = reg.pendingStateUpdates.splice(0);
         this.log.debug(`[Matter] pending updates flush: ${reg.displayName} (${pending.length})`);
@@ -76,7 +89,8 @@ export class MatterStateUpdateQueue {
             this.onBeforePush?.(reg.uuid, update.clusterName, update.attributes);
             await this.api.matter!.updateAccessoryState(reg.uuid, update.clusterName, update.attributes, update.partId);
         } catch (err) {
-            this.log.debug(`[Matter] state update failed for ${reg.displayName} (${update.clusterName}): ${this.fmtErr(err)}`);
+            // Lost values are not a debug matter: the endpoint shows a stale state until the next update.
+            this.log.warn(`[Matter] state update refused for ${reg.displayName} (${update.clusterName}): ${this.fmtErr(err)}`);
         }
     }
 

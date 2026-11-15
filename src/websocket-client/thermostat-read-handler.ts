@@ -86,10 +86,21 @@ export class ThermostatReadHandler {
     }
 
     public handlePrgThermostats(entries: KseniaProgramThermostatRaw[]): void {
+        this.deps.state.thermostatProgramsSettled = true;
         this.cacheProgramThermostats(entries);
         this.refreshDomusThermostatMapping();
         this.applyOutputRoles();
         this.deps.thermostatStatusUpdater.applyPendingTemperatureStatuses();
+    }
+
+    /**
+     * The panel refused `PRG_THERMOSTATS` (some panels never provide it): the
+     * roles taken from the output names are final.
+     */
+    public programsUnavailable(): void {
+        if (this.deps.state.thermostatProgramsSettled) return;
+        this.deps.state.thermostatProgramsSettled = true;
+        this.applyOutputRoles();
     }
 
     /**
@@ -169,8 +180,11 @@ export class ThermostatReadHandler {
         const programId = state.thermostatProgramIdByOutputId.get(outputId);
         const program = programId === undefined ? undefined : state.thermostatProgramById.get(programId);
         const role = deriveThermostatOutputRole(outputId, program, state.thermostatOutputs.get(outputId)?.DES);
-        if (role === undefined || role === device.status.outputRole) return false;
-        device.status.outputRole = role;
+        const pending = state.thermostatProgramsSettled ? undefined : true;
+        if ((role === undefined || role === device.status.outputRole) && pending === device.status.outputRolePending) return false;
+        if (role !== undefined) device.status.outputRole = role;
+        if (pending) device.status.outputRolePending = true;
+        else delete device.status.outputRolePending;
         return true;
     }
 
