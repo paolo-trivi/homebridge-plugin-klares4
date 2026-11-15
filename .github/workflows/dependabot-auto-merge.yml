@@ -3,7 +3,10 @@ name: Dependabot auto-merge
 # Only Dependabot's own PRs, and only patch/minor updates of development
 # dependencies and GitHub Actions. Runtime dependencies (and anything that is not
 # a direct development dependency) always wait for a human review: they end up in
-# the published package. This workflow never checks out or runs the PR's code.
+# the published package. So do the packages that shape the published output even
+# though they are development dependencies: the compiler (typescript) and the
+# types it compiles against (@types/*). This workflow never checks out or runs
+# the PR's code.
 
 on: pull_request_target
 
@@ -30,17 +33,20 @@ jobs:
         env:
           UPDATES: ${{ steps.meta.outputs.updated-dependencies-json }}
           ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          # Keep in sync with the npm-build-tools group in .github/dependabot.yml.
+          REVIEWED_PACKAGES: '^(typescript|@types/.+)$'
         run: |
           set -euo pipefail
-          if jq -e --arg ecosystem "$ECOSYSTEM" '
+          if jq -e --arg ecosystem "$ECOSYSTEM" --arg reviewed "$REVIEWED_PACKAGES" '
             length > 0 and all(.[];
               (.updateType == "version-update:semver-patch" or .updateType == "version-update:semver-minor")
+              and (.dependencyName | test($reviewed) | not)
               and (.dependencyType == "direct:development" or $ecosystem == "github_actions" or $ecosystem == "github-actions"))
           ' <<<"$UPDATES" >/dev/null; then
             echo "allow=true" >> "$GITHUB_OUTPUT"
           else
             echo "allow=false" >> "$GITHUB_OUTPUT"
-            echo "Not auto-merging: needs a human review (runtime dependency, major update or indirect)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Not auto-merging: needs a human review (runtime dependency, compiler or types, major update or indirect)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Enable auto-merge
