@@ -1,6 +1,6 @@
 # C — Connection, sync, parsing, zones
 
-Findings: WS-05, WS-07, WS-10, WS-12, WS-13, WS-14 (except the response-ID item, task B), PLAT-13, TD-T-09 (M43, M44, M45); rc.1 review: COMMS-01, COMMS-02, COMMS-03, COMMS-09.
+Findings: WS-05, WS-07, WS-10, WS-12, WS-13, WS-14 (except the response-ID item, task B), PLAT-13, TD-T-09 (M43, M44, M45); rc.1 review: COMMS-01, COMMS-02, COMMS-03, COMMS-09, N-ws1, N-ws2.
 
 ## Config keys
 
@@ -33,6 +33,8 @@ None added, changed or removed in `config.schema.json`. Three **internal** clien
 - `connect()` always completes: a shutdown during the login or while connecting no longer leaves it pending, and a shutdown while connecting is no longer logged as an error. (WS-14)
 - An IPv6 address in `ip` now works (it is put in brackets in the panel URL). (WS-14)
 - Statuses received for devices that were never discovered are kept for at most 512 IDs. (WS-14)
+- The CRC check of incoming frames is computed a byte at a time from a table (same result as before): a 1 MB frame takes milliseconds instead of more than a second of blocked event loop. (N-ws1)
+- A discovery list element that is not an object with an ID (for example `null`) is reported as an error and ignored; the other devices of the list are applied and none is removed because of it. (N-ws2, COMMS-09)
 
 ## Migration notes
 - No persisted data, UUIDs, MQTT topics or config keys change.
@@ -44,6 +46,7 @@ None added, changed or removed in `config.schema.json`. Three **internal** clien
 - Task D: `NOT_MASK_UNSOLICITED / NM_CHANGES` reaches the thermostat cfg cache; `PRG_CHECK` of `CFG_THERMOSTATS` is the change-counter baseline; the command service publishes the thermostat state on ACK; the legacy `MODE` of `STATUS_OUTPUTS` uses `parseKseniaMode` (an unknown mode no longer reads as off); `state.ts` initialises `hiddenByExposurePolicy` and `thermostatCfgFreshness`.
 - Task B: `command-dispatcher.ts` reads RESULT through `websocket/protocol-result.ts`; a RESULT that is not a string is now a refusal there too (it used to be "no RESULT").
 - Every fake panel in the tests signs its frames (`test/fixtures/panel-frame.js`).
+- Task A follow-up: `parseOutputDevice(outputData, outputType?)` takes the type decided by the exposure policy explicitly (`parseOutputData(output, exposure.type)` in discovery); the provisional `WeakMap` in `output-classifier.ts` is gone. `classifyOutput` now reads the category only.
 
 ## Decisions to confirm (rc.1 review)
 - Wrong PIN: one attempt per hour for as long as the PIN stays wrong (about 24 wrong-code events per day in the panel log). Alternative: one per hour for a day, then stop with a periodic log.

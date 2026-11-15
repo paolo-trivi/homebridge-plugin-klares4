@@ -35,6 +35,14 @@ export const DISCOVERY_FAMILIES = {
 
 export type DiscoverySection = keyof typeof DISCOVERY_FAMILIES;
 
+/** A discovery list element the handlers can process: an object with a non-empty ID. */
+export function isDiscoveryEntry(item: unknown): boolean {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return false;
+    const id: unknown = (item as { ID?: unknown }).ID;
+    if (typeof id === 'number') return Number.isFinite(id);
+    return typeof id === 'string' && id.trim() !== '';
+}
+
 /**
  * Syncs in a row in which the same discovery read may be refused before the
  * sync completes without it. A refusal now and then (panel busy) is retried

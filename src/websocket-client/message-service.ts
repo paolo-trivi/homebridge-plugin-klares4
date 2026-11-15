@@ -7,13 +7,13 @@ import { ThermostatReadHandler } from './thermostat-read-handler';
 import type { ThermostatStatusUpdater } from './thermostat-status-updater';
 import { StatusUpdater } from './status-updater';
 import { SystemTemperatureUpdater } from './system-temperature-updater';
-import { runIsolated } from '../isolation';
+import { rawItemId, runIsolated } from '../isolation';
 import { frameResult, resultDetail } from '../websocket/protocol-result';
 import { abandonDiscoveryRound, closeDiscoveryRound, openDiscoveryRound } from './discovered-device';
 import { readInboundFrame } from './inbound-frame';
 import { LoginResponseHandler } from './login-response-handler';
 import { type LoginFailureKind, resetLoginRejections } from './login-rejection-guard';
-import { DISCOVERY_FAMILIES, type DiscoverySection, ReadRefusals } from './sync-read-policy';
+import { DISCOVERY_FAMILIES, type DiscoverySection, isDiscoveryEntry, ReadRefusals } from './sync-read-policy';
 import type {
     CallbackRegistry,
     RealtimeStatusData,
@@ -166,14 +166,14 @@ export class MessageService {
 
         if (message.PAYLOAD_TYPE === 'ZONES') {
             const zones = payload.ZONES;
-            this.discoverySection('ZONES', zones, () => this.discovery.handleZones(zones ?? []));
+            this.discoverySection('ZONES', zones, (listed) => this.discovery.handleZones(listed));
         }
 
         if (message.PAYLOAD_TYPE === 'MULTI_TYPES') {
             const { OUTPUTS: outputs, SCENARIOS: scenarios, BUS_HAS: sensors } = payload;
-            this.discoverySection('OUTPUTS', outputs, () => this.discovery.handleOutputs(outputs ?? []));
-            this.discoverySection('SCENARIOS', scenarios, () => this.discovery.handleScenarios(scenarios ?? []));
-            this.discoverySection('BUS_HAS', sensors, () => this.discovery.handleBusSensors(sensors ?? []));
+            this.discoverySection('OUTPUTS', outputs, (listed) => this.discovery.handleOutputs(listed));
+            this.discoverySection('SCENARIOS', scenarios, (listed) => this.discovery.handleScenarios(listed));
+            this.discoverySection('BUS_HAS', sensors, (listed) => this.discovery.handleBusSensors(listed));
             section('thermostat mapping', () => this.thermostats.afterMultiTypes());
         }
 
@@ -242,10 +242,12 @@ export class MessageService {
 
     /**
      * One discovery section of a configuration read. When it is a list and
-     * its handler completes without any element failing, the devices of its family that it no longer
-     * lists leave the session state (deleted or re-categorised on the panel).
+     * every element is a device entry that its handler processes, the devices
+     * of its family that it no longer lists leave the session state (deleted
+     * or re-categorised on the panel). An element that is not an object with
+     * an ID is reported like any element failure and handled by nobody.
      */
-    private discoverySection(name: DiscoverySection, items: unknown, handle: () => void): void {
+    private discoverySection<T>(name: DiscoverySection, items: T[] | undefined, handle: (listed: T[]) => void): void {
         if (items === undefined) return;
         if (!Array.isArray(items)) {
             this.deps.log.warn(`Ignoring the ${name} section of a discovery read: it is not a list`);
@@ -253,10 +255,18 @@ export class MessageService {
         }
         const devices = this.deps.state.devices;
         const errorsBefore = this.discoveryErrors;
+        const listed = items.filter(isDiscoveryEntry);
+        for (const item of items.filter((entry) => !isDiscoveryEntry(entry))) {
+            this.discoveryErrors += 1;
+            const frame = name === 'ZONES' ? 'READ_RES/ZONES zone' : `READ_RES/MULTI_TYPES ${name} entry`;
+            runIsolated(this.deps.log, `${frame} ${rawItemId(item)}`, () => {
+                throw new Error('not an object with an ID');
+            });
+        }
         let completed = false;
         openDiscoveryRound(devices);
         runIsolated(this.deps.log, `READ_RES ${name}`, () => {
-            handle();
+            handle(listed);
             completed = true;
         });
         // An element that failed is still listed by the panel: with one failure

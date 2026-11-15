@@ -6,7 +6,7 @@ import type {
     KseniaThermostat,
 } from '../types';
 import { createDefaultThermostatState } from '../thermostat-state';
-import { classifyOutput } from './output-classifier';
+import { classifyOutput, type ProjectedOutputType } from './output-classifier';
 
 export { determineOutputType, OutputTypeMemory, type ProjectedOutputType } from './output-classifier';
 
@@ -22,11 +22,15 @@ export function normalizeDeviceName(raw: string | undefined): string {
     return raw.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Device for a discovered output. `outputType` is the one the exposure policy
+ * decided (`resolveOutputExposure`); without it the category decides.
+ */
 export function parseOutputDevice(
     outputData: KseniaOutputData,
+    outputType: ProjectedOutputType = classifyOutput(outputData),
 ): KseniaLight | KseniaCover | KseniaGate | KseniaThermostat {
     const systemId = outputData.ID;
-    const outputType = classifyOutput(outputData);
     const label = normalizeDeviceName(outputData.DES);
 
     if (outputType === 'light') {

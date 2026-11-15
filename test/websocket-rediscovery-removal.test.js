@@ -95,3 +95,30 @@ test('COMMS-09: a discovery element that fails is still listed: nothing of that 
     await resync();
     assert.ok(!ids().includes('light_6') && !ids().includes('gate_9'));
 });
+
+test('N-ws2: a ZONES read with a malformed element (null, not an object, no ID) keeps every zone', async (t) => {
+    for (const malformed of [null, 5, 'x', { DES: 'no id' }]) {
+        const { panel, ids, resync, log, client } = await session(t, {
+            data: { ZONES: [{ ID: '1', DES: 'Zone One' }, { ID: '2', DES: 'Zone Two' }, { ID: '3', DES: 'Zone Three' }] },
+        });
+        const before = ids();
+        // Zone 3 is gone, but one element cannot be read: nothing of the family is removed.
+        panel.data = { ...panel.data, ZONES: [malformed, { ID: '1', DES: 'Zone One' }, { ID: '2', DES: 'Zone Two Renamed' }] };
+        await resync();
+        assert.deepEqual(ids(), before, JSON.stringify(malformed));
+        assert.ok(!ids().includes('zone_undefined'));
+        assert.ok(log.lines.some((l) => /^\[error\] READ_RES\/ZONES zone \? failed: Error: not an object with an ID/.test(l)), JSON.stringify(malformed));
+        assert.ok(!log.lines.some((l) => /no longer listed/.test(l)));
+        // The valid elements are still applied.
+        assert.equal(client.getAllDevices().find((d) => d.id === 'zone_2').name, 'Zone Two Renamed');
+    }
+});
+
+test('an output re-read without a category keeps the type the exposure policy remembered (explicit type to the parser)', async (t) => {
+    const { panel, ids, resync } = await session(t);
+    assert.ok(ids().includes('cover_7'));
+    panel.data = { ...panel.data, OUTPUTS: panel.data.OUTPUTS.map((o) => (o.ID === '7' ? { ...o, CAT: '' } : o)) };
+    await resync();
+    assert.ok(ids().includes('cover_7'), ids().join(','));
+    assert.ok(!ids().includes('light_7'));
+});

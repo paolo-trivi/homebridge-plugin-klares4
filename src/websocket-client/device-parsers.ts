@@ -31,8 +31,8 @@ export function parseZoneData(zoneData: KseniaZoneData): KseniaZone {
     };
 }
 
-export function parseOutputData(outputData: KseniaOutputData) {
-    return parseOutputDevice(outputData);
+export function parseOutputData(outputData: KseniaOutputData, type?: ProjectedOutputType) {
+    return parseOutputDevice(outputData, type);
 }
 
 export function parseScenarioData(scenarioData: KseniaScenarioData): KseniaScenario {

@@ -1,5 +1,5 @@
 import type { KseniaMessage } from '../types';
-import { calculateCRC16 } from './crc16';
+import { calculateCRC16, crc16OfBytes } from './crc16';
 
 export type InboundFrame =
     | { kind: 'frame'; message: KseniaMessage; crc: 'valid' | 'missing' }
@@ -66,17 +66,4 @@ function matchingEncoding(raw: string, expected: string): string | undefined {
     const crcField = '"CRC_16"';
     const text = raw.slice(0, raw.lastIndexOf(crcField) + crcField.length);
     return CANDIDATE_ENCODINGS.find(([, encode]) => crc16OfBytes(encode(text)) === expected)?.[0];
-}
-
-/** The algorithm of `crc16.ts` over raw bytes (lower-case hex, as compared above). */
-export function crc16OfBytes(bytes: Uint8Array): string {
-    let crc = 0xffff;
-    for (const byte of bytes) {
-        for (let bit = 0x80; bit; bit >>= 1) {
-            const carry = crc & 0x8000;
-            crc = ((crc << 1) & 0xffff) + (byte & bit ? 1 : 0);
-            if (carry) crc ^= 0x1021;
-        }
-    }
-    return `0x${crc.toString(16).padStart(4, '0')}`;
 }

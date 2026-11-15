@@ -137,7 +137,7 @@ test('WS-14: a shutdown while connecting is not logged as an error and settles c
 });
 
 test('COMMS-03: a non-ASCII frame whose CRC differs is accepted and reported once, with the matching encoding', async (t) => {
-    const { crc16OfBytes } = require('../dist/websocket-client/inbound-frame.js');
+    const { crc16OfBytes } = require('../dist/websocket-client/crc16.js');
     const { panel, events, log, client } = await syncedSession(t);
     // A panel that would compute the CRC over latin1 bytes instead of UTF-8.
     const latin1Frame = (statusData) => {
