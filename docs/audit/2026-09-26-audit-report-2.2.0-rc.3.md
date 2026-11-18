@@ -865,7 +865,7 @@ Dopo la verifica sul campo, revisione riga per riga di tutto `src/` (≈12k righ
 | R5 | P2 | Comandi | Risposte non sollecitate (il `READ_RES PRG_THERMOSTATS FAIL` di ogni login) chiudevano comandi utente pendenti; ID risposta del pannello modulo 65536 | FIXED |
 | R6 | P2 | Comandi | PIN errato ritentato all'infinito | FIXED (stop dopo 3 rifiuti) |
 | R7 | P2 | Matter | Target delle tapparelle appiattito sulla posizione corrente | FIXED |
-| R8 | P2 | Matter | Comandi obbligatori senza handler (Up/Down/Stop, Toggle, Move/Step/Stop) | FIXED; `stopMotion` in movimento rifiutato esplicitamente (il pannello non ha STOP); `moveWithOnOff`/`stepWithOnOff` gestiti da matter.js senza handler: limite di Homebridge |
+| R8 | P2 | Matter | Comandi obbligatori senza handler (Up/Down/Stop, Toggle, Move/Step/Stop) | FIXED; `stopMotion` in movimento rifiutato esplicitamente (il pannello non ha STOP; **sbagliato**: lo stop della Lares4 è `ALT`, gestito dal 18/11/2026); `moveWithOnOff`/`stepWithOnOff` gestiti da matter.js senza handler: limite di Homebridge |
 | R9 | P2 | Matter | Handler termostato su una copia congelata del device | FIXED (con F15, F21, F33 parziale) |
 | R10 | P2 | HAP | CurrentHeatingCoolingState senza lo stato reale dell'uscita | FIXED |
 | R11 | P2 | KSA | `applyExclusionSuggestions` svuotava le esclusioni; `applyCustomNames` sovrascriveva i nomi utente; room mapping con nomi non slug nei topic | FIXED |

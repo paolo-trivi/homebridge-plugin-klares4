@@ -128,3 +128,25 @@ test('"sent without confirmation" is an error, not a logged success', () => {
     reportMutationOutcome(log, 'Light', '5', 'ON', { status: 'acknowledged', latencyMs: 3 });
     assert.equal(lines.length, 1);
 });
+
+test('stopCover sends ALT to a discovered cover only, and is confirmed by STA STOP', async () => {
+    const { client, sent } = commandClient({ devices: ['cover_7', 'light_5'] });
+    const result = await settle(client.stopCover('light_5'));
+    assert.equal(result.ok, false);
+    assert.ok(result.error instanceof ValidationKlaresError, String(result.error));
+    assert.equal(sent.length, 0);
+    await client.stopCover('cover_7');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].m.PAYLOAD_TYPE, 'CMD_SET_OUTPUT');
+    assert.deepEqual(sent[0].m.PAYLOAD.OUTPUT, { ID: '7', STA: 'ALT' });
+});
+
+test('coverStoppedMatches: STOP, or target equal to position', () => {
+    const { coverStoppedMatches } = require('../dist/websocket-client/output-state-matchers.js');
+    const m = coverStoppedMatches();
+    assert.equal(m({ STA: 'STOP', POS: '42' }), true);
+    assert.equal(m({ STA: 'stop' }), true);
+    assert.equal(m({ STA: 'UP', POS: '42', TPOS: '42' }), true);
+    assert.equal(m({ STA: 'UP', POS: '42', TPOS: '100' }), false);
+    assert.equal(m({ STA: 'DOWN' }), false);
+});

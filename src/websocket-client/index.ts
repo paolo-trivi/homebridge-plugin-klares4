@@ -241,6 +241,10 @@ export class KseniaWebSocketClient {
         await this.commandService.moveCover(coverId, position);
     }
 
+    public async stopCover(coverId: string): Promise<void> {
+        await this.commandService.stopCover(coverId);
+    }
+
     public async toggleGate(gateId: string): Promise<void> {
         await this.commandService.toggleGate(gateId);
     }

@@ -187,10 +187,10 @@ export function buildCoverHandlers(device: KseniaCover, ctx: CommandContext<Ksen
                 const status = latest().status;
                 const target = status?.targetPosition ?? status?.position;
                 if (status?.state === 'stopped' && target === status.position) return;
-                // The panel offers no stop command, and moving to the last
-                // reported position (one per second or so while travelling)
-                // would send the cover back a little.
-                throw unsupportedCommand(api, 'Lares4 covers cannot be stopped mid-travel from Matter');
+                // The panel stops a cover with `ALT` (not by moving it to the
+                // last reported position, which lags and would send it back a
+                // little); it then reports the position reached.
+                await requireWsClient(api, getWsClient).stopCover(device.id);
             },
         },
     };

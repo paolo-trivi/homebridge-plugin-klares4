@@ -13,7 +13,7 @@ import { calculateCRC16 } from './crc16';
 import { CommandSender } from './command-sender';
 import { resolveScenarioExposure, scenarioOptInIds } from './device-parsers';
 import { type MutationOutcome, mutationOptions, reportMutationOutcome } from './command-outcome';
-import { coverTargetMatches, dimmerLevelMatches, lightStateMatches } from './output-state-matchers';
+import { coverStoppedMatches, coverTargetMatches, dimmerLevelMatches, lightStateMatches } from './output-state-matchers';
 import { ValidationKlaresError } from '../errors';
 
 const SCENARIO_REFUSAL = {
@@ -142,6 +142,22 @@ export class CommandService {
                 systemOutputId, command, mutationOptions(systemOutputId, coverTargetMatches(safePosition)),
             );
             reportMutationOutcome(this.deps.log, 'Cover', systemOutputId, command, outcome);
+        });
+    }
+
+    /**
+     * Stops a cover mid-travel. The Lares4 stop is `ALT` on the same
+     * CMD_SET_OUTPUT as `UP`, `DOWN` and the positions (the panel then reports
+     * `STA: STOP` with the position reached). Same queue key as the moves, so
+     * a move still waiting is replaced by the stop.
+     */
+    public async stopCover(coverId: string): Promise<void> {
+        const systemOutputId = this.discoveredOutputId(coverId, 'cover');
+        await this.enqueueObservable(`cover_${systemOutputId}`, async (): Promise<void> => {
+            const outcome = await this.sendOutputCommand(
+                systemOutputId, 'ALT', mutationOptions(systemOutputId, coverStoppedMatches()),
+            );
+            reportMutationOutcome(this.deps.log, 'Cover', systemOutputId, 'ALT (stop)', outcome);
         });
     }
 

@@ -29,6 +29,20 @@ export function dimmerLevelMatches(level: number): (status: KseniaOutputStatusRa
         || (level === 0 && panelText(status.STA) === 'OFF');
 }
 
+/**
+ * A stop is confirmed when the panel reports the cover at rest: `STOP`, or a
+ * target position equal to the current one.
+ */
+export function coverStoppedMatches(): (status: KseniaOutputStatusRaw) => boolean {
+    return (status) => {
+        const state = panelText(status.STA);
+        if (state === 'STOP') return true;
+        const position = panelNumber(status.POS);
+        const target = panelNumber(status.TPOS);
+        return position !== undefined && target !== undefined && position === target;
+    };
+}
+
 export function coverTargetMatches(position: number): (status: KseniaOutputStatusRaw) => boolean {
     return (status) => {
         const state = panelText(status.STA);

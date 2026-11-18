@@ -26,6 +26,7 @@ function wsClient() {
         switchLight: record('switchLight'),
         dimLight: record('dimLight'),
         moveCover: record('moveCover'),
+        stopCover: record('stopCover'),
         triggerScenario: record('triggerScenario'),
         toggleGate: record('toggleGate'),
     };
@@ -104,14 +105,12 @@ test('WindowCovering upOrOpen / downOrClose drive the cover fully open / closed'
     assert.deepEqual(ws.calls, [['moveCover', 'cover_9', 100], ['moveCover', 'cover_9', 0]]);
 });
 
-test('WindowCovering stopMotion is a no-op on a stopped cover and refused while it moves', async (t) => {
+test('WindowCovering stopMotion is a no-op on a stopped cover and stops it on the panel while it moves', async (t) => {
     const { hb, ws, registry } = await setup(t, cover({ position: 40, targetPosition: 40, state: 'stopped' }));
     await hb.invoke('cover_9', 'windowCovering', 'stopMotion');
+    assert.deepEqual(ws.calls, []);
     await registry.updateAccessoryState(cover({ position: 40, targetPosition: 100, state: 'opening' }));
     await delay(20);
-    await assert.rejects(
-        () => hb.invoke('cover_9', 'windowCovering', 'stopMotion'),
-        (err) => err.code === UNSUPPORTED_COMMAND,
-    );
-    assert.deepEqual(ws.calls, []);
+    await hb.invoke('cover_9', 'windowCovering', 'stopMotion');
+    assert.deepEqual(ws.calls, [['stopCover', 'cover_9']]);
 });

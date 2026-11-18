@@ -93,6 +93,10 @@ Release 2.3.0 closes the findings of a full review of 2.2.0: security and privac
 
 ### Fixed
 
+**Covers**
+
+- Matter Stop on a moving cover now stops it: the plugin sends the panel's stop command (`ALT` on `CMD_SET_OUTPUT`, the same command as `UP`, `DOWN` and the positions) and waits for the panel to report the cover at rest (`STA: STOP`, or the target equal to the position). Previously Stop was refused with "Unsupported command" (0x81), on the wrong assumption that the panel had no stop. Stop on a cover already at rest still does nothing. Checked on a real Lares4 on 18 November 2026: a closing cover stopped at 72 % and stayed there.
+
 **Connection and synchronization**
 
 - The initial synchronization is no longer reported complete when the panel refuses the realtime registration or the zones/outputs discovery read: the refusal is logged, and the plugin reconnects with backoff. Previously it stayed connected without ever receiving a status change. If the panel refuses the same discovery read in 3 synchronizations in a row, the synchronization completes without it: the other devices work, the devices of that read are neither discovered nor removed, and a warning names the read. A panel that never answers the realtime registration is reconnected after 60 s. The `PRG_THERMOSTATS` answer `CMD_NOT_AVAILABLE` that panels give at every login is not reported.
